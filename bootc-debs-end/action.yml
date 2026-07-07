@@ -5,6 +5,9 @@ inputs:
   repo_name:
     description: 'Name of the APT repository published on GitHub Pages'
     required: true
+  apt_gpg_key:
+    description: 'GPG private key used to sign the APT repository (passed by caller from secrets.APT_GPG_KEY)'
+    required: true
 
 runs:
   using: 'composite'
@@ -20,7 +23,7 @@ runs:
       uses: morph027/apt-repo-action@v3
       with:
         repo-name: ${{ inputs.repo_name }}
-        signing-key: ${{ secrets.APT_GPG_KEY }}
+        signing-key: ${{ inputs.apt_gpg_key }}
         codename: trixie
         components: main
         architectures: amd64
@@ -43,6 +46,7 @@ runs:
 
     - name: Wait before retry 2
       if: steps.deploy_1.outcome == 'failure'
+      shell: bash
       run: sleep 30
 
     - name: Deploy to GitHub Pages (attempt 2/3)
@@ -53,6 +57,7 @@ runs:
 
     - name: Wait before retry 3
       if: steps.deploy_1.outcome == 'failure' && steps.deploy_2.outcome == 'failure'
+      shell: bash
       run: sleep 60
 
     - name: Deploy to GitHub Pages (attempt 3/3)
@@ -62,6 +67,7 @@ runs:
 
     - name: Fail job if all deploy attempts failed
       if: steps.deploy_1.outcome == 'failure' && steps.deploy_2.outcome == 'failure' && steps.deploy_3.outcome == 'failure'
+      shell: bash
       run: |
         echo "::error::All 3 GitHub Pages deploy attempts failed. This is a transient issue on the GitHub Pages service side; re-run the workflow later."
         exit 1
