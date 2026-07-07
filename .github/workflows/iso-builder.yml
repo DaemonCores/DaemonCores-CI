@@ -141,7 +141,7 @@ jobs:
           COSIGN_EXPERIMENTAL: 1
         run: |
           cosign verify \
-            --certificate-identity-regexp="^https://github.com/${{ github.repository }}/.*" \
+            --certificate-identity-regexp="https://github.com/DaemonCores/DaemonCores-CI/.github/workflows/bootc-build.yml@refs/heads/main" \
             --certificate-oidc-issuer="https://token.actions.githubusercontent.com" \
             "ghcr.io/${GITHUB_REPOSITORY,,}:latest"
 
