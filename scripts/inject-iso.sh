@@ -19,7 +19,7 @@ set -euo pipefail
 
 SRC_ISO="${1:?Usage: $0 <source.iso> <dest.iso> [display-name]}"
 DST_ISO="${2:?Usage: $0 <source.iso> <dest.iso> [display-name]}"
-PRODUCT_NAME="${3:-}"   # display name passed from CI (e.g. "Debian Bootc")
+PRODUCT_NAME="${3:-}" # display name passed from CI (e.g. "Debian Bootc")
 BANNER_DIR="assets/banner"
 
 SIDEBAR="${BANNER_DIR}/anaconda-sidebar.png"
@@ -27,8 +27,8 @@ LOGO="${BANNER_DIR}/anaconda-logo.png"
 TOPBAR="${BANNER_DIR}/anaconda-topbar.png"
 HEADER="${BANNER_DIR}/anaconda-header.png"
 
-[[ ! -f "$SIDEBAR" && ! -f "$LOGO" && \
-   ! -f "$TOPBAR" && ! -f "$HEADER" ]] && {
+[[ ! -f "$SIDEBAR" && ! -f "$LOGO" &&
+  ! -f "$TOPBAR" && ! -f "$HEADER" ]] && {
   echo "[banners] No banner assets found, skipping"
   exit 0
 }
@@ -48,10 +48,16 @@ chmod -R u+w "$WORKDIR/iso-root"
 
 INSTALL_IMG=""
 for c in "$WORKDIR/iso-root/images/install.img" \
-          "$WORKDIR/iso-root/images/squashfs.img"; do
-  [[ -f "$c" ]] && { INSTALL_IMG="$c"; break; }
+  "$WORKDIR/iso-root/images/squashfs.img"; do
+  [[ -f "$c" ]] && {
+    INSTALL_IMG="$c"
+    break
+  }
 done
-[[ -z "$INSTALL_IMG" ]] && { echo "[banners] ERROR: install.img not found"; exit 1; }
+[[ -z "$INSTALL_IMG" ]] && {
+  echo "[banners] ERROR: install.img not found"
+  exit 1
+}
 
 echo "[banners] Found: $INSTALL_IMG"
 echo "[banners] Unsquashing installer environment..."
@@ -71,9 +77,20 @@ else
   PIXMAPS="$WORKDIR/squashfs-root/usr/share/anaconda/pixmaps"
 fi
 
+#######################################
+# Copy a banner asset into the pixmaps dir if the target already exists.
+# Globals:
+#   PIXMAPS
+# Arguments:
+#   $1 - source image path
+#   $2 - target filename relative to PIXMAPS
+# Outputs:
+#   Writes progress to stdout.
+#######################################
 _replace() {
   local src="$1" target="$2"
-  [[ ! -f "$PIXMAPS/$target" ]] && return 0   # fichier absent dans cette variante → skip
+  # fichier absent dans cette variante → skip
+  [[ ! -f "$PIXMAPS/$target" ]] && return 0
   cp "$src" "$PIXMAPS/$target"
   echo "[banners]   → $target"
 }
@@ -84,7 +101,8 @@ TRANSPARENT=""
 if [[ -f "$SIDEBAR" && ! -f "$LOGO" ]]; then
   TRANSPARENT="$WORKDIR/transparent.png"
   convert -size 1x1 xc:none "$TRANSPARENT"
-  echo "[banners] No anaconda-logo.png — will clear sidebar-logo.png with transparent PNG"
+  echo "[banners] No anaconda-logo.png — will clear sidebar-logo.png""\
+ with transparent PNG"
 fi
 
 # Remplace dans toutes les variantes trouvées
@@ -123,7 +141,7 @@ if [[ -f "assets/banner/flat-overrides.css" ]]; then
   SERVER_CSS="$PIXMAPS/server/fedora-server.css"
   if [[ -f "$SERVER_CSS" ]]; then
     cp "$SERVER_CSS" "${SERVER_CSS}.bak"
-    cat "assets/banner/flat-overrides.css" >> "$SERVER_CSS"
+    cat "assets/banner/flat-overrides.css" >>"$SERVER_CSS"
     echo "[banners] → flat-overrides.css appended to server/fedora-server.css"
   fi
 fi
@@ -132,8 +150,10 @@ if [[ "$USE_ROOTFS_IMG" == true ]]; then
   umount "$WORKDIR/rootfs-mount"
 fi
 
-# Inject anaconda config to disable Users, Localization and Timezone modules directly into the installer squashfs
-ANACONDA_CONF="$WORKDIR/squashfs-root/etc/anaconda/conf.d/99-disable-anaconda-modules.conf"
+# Inject anaconda config to disable Users, Localization and Timezone
+# modules directly into the installer squashfs
+ANACONDA_CONF="$WORKDIR/squashfs-root/etc/anaconda/conf.d""\
+/99-disable-anaconda-modules.conf"
 mkdir -p "$(dirname "$ANACONDA_CONF")"
 printf '%s\n' \
   '[Anaconda]' \
@@ -148,10 +168,12 @@ printf '%s\n' \
   '  org.fedoraproject.Anaconda.Modules.Security' \
   '  org.fedoraproject.Anaconda.Modules.Subscription' \
   '  org.fedoraproject.Anaconda.Addons.*' \
-  > "$ANACONDA_CONF"
-echo "[banners] → etc/anaconda/conf.d/99-disable-anaconda-modules.conf injected (Users/Localization/Timezone forbidden, Addons optional)"
+  >"$ANACONDA_CONF"
+echo "[banners] → etc/anaconda/conf.d/99-disable-anaconda-modules.conf""\
+ injected (Users/Localization/Timezone forbidden, Addons optional)"
 
-# Patch product name: .buildstamp controls "FEDORA 44" in the Anaconda header/welcome title
+# Patch product name: .buildstamp controls "FEDORA 44" in the Anaconda
+# header/welcome title
 BUILDSTAMP="$WORKDIR/squashfs-root/.buildstamp"
 if [[ -n "$PRODUCT_NAME" && -f "$BUILDSTAMP" ]]; then
   sed -i \
@@ -162,7 +184,8 @@ if [[ -n "$PRODUCT_NAME" && -f "$BUILDSTAMP" ]]; then
   echo "[banners] → .buildstamp patched (Product=${PRODUCT_NAME})"
 fi
 
-# Patch os-release display name (keep ID=fedora + VARIANT_ID=server for profile detection)
+# Patch os-release display name (keep ID=fedora + VARIANT_ID=server for
+# profile detection)
 OS_RELEASE="$WORKDIR/squashfs-root/etc/os-release"
 if [[ -n "$PRODUCT_NAME" && -f "$OS_RELEASE" ]]; then
   sed -i \
@@ -180,9 +203,9 @@ mv "$WORKDIR/new-install.img" "$INSTALL_IMG"
 echo "[banners] Rebuilding ISO..."
 xorriso \
   -return_with SORRY 0 \
-  -indev  "$SRC_ISO" \
+  -indev "$SRC_ISO" \
   -outdev "$DST_ISO" \
-  -map    "$INSTALL_IMG" /images/$(basename "$INSTALL_IMG") \
+  -map "$INSTALL_IMG" "/images/$(basename "$INSTALL_IMG")" \
   -boot_image any replay 2>/dev/null
 
 echo "[banners] Done: $DST_ISO"
