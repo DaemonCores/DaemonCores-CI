@@ -1,0 +1,68 @@
+name: 'Trigger pipeline and wait'
+description: >-
+  Dispatch another repository's workflow via workflow_dispatch and block until
+  that run completes, failing this step if the triggered run fails. Used to
+  rebuild an upstream base image before a downstream build starts.
+
+inputs:
+  repo:
+    description: 'Target repository as owner/repo (e.g. DaemonCores/debian-bootc).'
+    required: true
+  workflow:
+    description: 'Workflow file to dispatch in the target repo.'
+    required: false
+    default: 'pipeline.yml'
+  ref:
+    description: 'Git ref (branch/tag) to run the target workflow on.'
+    required: false
+    default: 'main'
+  token:
+    description: >-
+      Token with Actions read+write on the target repo (classic PAT with
+      "repo" + "workflow" scope, or a fine-grained token granting Actions:
+      read and write). The default GITHUB_TOKEN cannot dispatch cross-repo.
+    required: true
+  poll_interval:
+    description: 'Seconds between run-status polls while waiting.'
+    required: false
+    default: '20'
+
+runs:
+  using: composite
+  steps:
+    - name: Dispatch and wait
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.token }}
+        REPO: ${{ inputs.repo }}
+        WORKFLOW: ${{ inputs.workflow }}
+        REF: ${{ inputs.ref }}
+        INTERVAL: ${{ inputs.poll_interval }}
+      run: |
+        set -euo pipefail
+        # Timestamp just before dispatch so we can locate the new run and not
+        # latch onto an older one of the same workflow.
+        since=$(date -u -d '-1 minute' +%Y-%m-%dT%H:%M:%SZ)
+        echo "Dispatching ${WORKFLOW} on ${REPO}@${REF}..."
+        gh workflow run "${WORKFLOW}" -R "${REPO}" --ref "${REF}"
+
+        # The run does not exist instantly; poll for it to appear.
+        run_id=""
+        for _ in $(seq 1 30); do
+          run_id=$(gh run list -R "${REPO}" --workflow "${WORKFLOW}" \
+            --created ">=${since}" --limit 1 \
+            --json databaseId --jq '.[0].databaseId // empty')
+          [ -n "${run_id}" ] && break
+          sleep 5
+        done
+        if [ -z "${run_id}" ]; then
+          echo "::error::Could not find the dispatched ${WORKFLOW} run" \
+            "on ${REPO}."
+          exit 1
+        fi
+
+        url=$(gh run view "${run_id}" -R "${REPO}" --json url --jq .url)
+        echo "Watching run ${run_id}: ${url}"
+        # Block until the run concludes; --exit-status is non-zero on failure.
+        gh run watch "${run_id}" -R "${REPO}" \
+          --interval "${INTERVAL}" --exit-status
