@@ -167,7 +167,7 @@ jobs:
             sed \
               -e "s|{{ repo }}|${GITHUB_REPOSITORY,,}|g" \
               -e "s|{{ hostname }}|${{ steps.names.outputs.hostname }}|g" \
-              iso-${1}-config.ks.tpl > /tmp/iso-${1}-config.ks
+              .ci-tools/kickstart/iso-${1}-config.ks.tpl > /tmp/iso-${1}-config.ks
           }
 
           dualiso offline &
