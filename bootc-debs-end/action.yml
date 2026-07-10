@@ -9,14 +9,38 @@ inputs:
     description: 'GPG private key used to sign the APT repository (passed by caller from secrets.APT_GPG_KEY)'
     required: true
 
+outputs:
+  any_rebuilt:
+    description: 'true if at least one package was rebuilt (not cache-reused).'
+    value: ${{ steps.rebuilt.outputs.any_rebuilt }}
+
 runs:
   using: 'composite'
   steps:
     - uses: actions/checkout@v7
+    # Each package uploads its own artifact debs-<pkg>; merge them all into debs/.
     - uses: actions/download-artifact@v8
       with:
-        name: debs
+        pattern: debs-*
+        merge-multiple: true
         path: debs/
+
+    - name: Compute any_rebuilt
+      id: rebuilt
+      shell: bash
+      run: |
+        command -v jq >/dev/null 2>&1 \
+          || { apt-get update >/dev/null; apt-get install -y jq >/dev/null; }
+        any=false
+        shopt -s nullglob
+        for m in debs/.meta/*.json; do
+          if [ "$(jq -r .skipped "$m")" = "false" ]; then
+            any=true
+            break
+          fi
+        done
+        echo "any_rebuilt=${any}" >>"$GITHUB_OUTPUT"
+        echo "any_rebuilt=${any}"
 
     - name: Create APT repo
       id: create-apt-repo
@@ -27,6 +51,36 @@ runs:
         codename: trixie
         components: main
         architectures: amd64
+
+    # Publish the content-addressed deb cache alongside the APT repo so the
+    # build-deb action can reuse unchanged packages on the next run:
+    #   debs-cache/<pkg>_<ver>_<arch>.deb   flat copies for direct download
+    #   debs-cache/hashes.json              per-package {hash, debs}
+    # apt clients only read dists/ and pool/, so this extra folder is inert.
+    - name: Assemble deb cache
+      shell: bash
+      env:
+        REPO_DIR: ${{ steps.create-apt-repo.outputs.dir }}
+      run: |
+        set -euo pipefail
+        command -v jq >/dev/null 2>&1 \
+          || { apt-get update >/dev/null; apt-get install -y jq >/dev/null; }
+        cache="${REPO_DIR}/debs-cache"
+        mkdir -p "${cache}"
+        find debs -maxdepth 1 -name '*.deb' -exec cp {} "${cache}/" \; 2>/dev/null \
+          || true
+        out="${cache}/hashes.json"
+        echo '{}' >"${out}"
+        # /debs/.meta/<pkg>.json is written by the build-deb action per package.
+        shopt -s nullglob
+        for meta in debs/.meta/*.json; do
+          pkg=$(basename "${meta}" .json)
+          jq --arg p "${pkg}" --slurpfile m "${meta}" \
+            '. + {($p): {hash: $m[0].hash, debs: $m[0].debs}}' \
+            "${out}" >"${out}.n"
+          mv "${out}.n" "${out}"
+        done
+        echo "debs-cache: $(jq 'keys | length' "${out}") package(s) recorded"
 
     - name: Upload Pages artifact
       uses: actions/upload-pages-artifact@v5

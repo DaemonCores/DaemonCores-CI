@@ -1,6 +1,13 @@
 name: Container Image CI
 
-on: workflow_call
+on:
+  workflow_call:
+    inputs:
+      force_no_cache:
+        description: 'Force a --no-cache image rebuild (e.g. a .deb changed).'
+        type: boolean
+        required: false
+        default: false
 
 jobs:
   build-test-push:
@@ -10,6 +17,8 @@ jobs:
       contents: read
       packages: write
       id-token: write
+      # Lets the duplicate-image guard open/append a "suspicious pipeline" issue.
+      issues: write
 
     steps:
       - name: Free disk space
@@ -38,20 +47,54 @@ jobs:
             --username "${{ github.actor }}" \
             --password-stdin <<< "${PAT_PKG}"
 
+      # Deterministic content id of what actually goes into the image: the
+      # published deb hashes + the base image digest + the Containerfile. Stamped
+      # as a label so the next run can tell whether a rebuild changed anything.
+      - name: Compute content hash
+        id: chash
+        run: |
+          set -euo pipefail
+          command -v skopeo >/dev/null 2>&1 \
+            || { sudo apt-get update -qq; sudo apt-get install -y skopeo; }
+          owner="${GITHUB_REPOSITORY%%/*}"
+          repo="${GITHUB_REPOSITORY#*/}"
+          pages="https://${owner,,}.github.io/${repo}"
+          debs=$(curl -fsSL "${pages}/debs-cache/hashes.json" 2>/dev/null \
+            | jq -cS . 2>/dev/null || echo '{}')
+          base=$(grep -m1 -iE '^FROM ' Containerfile | awk '{ print $2 }')
+          base_digest=$(skopeo inspect --format '{{.Digest}}' \
+            "docker://${base}" 2>/dev/null || echo none)
+          cf=$(sha256sum Containerfile | cut -d' ' -f1)
+          hash=$(printf '%s\n%s\n%s\n' "${debs}" "${base_digest}" "${cf}" \
+            | sha256sum | cut -d' ' -f1)
+          echo "hash=${hash}" >>"$GITHUB_OUTPUT"
+          # Content-hash label of the currently published image (empty if none).
+          prior=$(skopeo inspect \
+            --format '{{ index .Labels "org.daemoncores.content-hash" }}' \
+            "docker://${IMAGE}:latest" 2>/dev/null || echo '')
+          if [[ -n "${prior}" && "${prior}" == "${hash}" ]]; then
+            echo "identical=true" >>"$GITHUB_OUTPUT"
+          else
+            echo "identical=false" >>"$GITHUB_OUTPUT"
+          fi
+          echo "content-hash=${hash} prior=${prior:-none}"
+
       - name: Build
         run: |
-          NO_CACHE=""
-          MONTHLY_TAG=""
+          flags=()
+          if [[ "${{ github.event_name }}" == "schedule" \
+            || "${{ inputs.force_no_cache }}" == "true" ]]; then
+            flags+=(--no-cache)
+          fi
           if [[ "${{ github.event_name }}" == "schedule" ]]; then
-            NO_CACHE="--no-cache"
-            MONTHLY_TAG="--tag ${IMAGE}:monthly-$(date -u +%Y%m%d)"
+            flags+=(--tag "${IMAGE}:monthly-$(date -u +%Y%m%d)")
           fi
 
           podman build \
-            $NO_CACHE \
+            "${flags[@]}" \
+            --label "org.daemoncores.content-hash=${{ steps.chash.outputs.hash }}" \
             --tag "${IMAGE}:latest" \
             --tag "${IMAGE}:$(git rev-parse --short HEAD)" \
-            $MONTHLY_TAG \
             -f Containerfile \
             --format docker \
             .
@@ -87,3 +130,35 @@ jobs:
         if: github.ref == 'refs/heads/main'
         run: |
           cosign sign --yes "${IMAGE}@${{ steps.push.outputs.digest }}"
+
+      # The image was built, pushed and signed but its content is byte-identical
+      # to what was already published (same debs + base + Containerfile). Report
+      # it as a suspicious/wasteful run without failing the pipeline.
+      - name: Flag identical image
+        if: github.ref == 'refs/heads/main' && steps.chash.outputs.identical == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          hash="${{ steps.chash.outputs.hash }}"
+          {
+            echo "### ⚠️ Image identique à la précédente"
+            echo
+            echo "Le pipeline a reconstruit, poussé **et signé** une image dont le"
+            echo "content-hash \`${hash}\` est identique à celle déjà publiée :"
+            echo "ni les .deb, ni l'image de base, ni le Containerfile n'ont changé."
+            echo "Le rebuild/push/signature était probablement inutile."
+          } >>"$GITHUB_STEP_SUMMARY"
+          title="⚠️ Pipeline douteuse : image identique poussée"
+          num=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open \
+            --search "in:title \"$title\"" --json number -q '.[0].number' \
+            2>/dev/null || true)
+          if [ -n "$num" ]; then
+            gh issue comment "$num" --repo "$GITHUB_REPOSITORY" \
+              --body "Run \`${GITHUB_RUN_ID}\` : image identique (hash \`${hash}\`)." \
+              2>/dev/null || true
+          else
+            gh issue create --repo "$GITHUB_REPOSITORY" --title "$title" \
+              --body "Content-hash \`${hash}\` inchangé mais image reconstruite, poussée et signée (run \`${GITHUB_RUN_ID}\`)." \
+              2>/dev/null || true
+          fi
