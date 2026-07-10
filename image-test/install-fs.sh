@@ -14,6 +14,7 @@ T=/target
 dev=$(losetup -f --show -P "${DISK}")
 cleanup() {
   umount -R "${T}" 2>/dev/null || true
+  umount /varseed 2>/dev/null || true
   losetup -d "${dev}" 2>/dev/null || true
 }
 trap cleanup EXIT
@@ -59,6 +60,12 @@ bootc install to-filesystem --skip-fetch-check \
   --root-ssh-authorized-keys "${KEY}" \
   "${T}"
 
-# Skip the interactive first-boot wizard so the VM reaches multi-user in CI.
-mkdir -p "${T}/var/lib"
-touch "${T}/var/lib/firstboot-user-setup.done"
+# Seed the first-boot done flag so firstboot-user-setup skips its interactive
+# wizard and the VM reaches multi-user in CI. bootc finalizes ${T} read-only
+# once installed, so write straight into the var subvol via its own mount
+# rather than through ${T}/var.
+mkdir -p /varseed
+mount -o subvol=var LABEL=dcos /varseed
+mkdir -p /varseed/lib
+touch /varseed/lib/firstboot-user-setup.done
+umount /varseed
