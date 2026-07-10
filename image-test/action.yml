@@ -1,0 +1,34 @@
+name: 'Image test (bootc + QEMU)'
+description: >-
+  Install the freshly built bootc image onto a virtual disk, boot it under
+  QEMU/KVM (UEFI), and run the repo's workflows/image-tests/tests.yml over SSH.
+  Fails (blocking the push) if any test fails. Runs on an ubuntu-latest runner
+  (KVM available), not in a container.
+
+inputs:
+  image:
+    description: 'Local image ref to test (already built in podman storage).'
+    required: true
+  tests:
+    description: 'Path to the tests manifest in the caller repo.'
+    required: false
+    default: workflows/image-tests/tests.yml
+  memory:
+    description: 'VM memory in MiB.'
+    required: false
+    default: '4096'
+  vcpus:
+    description: 'VM vCPUs.'
+    required: false
+    default: '2'
+
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        IMAGE: ${{ inputs.image }}
+        TESTS_FILE: ${{ inputs.tests }}
+        MEM: ${{ inputs.memory }}
+        VCPUS: ${{ inputs.vcpus }}
+      run: bash "${GITHUB_ACTION_PATH}/image-test.sh"
