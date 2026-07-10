@@ -74,13 +74,15 @@ jobs:
           print(' '.join(w.capitalize() for w in h.split()))
           ")
           BASE="$(echo "${HOSTNAME}" | tr '[:lower:]-' '[:upper:]_')"
-          echo "name=${NAME}"                                             >> "$GITHUB_OUTPUT"
-          echo "hostname=${HOSTNAME}"                                     >> "$GITHUB_OUTPUT"
-          echo "display_name=${DISPLAY_NAME}"                             >> "$GITHUB_OUTPUT"
-          echo "volume_id_online=$(echo "${BASE}_NET"      | cut -c1-32)" >> "$GITHUB_OUTPUT"
-          echo "volume_id_offline=$(echo "${BASE}_OFFLINE" | cut -c1-32)" >> "$GITHUB_OUTPUT"
-          echo "isoonline=${NAME}-online.iso"                             >> "$GITHUB_OUTPUT"
-          echo "isooffline=${NAME}-offline.iso"                           >> "$GITHUB_OUTPUT"
+          {
+            echo "name=${NAME}"
+            echo "hostname=${HOSTNAME}"
+            echo "display_name=${DISPLAY_NAME}"
+            echo "volume_id_online=$(echo "${BASE}_NET" | cut -c1-32)"
+            echo "volume_id_offline=$(echo "${BASE}_OFFLINE" | cut -c1-32)"
+            echo "isoonline=${NAME}-online.iso"
+            echo "isooffline=${NAME}-offline.iso"
+          } >> "$GITHUB_OUTPUT"
 
       # ─── RELEASE ────────────────────────────────────────────────────────
 
@@ -161,13 +163,13 @@ jobs:
         shell: bash
         run: |
           set -euxo pipefail
-          NAME="${{ steps.names.outputs.name }}"
 
           dualiso() {
             sed \
               -e "s|{{ repo }}|${GITHUB_REPOSITORY,,}|g" \
               -e "s|{{ hostname }}|${{ steps.names.outputs.hostname }}|g" \
-              .ci-tools/kickstart/iso-${1}-config.ks.tpl > /tmp/iso-${1}-config.ks
+              ".ci-tools/kickstart/iso-${1}-config.ks.tpl" \
+              > "/tmp/iso-${1}-config.ks"
           }
 
           dualiso offline &
@@ -189,12 +191,12 @@ jobs:
               && VOL_ID="${{ steps.names.outputs.volume_id_offline }}" \
               || VOL_ID="${{ steps.names.outputs.volume_id_online }}"
             local DISPLAY="${{ steps.names.outputs.display_name }}"
-            local EXTRA_ADD=""
-            [[ "$TYPE" == "offline" ]] && EXTRA_ADD="--add out/image.tar"
+            local EXTRA_ADD=()
+            [[ "$TYPE" == "offline" ]] && EXTRA_ADD=(--add out/image.tar)
 
             mkksiso \
               --ks   "/tmp/iso-${TYPE}-config.ks" \
-              ${EXTRA_ADD} \
+              "${EXTRA_ADD[@]}" \
               -V    "${VOL_ID}" \
               out/base.iso \
               "out/boot-${TYPE}-tmp.iso"

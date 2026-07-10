@@ -31,7 +31,7 @@ jobs:
         uses: actions/checkout@v7 
 
       - name: Set image name
-        run: echo "IMAGE=ghcr.io/${GITHUB_REPOSITORY,,}" >> $GITHUB_ENV
+        run: echo "IMAGE=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_ENV"
 
       - name: Log in to GHCR
         env:
@@ -117,7 +117,7 @@ jobs:
           if [[ "${{ github.event_name }}" == "schedule" ]]; then
             podman push "${IMAGE}:monthly-$(date -u +%Y%m%d)"
           fi
-          echo "digest=$(cat /tmp/digest.txt)" >> $GITHUB_OUTPUT
+          echo "digest=$(cat /tmp/digest.txt)" >> "$GITHUB_OUTPUT"
 
       - name: Install cosign
         if: github.ref == 'refs/heads/main'

@@ -75,8 +75,10 @@ field in packages.yml" >&2
     mkdir -p "/output/${PKG_NAME}"
     cp -r "${POSTINSTALL_DIR}/"* "/output/${PKG_NAME}/"
 
-    # Mark executables under usr/local/bin or usr/sbin as executable.
-    find "/output/${PKG_NAME}" -path '*/bin/*' -o -path '*/sbin/*' \
+    # Mark executables under usr/local/bin or usr/sbin as executable. The
+    # group parens are required: without them -o binds looser than the
+    # implicit -a, so -type f -exec would apply to the sbin branch only.
+    find "/output/${PKG_NAME}" \( -path '*/bin/*' -o -path '*/sbin/*' \) \
       -type f -exec chmod 755 {} +
 
     sed -i \
