@@ -51,7 +51,9 @@ install_deps() {
 #######################################
 install_disk() {
   ssh-keygen -t ed25519 -N '' -f "${KEY}" -q
-  truncate -s 20G "${DISK}"
+  # Sparse: only written blocks consume host space (~3G after install), but 10G
+  # of virtual size is already ample for the ~3G deploy + boot + ESP.
+  truncate -s 10G "${DISK}"
   # The disk is partitioned + installed by install-fs.sh, run privileged INSIDE
   # the image so it can use the image's own tools and bootc install
   # to-filesystem into the same layout as the ISO (btrfs pool + varlog quota).
@@ -98,6 +100,12 @@ wait_ssh() {
   local timeout="$1" i
   for ((i = 0; i < timeout; i++)); do
     ssh "${SSH_OPTS[@]}" root@localhost true 2>/dev/null && return 0
+    # Surface the guest serial console live so a stuck boot is visible without
+    # waiting out the full timeout (or cancelling the run blind).
+    if ((i % 30 == 0)); then
+      echo "  … waiting for SSH (${i}/${timeout}s); serial tail:"
+      sudo tail -n 15 "${SERIAL}" 2>/dev/null | sed 's/^/    | /' || true
+    fi
     sleep 1
   done
   return 1
