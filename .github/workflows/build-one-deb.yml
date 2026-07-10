@@ -104,13 +104,29 @@ jobs:
           DEPS: ${{ steps.def.outputs.deps }}
         run: |
           set -euo pipefail
-          for dep in ${DEPS}; do
+          apt-get update
+          # Transitive closure of deps: a dep's own .deb may depend on ITS deps
+          # (libostree depends on libcomposefs), so collect the whole chain and
+          # install it in one apt call, letting apt resolve the links.
+          declare -A seen
+          read -ra queue <<<"${DEPS}"
+          debs=""
+          while [ "${#queue[@]}" -gt 0 ]; do
+            dep="${queue[0]}"
+            queue=("${queue[@]:1}")
+            [ -n "${seen[$dep]:-}" ] && continue
+            seen[$dep]=1
             glob=$(yq ".packages[] | select(.name == \"${dep}\") \
               | .\"deb-glob\" // \"${dep}_*\"" "${MAN}")
-            # Glob expansion is intentional (one deb per dependency).
-            # shellcheck disable=SC2086
-            apt install -y /tmp/prior/${glob}.deb
+            debs="${debs} /tmp/prior/${glob}.deb"
+            while IFS= read -r sub; do
+              [ -n "${sub}" ] && queue+=("${sub}")
+            done < <(yq ".packages[] | select(.name == \"${dep}\") \
+              | (.deps // []) | .[]" "${MAN}")
           done
+          # Intentional split + glob of the collected local deb paths.
+          # shellcheck disable=SC2086
+          apt-get install -y ${debs}
 
       - name: Build ${{ inputs.package }}
         uses: DaemonCores/DaemonCores-CI/build-deb@main
