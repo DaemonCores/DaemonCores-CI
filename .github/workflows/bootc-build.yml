@@ -108,6 +108,13 @@ jobs:
         run: |
           podman run --rm "${IMAGE}:latest" bootc container lint
 
+      # Real boot test: install to a disk, boot under QEMU/KVM, run the repo's
+      # image-tests over SSH. A failure fails this job, so Push never runs.
+      - name: Boot-test the image
+        uses: DaemonCores/DaemonCores-CI/image-test@main
+        with:
+          image: ${{ env.IMAGE }}:latest
+
       - name: Push
         if: github.ref == 'refs/heads/main'
         id: push
