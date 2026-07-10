@@ -1,0 +1,68 @@
+name: Build the deb-builder env image
+
+# Generic. Assembles the caller repo's build-env image from its
+# workflows/build-env/env.yml using buildah (no Containerfile) and pushes it to
+# the caller repo's own image package under the :buildenv tag
+# (ghcr.io/<owner>/<repo>:buildenv) - same package as the OS image so GitHub
+# links it to the repo, but a separate tag that never touches :latest. Phases
+# run in manifest order (SSL deps first). Called monthly by the pipeline so dev
+# runs reuse the cached image.
+
+on:
+  workflow_call:
+    inputs:
+      manifest:
+        description: 'Path to the build-env recipe in the caller repo.'
+        required: false
+        type: string
+        default: workflows/build-env/env.yml
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Assemble and push the build-env image
+        shell: bash
+        env:
+          MAN: ${{ inputs.manifest }}
+          GH_ACTOR: ${{ github.actor }}
+          PAT_PKG: ${{ secrets.PAT_PKG }}
+        run: |
+          set -euo pipefail
+          command -v yq >/dev/null 2>&1 || {
+            sudo curl -fsSL \
+              https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 \
+              -o /usr/local/bin/yq
+            sudo chmod +x /usr/local/bin/yq
+          }
+          img="ghcr.io/${GITHUB_REPOSITORY,,}:buildenv"
+          ctr=$(buildah from "$(yq '.base' "$MAN")")
+          buildah config \
+            --label "org.opencontainers.image.source=https://github.com/${GITHUB_REPOSITORY}" \
+            "$ctr"
+          # Bake env vars.
+          while IFS= read -r kv; do
+            [ -n "$kv" ] || continue
+            buildah config --env "$kv" "$ctr"
+          done < <(yq '(.env // {}) | to_entries | .[] | .key + "=" + .value' "$MAN")
+          # Run each phase in manifest order (apt list or shell script).
+          count=$(yq '.phases | length' "$MAN")
+          for i in $(seq 0 "$((count - 1))"); do
+            if [ "$(yq ".phases[$i] | has(\"apt\")" "$MAN")" = "true" ]; then
+              pkgs=$(yq ".phases[$i].apt[]" "$MAN" | paste -sd' ' -)
+              echo "phase $i: apt install ${pkgs}"
+              buildah run "$ctr" -- bash -c \
+                "apt-get update && apt-get install -y --no-install-recommends ${pkgs} && rm -rf /var/lib/apt/lists/*"
+            else
+              echo "phase $i: run"
+              buildah run "$ctr" -- bash -c "$(yq ".phases[$i].run" "$MAN")"
+            fi
+          done
+          buildah commit "$ctr" "${img}"
+          echo "$PAT_PKG" | buildah login ghcr.io -u "$GH_ACTOR" --password-stdin
+          buildah push "${img}"

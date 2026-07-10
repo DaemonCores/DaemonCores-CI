@@ -1,0 +1,59 @@
+name: 'Build bootc .deb (content-addressed)'
+description: >-
+  Build one bootc .deb, skipping the build when neither its overlay sources, its
+  upstream version, its env (version) nor its build script changed since the
+  last published run (the previous .deb is downloaded from the APT repo on Pages
+  instead). Writes /debs/.meta/<package>.json for the publish step.
+
+inputs:
+  package:
+    description: 'Logical package name (metadata key and default deb glob).'
+    required: true
+  build:
+    description: 'Shell script that produces the .deb(s) into /debs.'
+    required: true
+  sources:
+    description: 'Space/newline-separated files or dirs whose contents are hashed.'
+    required: false
+    default: ''
+  upstream:
+    description: 'apt package name to resolve for repacks; empty for custom packages.'
+    required: false
+    default: ''
+  env:
+    description: >-
+      KEY=VALUE lines exported for the build (e.g. FANCTL_VER, GH_TOKEN). Non-
+      secret keys also feed the content hash; secret-looking keys are excluded.
+    required: false
+    default: ''
+  deb-glob:
+    description: 'Glob (relative to /debs, without .deb) matching this package output. Defaults to <package>_*.'
+    required: false
+    default: ''
+  pages-url:
+    description: 'APT repo base URL. Derived from the repository if empty.'
+    required: false
+    default: ''
+
+outputs:
+  skipped:
+    description: 'true when the cached deb was reused, false when it was built.'
+    value: ${{ steps.run.outputs.skipped }}
+  hash:
+    description: 'Computed content hash for this package.'
+    value: ${{ steps.run.outputs.hash }}
+
+runs:
+  using: composite
+  steps:
+    - id: run
+      shell: bash
+      env:
+        PACKAGE: ${{ inputs.package }}
+        BUILD: ${{ inputs.build }}
+        SOURCES: ${{ inputs.sources }}
+        UPSTREAM: ${{ inputs.upstream }}
+        EXTRA_ENV: ${{ inputs.env }}
+        DEB_GLOB: ${{ inputs.deb-glob }}
+        PAGES_URL: ${{ inputs.pages-url }}
+      run: bash "${GITHUB_ACTION_PATH}/build-deb.sh"

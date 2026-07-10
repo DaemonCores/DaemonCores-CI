@@ -1,0 +1,130 @@
+name: Build one bootc .deb
+
+# Builds a single package from the caller repo's packages.yml manifest and
+# uploads its .deb(s) as the artifact debs-<package>. Called once per package
+# (via a matrix) by the generic bootc-debs-builder workflow. A package that
+# declares deps first downloads and installs those deps' debs (built in an
+# earlier wave) so its build can link against them.
+
+on:
+  workflow_call:
+    inputs:
+      package:
+        description: 'Package name as it appears in the manifest.'
+        required: true
+        type: string
+      manifest:
+        description: 'Path to the package manifest in the caller repo.'
+        required: false
+        type: string
+        default: workflows/bootc-debs-builder/packages.yml
+      container_image:
+        description: 'Pre-baked build-env image the job runs in (ghcr :buildenv tag).'
+        required: true
+        type: string
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container:
+      image: ${{ inputs.container_image }}
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.PAT_PKG }}
+    permissions:
+      contents: read
+      # Some guarded repack builds open a "patch drift" issue on skip.
+      issues: write
+    env:
+      # Secret values a package may pull in via its manifest secret-env. A
+      # secret absent from this repo resolves to an empty string (harmless).
+      SECRETVAL_GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      SECRETVAL_SB_SIGNING_KEY: ${{ secrets.SB_SIGNING_KEY }}
+      SECRETVAL_SB_SIGNING_CERT: ${{ secrets.SB_SIGNING_CERT }}
+    steps:
+      - uses: DaemonCores/DaemonCores-CI/bootc-debs-start@main
+
+      - name: Read package definition
+        id: def
+        shell: bash
+        env:
+          MAN: ${{ inputs.manifest }}
+          PKG: ${{ inputs.package }}
+        run: |
+          set -euo pipefail
+          command -v yq >/dev/null 2>&1 || {
+            curl -fsSL \
+              https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 \
+              -o /usr/local/bin/yq
+            chmod +x /usr/local/bin/yq
+          }
+          sel=".packages[] | select(.name == \"${PKG}\")"
+          {
+            echo "upstream=$(yq "${sel} | .upstream // \"\"" "${MAN}")"
+            echo "deb_glob=$(yq "${sel} | .\"deb-glob\" // \"\"" "${MAN}")"
+            echo "deps=$(yq "${sel} | (.deps // []) | .[]" "${MAN}" \
+              | paste -sd' ' -)"
+            # sources are stored relative to the manifest dir; make them
+            # workspace-relative for build-deb.
+            echo "sources=$(yq "${sel} | .sources[]" "${MAN}" \
+              | sed 's#^#workflows/bootc-debs-builder/#' | paste -sd' ' -)"
+          } >>"$GITHUB_OUTPUT"
+          # env = non-secret KEY=VALUE lines, then resolved secret-env lines.
+          envlines=$(yq "${sel} | (.env // {}) | to_entries | .[] \
+            | .key + \"=\" + .value" "${MAN}")
+          while IFS= read -r pair; do
+            [ -n "${pair}" ] || continue
+            key="${pair%%=*}"
+            ref="SECRETVAL_${pair#*=}"
+            envlines="${envlines}"$'\n'"${key}=${!ref}"
+          done < <(yq "${sel} | (.\"secret-env\" // {}) | to_entries | .[] \
+            | .key + \"=\" + .value" "${MAN}")
+          {
+            echo "env<<ENV_EOF"
+            printf '%s\n' "${envlines}"
+            echo "ENV_EOF"
+            echo "build<<BUILD_EOF"
+            yq "${sel} | .build" "${MAN}"
+            echo "BUILD_EOF"
+          } >>"$GITHUB_OUTPUT"
+
+      - name: Fetch dependency debs
+        if: steps.def.outputs.deps != ''
+        uses: actions/download-artifact@v8
+        with:
+          pattern: debs-*
+          merge-multiple: true
+          path: /tmp/prior
+
+      - name: Install dependency debs
+        if: steps.def.outputs.deps != ''
+        shell: bash
+        env:
+          MAN: ${{ inputs.manifest }}
+          DEPS: ${{ steps.def.outputs.deps }}
+        run: |
+          set -euo pipefail
+          for dep in ${DEPS}; do
+            glob=$(yq ".packages[] | select(.name == \"${dep}\") \
+              | .\"deb-glob\" // \"${dep}_*\"" "${MAN}")
+            # Glob expansion is intentional (one deb per dependency).
+            # shellcheck disable=SC2086
+            apt install -y /tmp/prior/${glob}.deb
+          done
+
+      - name: Build ${{ inputs.package }}
+        uses: DaemonCores/DaemonCores-CI/build-deb@main
+        with:
+          package: ${{ inputs.package }}
+          upstream: ${{ steps.def.outputs.upstream }}
+          sources: ${{ steps.def.outputs.sources }}
+          deb-glob: ${{ steps.def.outputs.deb_glob }}
+          env: ${{ steps.def.outputs.env }}
+          build: ${{ steps.def.outputs.build }}
+
+      - name: Upload ${{ inputs.package }} debs
+        uses: actions/upload-artifact@v7
+        with:
+          name: debs-${{ inputs.package }}
+          path: /debs
+          include-hidden-files: true
