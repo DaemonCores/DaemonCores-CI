@@ -83,7 +83,7 @@ boot_vm() {
     -drive "file=${DISK},format=raw,if=virtio" \
     -netdev "user,id=n0,hostfwd=tcp::${SSH_PORT}-:22" \
     -device virtio-net,netdev=n0 \
-    -nographic -serial "file:${SERIAL}" \
+    -display none -serial "file:${SERIAL}" -monitor none \
     -daemonize -pidfile "${WORK}/qemu.pid"
 }
 
