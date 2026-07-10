@@ -164,12 +164,22 @@ jobs:
         run: |
           set -euxo pipefail
 
+          # One generic kickstart; only the bootc --source-imgref differs
+          # between the online (pull from registry) and offline (embedded
+          # oci-archive) ISOs, injected here.
           dualiso() {
+            local type="$1" src
+            if [ "$type" = online ]; then
+              src="registry:ghcr.io/${GITHUB_REPOSITORY,,}:latest"
+            else
+              src="oci-archive:/run/install/repo/image.tar"
+            fi
             sed \
               -e "s|{{ repo }}|${GITHUB_REPOSITORY,,}|g" \
               -e "s|{{ hostname }}|${{ steps.names.outputs.hostname }}|g" \
-              ".ci-tools/kickstart/iso-${1}-config.ks.tpl" \
-              > "/tmp/iso-${1}-config.ks"
+              -e "s|{{ source_imgref }}|${src}|g" \
+              ".ci-tools/kickstart/iso-config.ks.tpl" \
+              > "/tmp/iso-${type}-config.ks"
           }
 
           dualiso offline &
