@@ -77,26 +77,30 @@ sources_hash() {
 }
 
 #######################################
-# Identify the exact upstream artifact for a repack (empty for custom pkgs).
-# The apt "print-uris" line carries the versioned URL and checksum, so hashing
-# it captures any upstream change without parsing a version string.
+# Identify the upstream artifact for a repack (empty for custom pkgs). Uses the
+# versioned .deb FILENAME from apt (e.g. pve-manager_9.0.0-1_amd64.deb), which
+# changes with the upstream version but NOT with the mirror: hashing the full
+# print-uris URL would vary across runs (mirror rotation) and defeat the cache.
 # Globals:
 #   UPSTREAM
 # Outputs:
-#   Hex digest or "none" on stdout.
+#   The upstream .deb filename, or "unresolved"/"none" on stdout.
 #######################################
 upstream_id() {
   [[ -n "${UPSTREAM:-}" ]] || {
     echo none
     return 0
   }
-  local uris
-  uris=$(apt-get download --print-uris "${UPSTREAM}" 2>/dev/null || true)
-  [[ -n "${uris}" ]] || {
+  # apt lists are purged in the :buildenv image; refresh so print-uris resolves.
+  apt-get update >/dev/null 2>&1 || true
+  local file
+  file=$(apt-get download --print-uris "${UPSTREAM}" 2>/dev/null \
+    | awk 'NR == 1 { print $2 }')
+  [[ -n "${file}" ]] || {
     echo unresolved
     return 0
   }
-  printf '%s' "${uris}" | sha256sum | cut -d' ' -f1
+  printf '%s' "${file}"
 }
 
 #######################################
@@ -233,6 +237,10 @@ main() {
   prior=$(curl -fsSL "${base}/debs-cache/hashes.json" 2>/dev/null || echo '{}')
   prior_hash=$(printf '%s' "${prior}" \
     | jq -r --arg p "${PACKAGE}" '.[$p].hash // empty')
+
+  # Diagnostics: shows why a package did (not) skip on the next run.
+  echo "cache[${PACKAGE}]: hash=${hash} prior=${prior_hash:-<none>}" \
+    "src=${base}/debs-cache/hashes.json" >&2
 
   if [[ -n "${prior_hash}" && "${prior_hash}" == "${hash}" ]]; then
     local cached_debs
