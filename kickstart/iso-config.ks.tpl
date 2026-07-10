@@ -1,8 +1,8 @@
 # Partitioning is chosen interactively (the operator picks the OS disk) and
 # emitted to /tmp/dc-part.ks. ONLY the selected disk is wiped, so ZFS data pools
-# on other disks survive a reinstall. Layout: small ext4 /var/log (caps log
-# growth) + one btrfs whose root/var subvolumes share the pool (no fixed / vs
-# /var sizing, image growth is a non-issue).
+# on other disks survive a reinstall. Layout: one btrfs pool whose root/var/
+# varlog subvolumes share it (no fixed sizing); /var/log is a subvolume capped
+# at 2G on-disk via a btrfs qgroup quota (compressed, so it holds far more).
 %pre --interpreter=/bin/bash --erroronfail
 exec < /dev/tty1 > /dev/tty1 2>&1
 
@@ -34,11 +34,11 @@ cat > /tmp/dc-part.ks <<EOF
 zerombr
 clearpart --all --initlabel --disklabel=gpt --drives=${DEV}
 reqpart --add-boot
-part /var/log --fstype=ext4  --size=2048        --ondisk=${DEV}
 part btrfs.01 --fstype=btrfs --size=1024 --grow --ondisk=${DEV}
-btrfs none    --label=dcos btrfs.01
-btrfs /       --subvol --name=root LABEL=dcos
-btrfs /var    --subvol --name=var  LABEL=dcos
+btrfs none     --label=dcos btrfs.01
+btrfs /        --subvol --name=root   LABEL=dcos
+btrfs /var     --subvol --name=var    LABEL=dcos
+btrfs /var/log --subvol --name=varlog LABEL=dcos
 EOF
 %end
 
@@ -49,12 +49,17 @@ network --bootproto=dhcp --hostname={{ hostname }} --activate
 # services --disabled=chronyd). --nontp is the only effective knob.
 timezone --nontp
 
-bootc --source-imgref=oci-archive:/run/install/repo/image.tar --target-imgref=ghcr.io/{{ repo }}:latest
+bootc --source-imgref={{ source_imgref }} --target-imgref=ghcr.io/{{ repo }}:latest
 
 %post
 # Enable zstd compression on the btrfs subvolumes (new writes inherit it).
 btrfs property set / compression zstd 2>/dev/null || true
 btrfs property set /var compression zstd 2>/dev/null || true
+btrfs property set /var/log compression zstd 2>/dev/null || true
+# Cap /var/log at 2G of on-disk (compressed) usage via a btrfs qgroup quota on
+# its subvolume — no fixed partition. ENOSPC there leaves the rest untouched.
+btrfs quota enable / 2>/dev/null || true
+btrfs qgroup limit 2G /var/log 2>/dev/null || true
 
 # Default root password for debug if first boot setup don't run
 echo 'root:BootcDebug@0' | chpasswd

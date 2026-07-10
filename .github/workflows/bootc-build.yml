@@ -38,7 +38,7 @@ jobs:
           PAT_PKG: ${{ secrets.PAT_PKG }}
         run: |
           # Login Podman for build and push with podman fonctionality and for bootc standard
-          podman login ghcr.io \
+          sudo podman login ghcr.io \
             --username "${{ github.actor }}" \
             --password-stdin <<< "${PAT_PKG}"
           
@@ -62,14 +62,14 @@ jobs:
           debs=$(curl -fsSL "${pages}/debs-cache/hashes.json" 2>/dev/null \
             | jq -cS . 2>/dev/null || echo '{}')
           base=$(grep -m1 -iE '^FROM ' Containerfile | awk '{ print $2 }')
-          base_digest=$(skopeo inspect --format '{{.Digest}}' \
+          base_digest=$(sudo skopeo inspect --format '{{.Digest}}' \
             "docker://${base}" 2>/dev/null || echo none)
           cf=$(sha256sum Containerfile | cut -d' ' -f1)
           hash=$(printf '%s\n%s\n%s\n' "${debs}" "${base_digest}" "${cf}" \
             | sha256sum | cut -d' ' -f1)
           echo "hash=${hash}" >>"$GITHUB_OUTPUT"
           # Content-hash label of the currently published image (empty if none).
-          prior=$(skopeo inspect \
+          prior=$(sudo skopeo inspect \
             --format '{{ index .Labels "org.daemoncores.content-hash" }}' \
             "docker://${IMAGE}:latest" 2>/dev/null || echo '')
           if [[ -n "${prior}" && "${prior}" == "${hash}" ]]; then
@@ -90,7 +90,7 @@ jobs:
             flags+=(--tag "${IMAGE}:monthly-$(date -u +%Y%m%d)")
           fi
 
-          podman build \
+          sudo podman build \
             "${flags[@]}" \
             --label "org.daemoncores.content-hash=${{ steps.chash.outputs.hash }}" \
             --tag "${IMAGE}:latest" \
@@ -101,12 +101,12 @@ jobs:
 
       - name: Check runtime deps
         run: |
-          podman run --rm "${IMAGE}:latest" \
+          sudo podman run --rm "${IMAGE}:latest" \
             sh -c "ldd /usr/bin/bootc && ldd /usr/lib/libostree-1.so*"
 
       - name: Smoke test
         run: |
-          podman run --rm "${IMAGE}:latest" bootc container lint
+          sudo podman run --rm "${IMAGE}:latest" bootc container lint
 
       # Real boot test: install to a disk, boot under QEMU/KVM, run the repo's
       # image-tests over SSH. A failure fails this job, so Push never runs.
@@ -119,10 +119,10 @@ jobs:
         if: github.ref == 'refs/heads/main'
         id: push
         run: |
-          podman push --digestfile /tmp/digest.txt "${IMAGE}:latest"
-          podman push "${IMAGE}:$(git rev-parse --short HEAD)"
+          sudo podman push --digestfile /tmp/digest.txt "${IMAGE}:latest"
+          sudo podman push "${IMAGE}:$(git rev-parse --short HEAD)"
           if [[ "${{ github.event_name }}" == "schedule" ]]; then
-            podman push "${IMAGE}:monthly-$(date -u +%Y%m%d)"
+            sudo podman push "${IMAGE}:monthly-$(date -u +%Y%m%d)"
           fi
           echo "digest=$(cat /tmp/digest.txt)" >> "$GITHUB_OUTPUT"
 

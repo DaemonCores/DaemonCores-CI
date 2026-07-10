@@ -13,6 +13,7 @@
 set -euo pipefail
 
 WORK="${RUNNER_TEMP:-/tmp}"
+SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 DISK="${WORK}/test-disk.raw"
 KEY="${WORK}/test-key"
 SERIAL="${WORK}/serial.log"
@@ -51,40 +52,18 @@ install_deps() {
 install_disk() {
   ssh-keygen -t ed25519 -N '' -f "${KEY}" -q
   truncate -s 20G "${DISK}"
+  # The disk is partitioned + installed by install-fs.sh, run privileged INSIDE
+  # the image so it can use the image's own tools and bootc install
+  # to-filesystem into the same layout as the ISO (btrfs pool + varlog quota).
+  # bootc-build.yml builds with sudo podman, so this root podman sees the freshly
+  # built image directly (no registry pull).
   sudo podman run --rm --privileged --pid=host --security-opt label=disable \
     -v /dev:/dev -v /var/lib/containers:/var/lib/containers \
-    -v "${WORK}:/out" \
+    -v "${DISK}:/disk.raw" \
+    -v "${KEY}.pub:/key.pub:ro" \
+    -v "${SCRIPT_DIR}/install-fs.sh:/install-fs.sh:ro" \
     "${IMAGE}" \
-    bootc install to-disk --generic-image --via-loopback --skip-fetch-check \
-    --root-ssh-authorized-keys "/out/$(basename "${KEY}").pub" \
-    "/out/$(basename "${DISK}")"
-}
-
-#######################################
-# Drop the first-boot wizard's done-flag so the VM reaches multi-user
-# unattended (the shipped image runs an interactive TUI on first boot).
-# Globals:
-#   DISK
-#######################################
-skip_firstboot() {
-  local dev mnt vardir part
-  dev=$(sudo losetup -Pf --show "${DISK}")
-  mnt=$(mktemp -d)
-  for part in "${dev}"p*; do
-    sudo mount "${part}" "${mnt}" 2>/dev/null || continue
-    if [ -d "${mnt}/ostree/deploy" ]; then
-      vardir=$(sudo find "${mnt}/ostree/deploy" -maxdepth 2 -type d -name var \
-        | head -1)
-      if [ -n "${vardir}" ]; then
-        sudo mkdir -p "${vardir}/lib"
-        sudo touch "${vardir}/lib/firstboot-user-setup.done"
-      fi
-      sudo umount "${mnt}"
-      break
-    fi
-    sudo umount "${mnt}"
-  done
-  sudo losetup -d "${dev}"
+    bash /install-fs.sh
 }
 
 #######################################
@@ -173,7 +152,6 @@ main() {
   trap cleanup EXIT
   install_deps
   install_disk
-  skip_firstboot
   boot_vm
   local timeout
   timeout=$(yq '.boot_timeout // 600' "${TESTS_FILE}")
