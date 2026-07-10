@@ -56,7 +56,11 @@ mount -o subvol=varlog,compress=zstd LABEL=dcos "${T}/var/log"
 btrfs quota enable "${T}" >/dev/null 2>&1 || true
 btrfs qgroup limit 2G "${T}/var/log" >/dev/null 2>&1 || true
 
+# console=ttyS0 makes the guest kernel log to the serial port QEMU captures to
+# serial.log (default is tty0, which the boot-test can't see). Keep tty0 too so
+# a real machine still gets a video console. Ref: bootc.dev kernel-arguments.
 bootc install to-filesystem --skip-fetch-check \
+  --karg console=tty0 --karg console=ttyS0,115200 \
   --root-ssh-authorized-keys "${KEY}" \
   "${T}"
 
