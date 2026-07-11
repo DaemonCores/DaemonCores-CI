@@ -64,6 +64,13 @@ bootc install to-filesystem --skip-fetch-check \
   --root-ssh-authorized-keys "${KEY}" \
   "${T}"
 
+# Diagnostic: exactly what got laid on the ESP. Firmware boots the removable
+# path \EFI\BOOT\BOOTX64.EFI, so it (and grubx64.efi) must be here. Printed
+# before the EXIT trap unmounts the target.
+echo "=== ESP contents (${T}/boot/efi) ==="
+find "${T}/boot/efi" | sort
+echo "=== end ESP ==="
+
 # Seed the first-boot done flag so firstboot-user-setup skips its interactive
 # wizard and the VM reaches multi-user in CI. bootc finalizes ${T} read-only
 # once installed, so write straight into the var subvol via its own mount

@@ -103,11 +103,18 @@ boot_vm() {
 #   0 when reachable, 1 on timeout.
 #######################################
 wait_ssh() {
-  local timeout="$1" i
+  local timeout="$1" i resets
   for ((i = 0; i < timeout; i++)); do
     ssh "${SSH_OPTS[@]}" root@localhost true 2>/dev/null && return 0
-    # Surface the guest serial console live so a stuck boot is visible without
-    # waiting out the full timeout (or cancelling the run blind).
+    # Fail fast on a firmware reboot loop: if the guest EFI app keeps resetting
+    # instead of booting, SSH is never coming and there is nothing to wait for.
+    # A healthy boot reaches sshd in seconds, so bail the moment the loop shows.
+    resets=$(grep -c 'Reset System' "${SERIAL}" 2>/dev/null || echo 0)
+    if [ "${resets}" -ge 3 ]; then
+      echo "::error::guest firmware reboot loop (${resets}x Reset System) —" \
+        "not booting; failing immediately"
+      return 2
+    fi
     if ((i % 30 == 0)); then
       echo "  … waiting for SSH (${i}/${timeout}s); serial tail:"
       sudo tail -n 15 "${SERIAL}" 2>/dev/null | sed 's/^/    | /' || true
