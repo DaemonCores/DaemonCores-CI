@@ -214,10 +214,16 @@ restore_cached() {
 #######################################
 run_build() {
   export_env
-  (
+  # Explicit failure propagation: when this function is evaluated in a context
+  # where errexit is suppressed (a command substitution in an `if`/`||`), a
+  # failing build must still return non-zero rather than falling through to the
+  # deb listing and reporting success with no artifact.
+  if ! (
     cd "${GITHUB_WORKSPACE:-.}" || exit 1
     bash --noprofile --norc -eo pipefail -c "${BUILD}"
-  ) >&2
+  ) >&2; then
+    return 1
+  fi
   local glob="${DEB_GLOB:-${PACKAGE}_*}"
   (
     cd "${DEBS_DIR}" || exit 0
@@ -255,10 +261,43 @@ main() {
     echo "::warning::${PACKAGE} cache download failed; rebuilding"
   fi
 
-  debs=$(run_build)
-  write_meta "${hash}" false "${debs}"
-  set_output skipped false
-  echo "::notice::${PACKAGE} built (${debs})"
+  # Build. On failure (compile error, or a content check the build runs after
+  # patching a file) do NOT ship a broken package: fall back to the last-good
+  # deb(s) published on Pages, leave hashes.json at its prior hash so the fix is
+  # retried next run, flag build_failed for the issue step, and let the pipeline
+  # continue with the known-good artifact.
+  local ok=1 n
+  debs=$(run_build) || ok=0
+  if [[ "${ok}" -eq 1 ]]; then
+    n=$(printf '%s' "${debs}" | jq 'length' 2>/dev/null || echo 0)
+    [[ "${n}" -gt 0 ]] || {
+      ok=0
+      echo "::error::${PACKAGE} build produced no .deb" >&2
+    }
+  fi
+  if [[ "${ok}" -eq 1 ]]; then
+    write_meta "${hash}" false "${debs}"
+    set_output skipped false
+    echo "::notice::${PACKAGE} built (${debs})"
+    return 0
+  fi
+
+  local last_debs
+  last_debs=$(printf '%s' "${prior}" \
+    | jq -c --arg p "${PACKAGE}" '.[$p].debs // []')
+  if [[ -n "${prior_hash}" ]] && restore_cached "${base}" "${last_debs}"; then
+    echo "::warning::${PACKAGE} build failed; kept the last-good published" \
+      "deb(s) and left the cache hash unchanged so the fix is retried" >&2
+    write_meta "${prior_hash}" true "${last_debs}"
+    set_output skipped true
+    set_output build_failed true
+    return 0
+  fi
+
+  echo "::error::${PACKAGE} build failed and has no prior deb to fall back" \
+    "to; failing the job" >&2
+  set_output build_failed true
+  return 1
 }
 
 main "$@"

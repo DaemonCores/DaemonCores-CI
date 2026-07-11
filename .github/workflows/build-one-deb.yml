@@ -129,6 +129,7 @@ jobs:
           apt-get install -y ${debs}
 
       - name: Build ${{ inputs.package }}
+        id: build
         uses: DaemonCores/DaemonCores-CI/build-deb@main
         with:
           package: ${{ inputs.package }}
@@ -137,6 +138,41 @@ jobs:
           deb-glob: ${{ steps.def.outputs.deb_glob }}
           env: ${{ steps.def.outputs.env }}
           build: ${{ steps.def.outputs.build }}
+
+      # The build failed but the last-good published deb was kept, so the
+      # pipeline is not blocked. Record the breakage as an issue (deduped by
+      # title). gh is absent in the build container, so use the REST API.
+      - name: Flag broken build
+        if: steps.build.outputs.build_failed == 'true'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PKG: ${{ inputs.package }}
+        run: |
+          set -euo pipefail
+          title="⚠️ Build cassé : ${PKG} (dernier .deb valide conservé)"
+          body=$(printf '%s' \
+            "Le build de \`${PKG}\` a échoué (compilation ou check de contenu " \
+            "post-patch). Le dernier .deb publié a été réutilisé pour ne pas " \
+            "casser la prod, et le hash de cache est laissé inchangé (le fix " \
+            "sera re-tenté au prochain run). Run : " \
+            "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}")
+          api="${GITHUB_API_URL}/repos/${GITHUB_REPOSITORY}"
+          auth=(-H "Authorization: Bearer ${GH_TOKEN}"
+            -H "Accept: application/vnd.github+json")
+          num=$(curl -fsSL "${auth[@]}" "${api}/issues?state=open&per_page=100" \
+            | jq -r --arg t "${title}" \
+              'map(select(.title == $t)) | .[0].number // empty')
+          if [ -n "${num}" ]; then
+            curl -fsSL "${auth[@]}" -X POST "${api}/issues/${num}/comments" \
+              -d "$(jq -n --arg b "${body}" '{body: $b}')" >/dev/null
+          else
+            curl -fsSL "${auth[@]}" -X POST "${api}/issues" \
+              -d "$(jq -n --arg t "${title}" --arg b "${body}" \
+                '{title: $t, body: $b}')" >/dev/null
+          fi
+          echo "::warning::${PKG} build cassé — issue ouverte/mise à jour," \
+            "dernier .deb valide conservé"
 
       - name: Upload ${{ inputs.package }} debs
         uses: actions/upload-artifact@v7

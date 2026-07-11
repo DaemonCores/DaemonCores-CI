@@ -42,6 +42,11 @@ outputs:
   hash:
     description: 'Computed content hash for this package.'
     value: ${{ steps.run.outputs.hash }}
+  build_failed:
+    description: >-
+      true when the build failed and the last-good published deb was kept
+      instead (the pipeline continues; an issue should be opened).
+    value: ${{ steps.run.outputs.build_failed }}
 
 runs:
   using: composite
