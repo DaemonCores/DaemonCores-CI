@@ -75,8 +75,14 @@ install_disk() {
 #######################################
 boot_vm() {
   local code vars
-  code=$(find /usr/share/OVMF -name 'OVMF_CODE*.fd' | head -1)
-  vars=$(find /usr/share/OVMF -name 'OVMF_VARS*.fd' | head -1)
+  # Pick the non-Secure-Boot firmware + empty (keyless) vars deterministically:
+  # our grub is signed with the debian-bootc MOK key, which is not enrolled in a
+  # fresh VM, so an enrolled-key (*.ms) vars store would make shim reject grub.
+  # Empty vars leave the firmware in Setup Mode (SB not enforced). Ref: Ubuntu
+  # UEFI/OVMF — OVMF_CODE_4M.fd / OVMF_VARS_4M.fd vs *.secboot/*.ms.
+  code=$(find /usr/share/OVMF -name 'OVMF_CODE*.fd' ! -name '*secboot*' | head -1)
+  vars=$(find /usr/share/OVMF -name 'OVMF_VARS*.fd' ! -name '*.ms.*' \
+    ! -name '*secboot*' | head -1)
   cp "${vars}" "${WORK}/OVMF_VARS.fd"
   sudo qemu-system-x86_64 \
     -enable-kvm -m "${MEM:-4096}" -smp "${VCPUS:-2}" -machine q35 \
