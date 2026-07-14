@@ -1,0 +1,185 @@
+name: Full Pipeline (reusable)
+
+# Single source of truth for the debian-bootc / DaemonCores-VE build pipeline.
+# Both products call this via `uses:` from a thin caller workflow that only
+# declares its triggers + concurrency. All orchestration lives here: the change
+# plan (auto-skip untouched stages), the optional base rebuild, and the
+# env/debs/image/iso graph.
+#
+# Because this is a reusable workflow, the `github` context (repository, sha,
+# ref, event_name, event.before) refers to the CALLER's triggering event, so the
+# `changes` job checks out the caller repo and diffs the caller's push.
+
+on:
+  workflow_call:
+    inputs:
+      enable_base:
+        description: 'Product builds on debian-bootc and may rebuild it (DaemonCores-VE: true).'
+        type: boolean
+        default: false
+      # Dispatch checkboxes, forwarded from the caller. Passed as strings so an
+      # empty value on push/schedule (no inputs) is tolerated; the `changes` job
+      # only reads them on workflow_dispatch.
+      update_base:
+        type: string
+        default: 'false'
+      rebuild_env:
+        type: string
+        default: 'false'
+      run_debs:
+        type: string
+        default: 'true'
+      run_image:
+        type: string
+        default: 'true'
+      run_iso:
+        type: string
+        default: 'true'
+
+permissions:
+  contents: write
+  packages: write
+  pages: write
+  id-token: write
+  issues: write
+
+jobs:
+  meta:
+    name: Compute product name
+    runs-on: ubuntu-latest
+    outputs:
+      product_name: ${{ steps.name.outputs.product_name }}
+    steps:
+      - id: name
+        run: |
+          name="${GITHUB_REPOSITORY##*/}"   # cut at the slash -> repo name
+          name="${name//-/ }"               # replace dashes with spaces
+          echo "product_name=$name" >> "$GITHUB_OUTPUT"
+
+  changes:
+    name: Compute pipeline plan
+    runs-on: ubuntu-latest
+    outputs:
+      env: ${{ steps.plan.outputs.env }}
+      debs: ${{ steps.plan.outputs.debs }}
+      image: ${{ steps.plan.outputs.image }}
+      iso: ${{ steps.plan.outputs.iso }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Need the pre-push commit present locally to diff the pushed range.
+          fetch-depth: 0
+      - id: plan
+        env:
+          EVENT: ${{ github.event_name }}
+          BEFORE: ${{ github.event.before }}
+          SHA: ${{ github.sha }}
+          IN_ENV: ${{ inputs.rebuild_env }}
+          IN_DEBS: ${{ inputs.run_debs }}
+          IN_IMAGE: ${{ inputs.run_image }}
+          IN_ISO: ${{ inputs.run_iso }}
+        run: |
+          set -euo pipefail
+          env=false; debs=false; image=false; iso=false
+          case "$EVENT" in
+            schedule)
+              # Monthly full rebuild.
+              env=true; debs=true; image=true; iso=true ;;
+            workflow_dispatch)
+              # Manual override: the checkboxes decide, verbatim.
+              env="$IN_ENV"; debs="$IN_DEBS"; image="$IN_IMAGE"; iso="$IN_ISO" ;;
+            push)
+              # New branch or unknown/zero base -> can't diff, rebuild all.
+              if [ -z "$BEFORE" ] \
+                 || [ "$BEFORE" = "0000000000000000000000000000000000000000" ] \
+                 || ! git cat-file -e "${BEFORE}^{commit}" 2>/dev/null; then
+                env=true; debs=true; image=true; iso=true
+              else
+                changed=$(git diff --name-only "$BEFORE" "$SHA")
+                echo "Changed files in push:"; echo "$changed"
+                match() { printf '%s\n' "$changed" | grep -qE "$1"; }
+                match '^workflows/build-env/'                            && env=true   || true
+                match '^workflows/bootc-debs-builder/'                   && debs=true  || true
+                match '^(Containerfile$|src/|assets/|workflows/image-tests/)' && image=true || true
+                match '^workflows/build-iso/'                            && iso=true   || true
+                # Any change to the caller pipeline itself -> full rebuild (safe).
+                match '^\.github/workflows/pipeline\.yml$' && { env=true; debs=true; image=true; iso=true; } || true
+                # Cascade: rebuilt debs feed the image and the ISO; a rebuilt
+                # image feeds the ISO.
+                [ "$debs" = "true" ]  && { image=true; iso=true; } || true
+                [ "$image" = "true" ] && iso=true || true
+              fi ;;
+          esac
+          printf 'env=%s\ndebs=%s\nimage=%s\niso=%s\n' \
+            "$env" "$debs" "$image" "$iso" | tee -a "$GITHUB_OUTPUT"
+
+  base:
+    name: Rebuild debian-bootc base first
+    # Manual-dispatch only, and only for products that sit on the base
+    # (enable_base). A push/schedule never rebuilds the base (nothing in the
+    # product repo changes it). If it fails, the downstream jobs gate on base
+    # success/skipped, so the run goes red instead of shipping on a stale base.
+    if: ${{ inputs.enable_base && inputs.update_base == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger debian-bootc pipeline and wait
+        uses: DaemonCores/DaemonCores-CI/trigger-pipeline@main
+        with:
+          repo: DaemonCores/debian-bootc
+          workflow: pipeline.yml
+          ref: main
+          # PAT with Actions read+write on debian-bootc (GITHUB_TOKEN cannot
+          # dispatch cross-repo). Provided by the caller via `secrets: inherit`.
+          token: ${{ secrets.PAT_DISPATCH }}
+
+  build_env:
+    name: Rebuild the deb-builder env image
+    needs: [changes]
+    # Monthly schedule, checkbox, or a push touching workflows/build-env/.
+    if: ${{ !cancelled() && needs.changes.outputs.env == 'true' }}
+    uses: DaemonCores/DaemonCores-CI/.github/workflows/build-env.yml@main
+    secrets: inherit
+
+  debs:
+    name: Build .deb packages
+    needs: [changes, base, build_env]
+    # !cancelled() lets debs run (but stops on cancel) even when base/build_env were skipped.
+    if: |
+      !cancelled() &&
+      needs.changes.outputs.debs == 'true' &&
+      (needs.base.result == 'success' || needs.base.result == 'skipped') &&
+      (needs.build_env.result == 'success' || needs.build_env.result == 'skipped')
+    uses: DaemonCores/DaemonCores-CI/.github/workflows/bootc-debs-builder.yml@main
+    secrets: inherit
+
+  image:
+    name: Build container image
+    needs: [changes, debs, base]
+    # !cancelled() runs the job (but stops on cancel) even when the debs/base jobs were skipped.
+    if: |
+      !cancelled() &&
+      needs.changes.outputs.image == 'true' &&
+      (needs.base.result == 'success' || needs.base.result == 'skipped') &&
+      (needs.debs.result == 'success' || needs.debs.result == 'skipped')
+    uses: DaemonCores/DaemonCores-CI/.github/workflows/bootc-build.yml@main
+    with:
+      # Force a no-cache image rebuild when at least one .deb was rebuilt
+      # (schedule already forces no-cache inside bootc-build.yml).
+      force_no_cache: ${{ needs.debs.outputs.any_rebuilt == 'true' }}
+    secrets: inherit
+
+  iso:
+    name: Build ISO
+    needs: [changes, debs, image, meta, base]
+    # !cancelled() runs the job (but stops on cancel) even when debs, image or base were skipped.
+    if: |
+      !cancelled() &&
+      needs.changes.outputs.iso == 'true' &&
+      (needs.base.result == 'success' || needs.base.result == 'skipped') &&
+      (needs.debs.result == 'success' || needs.debs.result == 'skipped') &&
+      (needs.image.result == 'success' || needs.image.result == 'skipped') &&
+      needs.meta.result == 'success'
+    uses: DaemonCores/DaemonCores-CI/.github/workflows/iso-builder.yml@main
+    with:
+      product_name: ${{ needs.meta.outputs.product_name }}
+    secrets: inherit
