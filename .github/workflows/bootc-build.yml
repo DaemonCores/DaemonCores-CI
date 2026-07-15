@@ -90,8 +90,16 @@ jobs:
             flags+=(--tag "${IMAGE}:monthly-$(date -u +%Y%m%d)")
           fi
 
+          # Product display name, derived automatically from the repo name (same
+          # rule as the ISO branding: repo tail, dashes -> spaces). Passed into
+          # the build so the image brands its UEFI boot-entry label with it
+          # instead of a hardcoded distro name.
+          product_name="${GITHUB_REPOSITORY##*/}"
+          product_name="${product_name//-/ }"
+
           sudo podman build \
             "${flags[@]}" \
+            --build-arg "PRODUCT_NAME=${product_name}" \
             --label "org.daemoncores.content-hash=${{ steps.chash.outputs.hash }}" \
             --tag "${IMAGE}:latest" \
             --tag "${IMAGE}:$(git rev-parse --short HEAD)" \
