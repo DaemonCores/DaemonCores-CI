@@ -4,11 +4,15 @@
 # varlog subvolumes share it (no fixed sizing); /var/log is a subvolume capped
 # at 2G on-disk via a btrfs qgroup quota (compressed, so it holds far more).
 %pre --interpreter=/bin/bash --erroronfail
-exec < /dev/tty1 > /dev/tty1 2>&1
-# Anaconda hands us the console in raw mode: without CR/LF translation the output
-# staircases down-right (LF with no carriage return) and `read` sees the Enter
-# key as CR (not LF), so every entry fails validation. `stty sane` restores
-# cooked mode (ONLCR + ICRNL) so the menu renders and input works.
+# Anaconda drives tty1 through tmux, so reading/writing it directly garbles the
+# output (an LF-without-CR staircase) and keystrokes never reach our `read`
+# (they go to tmux), which soft-locks the prompt. The interactive-%pre pattern
+# is to move to a dedicated, unused VT and make it the *active* console with
+# chvt (so both the display and the keyboard are ours), then switch back to
+# tty1 for Anaconda. Ref: Red Hat KB 273843. stty sane is belt-and-suspenders
+# cooked mode on the fresh VT.
+exec < /dev/tty6 > /dev/tty6 2> /dev/tty6
+chvt 6 2>/dev/null || true
 stty sane 2>/dev/null || true
 
 echo
@@ -50,6 +54,10 @@ btrfs /        --subvol --name=root   LABEL=dcos
 btrfs /var     --subvol --name=var    LABEL=dcos
 btrfs /var/log --subvol --name=varlog LABEL=dcos
 EOF
+
+# Hand the console back to Anaconda's tty1.
+chvt 1 2>/dev/null || true
+exec < /dev/tty1 > /dev/tty1 2>&1
 %end
 
 %include /tmp/dc-part.ks
