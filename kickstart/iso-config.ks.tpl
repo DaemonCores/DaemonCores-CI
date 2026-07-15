@@ -5,6 +5,11 @@
 # at 2G on-disk via a btrfs qgroup quota (compressed, so it holds far more).
 %pre --interpreter=/bin/bash --erroronfail
 exec < /dev/tty1 > /dev/tty1 2>&1
+# Anaconda hands us the console in raw mode: without CR/LF translation the output
+# staircases down-right (LF with no carriage return) and `read` sees the Enter
+# key as CR (not LF), so every entry fails validation. `stty sane` restores
+# cooked mode (ONLCR + ICRNL) so the menu renders and input works.
+stty sane 2>/dev/null || true
 
 echo
 echo "======================================================================"
@@ -14,7 +19,12 @@ echo "  ONLY the disk you choose is wiped. Other disks (e.g. ZFS data pools)"
 echo "  are left untouched."
 echo
 
-mapfile -t DISKS < <(lsblk -dpno NAME,SIZE,TYPE,MODEL | awk '$3=="disk"{ $3=""; sub(/  +/," "); print }')
+# Real OS-install targets only. lsblk reports zram (Fedora's installer enables a
+# zram swap device), loop, ram, sr, md and dm devices as TYPE=disk too, so filter
+# those pseudo/virtual devices out by name — otherwise e.g. /dev/zram0 shows up
+# as a selectable (and dangerous) OS disk.
+mapfile -t DISKS < <(lsblk -dpno NAME,SIZE,TYPE,MODEL \
+  | awk '$3=="disk" && $1 !~ /^\/dev\/(zram|loop|ram|fd|sr|md|dm-)/ { $3=""; sub(/  +/," "); print }')
 [[ ${#DISKS[@]} -gt 0 ]] || { echo "  No disk found — aborting."; exit 1; }
 
 i=0
