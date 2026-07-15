@@ -212,7 +212,7 @@ wait_ssh() {
 #   0 if all tests pass, 1 otherwise.
 #######################################
 run_tests() {
-  local n i name cmd expect out rc fail=0 pass
+  local n i name cmd expect diag out rc fail=0 pass
   n=$(yq '.tests | length' "${TESTS_FILE}")
   for ((i = 0; i < n; i++)); do
     name=$(yq ".tests[${i}].name" "${TESTS_FILE}")
@@ -233,10 +233,74 @@ run_tests() {
     else
       echo "::error::image test failed: ${name}"
       printf '%s\n' "${out}" | sed 's/^/      /'
+      # Run this test's own diagnostic so the failure is self-explaining. The
+      # manifest is validated up front, so diag is always present.
+      diag=$(yq ".tests[${i}].diag" "${TESTS_FILE}")
+      echo "      ----- diag: ${name} -----"
+      # shellcheck disable=SC2029
+      ssh "${SSH_OPTS[@]}" root@localhost "${diag}" 2>&1 | sed 's/^/      | /' || true
       fail=1
     fi
   done
   return "${fail}"
+}
+
+#######################################
+# Enforce that every test ships its own `diag:` command. A test with no diag is
+# a manifest error and fails the run BEFORE the VM is even booted — so a test
+# can never regress into a blind, undiagnosable failure later. Also checks the
+# mandatory name/run fields.
+# Globals:
+#   TESTS_FILE
+# Returns:
+#   Exits 1 if any test is missing name, run, or diag.
+#######################################
+validate_manifest() {
+  local n i name run diag missing=0
+  n=$(yq '.tests | length' "${TESTS_FILE}")
+  for ((i = 0; i < n; i++)); do
+    name=$(yq ".tests[${i}].name // \"\"" "${TESTS_FILE}")
+    run=$(yq ".tests[${i}].run // \"\"" "${TESTS_FILE}")
+    diag=$(yq ".tests[${i}].diag // \"\"" "${TESTS_FILE}")
+    if [ -z "${name}" ] || [ "${name}" = "null" ]; then
+      echo "::error::tests[${i}] has no name"
+      missing=1
+    fi
+    if [ -z "${run}" ] || [ "${run}" = "null" ]; then
+      echo "::error::test '${name}' (index ${i}) has no run:"
+      missing=1
+    fi
+    if [ -z "${diag}" ] || [ "${diag}" = "null" ]; then
+      echo "::error::test '${name}' (index ${i}) has no diag: — every test MUST ship its own diagnostic so a failure is never undiagnosable"
+      missing=1
+    fi
+  done
+  if [ "${missing}" -ne 0 ]; then
+    echo "::error::${TESTS_FILE}: one or more tests are missing name/run/diag"
+    exit 1
+  fi
+}
+
+#######################################
+# Wait for the guest to FINISH booting before testing. sshd answers within ~1s
+# (it starts early), but PVE services come up much later — pveproxy is delayed
+# ~20s by an apt-update task it runs at startup, and dc-zramctl by its zram
+# calibration (~23s). Running the tests the instant SSH answers therefore reads
+# those slow-to-start services as false 'inactive'/'activating' failures.
+# `systemctl is-system-running --wait` blocks until systemd leaves the 'starting'
+# state; it exits non-zero when the result is 'degraded' (some unit failed),
+# which the tests then report, so a non-zero here is not fatal. Capped by a
+# timeout in case startup never settles.
+# Globals:
+#   SSH_OPTS
+#######################################
+wait_boot() {
+  echo "Waiting for guest systemd startup to settle before testing..."
+  local state
+  state=$(ssh "${SSH_OPTS[@]}" root@localhost \
+    'timeout 180 systemctl is-system-running --wait >/dev/null 2>&1; \
+     systemctl is-system-running' 2>/dev/null || true)
+  echo "  guest is-system-running: ${state:-unknown}"
 }
 
 #######################################
@@ -251,6 +315,8 @@ cleanup() {
 main() {
   trap cleanup EXIT
   install_deps
+  # Fail fast on an incomplete manifest (missing diag) before paying for a boot.
+  validate_manifest
   install_disk
   if [ "${SECURE_BOOT}" = 1 ]; then
     build_sb_vars
@@ -263,6 +329,7 @@ main() {
     sudo tail -n 50 "${SERIAL}" 2>/dev/null || true
     exit 1
   fi
+  wait_boot
   run_tests
 }
 
