@@ -65,7 +65,7 @@ jobs:
       image: ${{ steps.plan.outputs.image }}
       iso: ${{ steps.plan.outputs.iso }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           # Need the pre-push commit present locally to diff the pushed range.
           fetch-depth: 0
@@ -100,7 +100,7 @@ jobs:
                 match() { printf '%s\n' "$changed" | grep -qE "$1"; }
                 match '^workflows/build-env/'                            && env=true   || true
                 match '^workflows/bootc-debs-builder/'                   && debs=true  || true
-                match '^(Containerfile$|src/|assets/|workflows/image-tests/)' && image=true || true
+                match '^(Containerfile|src/|assets/|workflows/image-tests/)' && image=true || true
                 match '^workflows/build-iso/'                            && iso=true   || true
                 # Any change to the caller pipeline itself -> full rebuild (safe).
                 match '^\.github/workflows/pipeline\.yml$' && { env=true; debs=true; image=true; iso=true; } || true
