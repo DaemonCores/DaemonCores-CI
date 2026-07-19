@@ -125,7 +125,7 @@ jobs:
 
       # ─── CHECKOUT CI TOOLS ──────────────────────────────────────────────
       - name: Checkout CI tools
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: DaemonCores/DaemonCores-CI
           path: .ci-tools

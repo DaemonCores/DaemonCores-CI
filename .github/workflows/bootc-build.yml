@@ -10,8 +10,57 @@ on:
         default: false
 
 jobs:
+  # Discover every Containerfile* at the repo root and emit a matrix of
+  # { file, tag } entries. Tag rule: 'Containerfile' -> 'latest',
+  # 'Containerfile.<suffix>' -> '<suffix>'. Also computes a global hash over
+  # all Containerfiles so any variant change invalidates every variant's
+  # "identical to previous" cache (a change in one Containerfile is a signal
+  # the whole image family should be reconsidered).
+  discover:
+    name: Discover Containerfiles
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.list.outputs.matrix }}
+      global_hash: ${{ steps.list.outputs.global_hash }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: List Containerfiles and build matrix
+        id: list
+        run: |
+          set -euo pipefail
+          # Find every Containerfile* at the repo root (maxdepth 1). Sorted for
+          # deterministic ordering across runs.
+          mapfile -t files < <(find . -maxdepth 1 -type f -name 'Containerfile*' \
+            | sed 's|^\./||' | sort)
+          if [ "${#files[@]}" -eq 0 ]; then
+            echo "No Containerfile found at repo root." >&2
+            exit 1
+          fi
+          matrix='[]'
+          global_inputs=""
+          for name in "${files[@]}"; do
+            if [[ "$name" == "Containerfile" ]]; then
+              tag="latest"
+            else
+              tag="${name#Containerfile.}"
+            fi
+            matrix=$(printf '%s' "$matrix" | jq -c \
+              --arg file "$name" --arg tag "$tag" \
+              '. += [{file: $file, tag: $tag}]')
+            global_inputs+="${name} $(sha256sum "$name" | cut -d' ' -f1)"$'\n'
+          done
+          global_hash=$(printf '%s' "$global_inputs" | sha256sum | cut -d' ' -f1)
+          echo "matrix=$(printf '%s' "$matrix" | jq -c .)" >>"$GITHUB_OUTPUT"
+          echo "global_hash=${global_hash}" >>"$GITHUB_OUTPUT"
+          echo "Discovered variants:"
+          printf '%s' "$matrix" | jq .
+          echo "Global Containerfiles hash: ${global_hash}"
+
   build-test-push:
-    name: Build, Test & Push
+    name: Build ${{ matrix.variant.tag }}
+    needs: discover
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -19,6 +68,10 @@ jobs:
       id-token: write
       # Lets the duplicate-image guard open/append a "suspicious pipeline" issue.
       issues: write
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: ${{ fromJSON(needs.discover.outputs.matrix) }}
 
     steps:
       - name: Free disk space
@@ -28,7 +81,7 @@ jobs:
           df -h
 
       - name: Checkout
-        uses: actions/checkout@v7 
+        uses: actions/checkout@v7
 
       - name: Set image name
         run: echo "IMAGE=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_ENV"
@@ -41,17 +94,23 @@ jobs:
           sudo podman login ghcr.io \
             --username "${{ github.actor }}" \
             --password-stdin <<< "${PAT_PKG}"
-          
+
           # Login Docker because github signe container with docker and not podman
           docker login ghcr.io \
             --username "${{ github.actor }}" \
             --password-stdin <<< "${PAT_PKG}"
 
       # Deterministic content id of what actually goes into the image: the
-      # published deb hashes + the base image digest + the Containerfile. Stamped
-      # as a label so the next run can tell whether a rebuild changed anything.
+      # published deb hashes + the base image digest + this variant's
+      # Containerfile + the global Containerfiles hash (so a change in any
+      # Containerfile invalidates every variant's cache). Stamped as a label
+      # so the next run can tell whether a rebuild changed anything.
       - name: Compute content hash
         id: chash
+        env:
+          CF_FILE: ${{ matrix.variant.file }}
+          CF_TAG: ${{ matrix.variant.tag }}
+          GLOBAL_HASH: ${{ needs.discover.outputs.global_hash }}
         run: |
           set -euo pipefail
           command -v skopeo >/dev/null 2>&1 \
@@ -61,33 +120,44 @@ jobs:
           pages="https://${owner,,}.github.io/${repo}"
           debs=$(curl -fsSL "${pages}/debs-cache/hashes.json" 2>/dev/null \
             | jq -cS . 2>/dev/null || echo '{}')
-          base=$(grep -m1 -iE '^FROM ' Containerfile | awk '{ print $2 }')
+          base=$(grep -m1 -iE '^FROM ' "$CF_FILE" | awk '{ print $2 }')
           base_digest=$(sudo skopeo inspect --format '{{.Digest}}' \
             "docker://${base}" 2>/dev/null || echo none)
-          cf=$(sha256sum Containerfile | cut -d' ' -f1)
-          hash=$(printf '%s\n%s\n%s\n' "${debs}" "${base_digest}" "${cf}" \
+          cf=$(sha256sum "$CF_FILE" | cut -d' ' -f1)
+          hash=$(printf '%s\n%s\n%s\n%s\n%s\n' \
+            "${debs}" "${base_digest}" "${cf}" "${GLOBAL_HASH}" "${CF_TAG}" \
             | sha256sum | cut -d' ' -f1)
           echo "hash=${hash}" >>"$GITHUB_OUTPUT"
           # Content-hash label of the currently published image (empty if none).
           prior=$(sudo skopeo inspect \
             --format '{{ index .Labels "org.daemoncores.content-hash" }}' \
-            "docker://${IMAGE}:latest" 2>/dev/null || echo '')
+            "docker://${IMAGE}:${CF_TAG}" 2>/dev/null || echo '')
           if [[ -n "${prior}" && "${prior}" == "${hash}" ]]; then
             echo "identical=true" >>"$GITHUB_OUTPUT"
           else
             echo "identical=false" >>"$GITHUB_OUTPUT"
           fi
-          echo "content-hash=${hash} prior=${prior:-none}"
+          echo "content-hash=${hash} prior=${prior:-none} tag=${CF_TAG}"
 
       - name: Build
+        env:
+          CF_FILE: ${{ matrix.variant.file }}
+          CF_TAG: ${{ matrix.variant.tag }}
         run: |
+          set -euo pipefail
           flags=()
           if [[ "${{ github.event_name }}" == "schedule" \
             || "${{ inputs.force_no_cache }}" == "true" ]]; then
             flags+=(--no-cache)
           fi
+          # Monthly tag: 'monthly-YYYYMMDD' for latest, '<tag>-monthly-YYYYMMDD'
+          # for non-latest variants (so each variant gets its own monthly tag).
           if [[ "${{ github.event_name }}" == "schedule" ]]; then
-            flags+=(--tag "${IMAGE}:monthly-$(date -u +%Y%m%d)")
+            if [[ "$CF_TAG" == "latest" ]]; then
+              flags+=(--tag "${IMAGE}:monthly-$(date -u +%Y%m%d)")
+            else
+              flags+=(--tag "${IMAGE}:${CF_TAG}-monthly-$(date -u +%Y%m%d)")
+            fi
           fi
 
           # Product display name, derived automatically from the repo name (same
@@ -97,40 +167,66 @@ jobs:
           product_name="${GITHUB_REPOSITORY##*/}"
           product_name="${product_name//-/ }"
 
+          # SHA tag: bare '<sha>' for latest (retrocompat with the single-
+          # Containerfile era), '<tag>-<sha>' for non-latest variants so multiple
+          # variants sharing a commit do not collide in the registry.
+          sha=$(git rev-parse --short HEAD)
+          if [[ "$CF_TAG" == "latest" ]]; then
+            sha_tag="${IMAGE}:${sha}"
+          else
+            sha_tag="${IMAGE}:${CF_TAG}-${sha}"
+          fi
+
           sudo podman build \
             "${flags[@]}" \
             --build-arg "PRODUCT_NAME=${product_name}" \
             --label "org.daemoncores.content-hash=${{ steps.chash.outputs.hash }}" \
-            --tag "${IMAGE}:latest" \
-            --tag "${IMAGE}:$(git rev-parse --short HEAD)" \
-            -f Containerfile \
+            --tag "${IMAGE}:${CF_TAG}" \
+            --tag "${sha_tag}" \
+            -f "$CF_FILE" \
             --format docker \
             .
 
       - name: Check runtime deps
+        env:
+          CF_TAG: ${{ matrix.variant.tag }}
         run: |
-          sudo podman run --rm "${IMAGE}:latest" \
+          sudo podman run --rm "${IMAGE}:${CF_TAG}" \
             sh -c "ldd /usr/bin/bootc && ldd /usr/lib/libostree-1.so*"
 
       - name: Smoke test
+        env:
+          CF_TAG: ${{ matrix.variant.tag }}
         run: |
-          sudo podman run --rm "${IMAGE}:latest" bootc container lint
+          sudo podman run --rm "${IMAGE}:${CF_TAG}" bootc container lint
 
       # Real boot test: install to a disk, boot under QEMU/KVM, run the repo's
       # image-tests over SSH. A failure fails this job, so Push never runs.
       - name: Boot-test the image
         uses: DaemonCores/DaemonCores-CI/image-test@main
         with:
-          image: ${{ env.IMAGE }}:latest
+          image: ${{ env.IMAGE }}:${{ matrix.variant.tag }}
 
       - name: Push
         if: github.ref == 'refs/heads/main'
         id: push
+        env:
+          CF_TAG: ${{ matrix.variant.tag }}
         run: |
-          sudo podman push --digestfile /tmp/digest.txt "${IMAGE}:latest"
-          sudo podman push "${IMAGE}:$(git rev-parse --short HEAD)"
+          set -euo pipefail
+          sudo podman push --digestfile /tmp/digest.txt "${IMAGE}:${CF_TAG}"
+          sha=$(git rev-parse --short HEAD)
+          if [[ "$CF_TAG" == "latest" ]]; then
+            sudo podman push "${IMAGE}:${sha}"
+          else
+            sudo podman push "${IMAGE}:${CF_TAG}-${sha}"
+          fi
           if [[ "${{ github.event_name }}" == "schedule" ]]; then
-            sudo podman push "${IMAGE}:monthly-$(date -u +%Y%m%d)"
+            if [[ "$CF_TAG" == "latest" ]]; then
+              sudo podman push "${IMAGE}:monthly-$(date -u +%Y%m%d)"
+            else
+              sudo podman push "${IMAGE}:${CF_TAG}-monthly-$(date -u +%Y%m%d)"
+            fi
           fi
           echo "digest=$(cat /tmp/digest.txt)" >> "$GITHUB_OUTPUT"
 
@@ -147,33 +243,35 @@ jobs:
           cosign sign --yes "${IMAGE}@${{ steps.push.outputs.digest }}"
 
       # The image was built, pushed and signed but its content is byte-identical
-      # to what was already published (same debs + base + Containerfile). Report
-      # it as a suspicious/wasteful run without failing the pipeline.
+      # to what was already published (same debs + base + Containerfiles). Report
+      # it as a suspicious/wasteful run without failing the pipeline. One issue
+      # per variant (title is keyed by tag) so each variant's status is visible.
       - name: Flag identical image
         if: github.ref == 'refs/heads/main' && steps.chash.outputs.identical == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
+          CF_TAG: ${{ matrix.variant.tag }}
         run: |
           set -euo pipefail
           hash="${{ steps.chash.outputs.hash }}"
           {
-            echo "### ⚠️ Image identique à la précédente"
+            echo "### ⚠️ Image identique à la précédente (\`${CF_TAG}\`)"
             echo
             echo "Le pipeline a reconstruit, poussé **et signé** une image dont le"
-            echo "content-hash \`${hash}\` est identique à celle déjà publiée :"
-            echo "ni les .deb, ni l'image de base, ni le Containerfile n'ont changé."
+            echo "content-hash \`${hash}\` est identique à celle déjà publiée (tag \`${CF_TAG}\`) :"
+            echo "ni les .deb, ni l'image de base, ni les Containerfiles n'ont changé."
             echo "Le rebuild/push/signature était probablement inutile."
           } >>"$GITHUB_STEP_SUMMARY"
-          title="⚠️ Pipeline douteuse : image identique poussée"
+          title="⚠️ Pipeline douteuse : image identique poussée (${CF_TAG})"
           num=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open \
             --search "in:title \"$title\"" --json number -q '.[0].number' \
             2>/dev/null || true)
           if [ -n "$num" ]; then
             gh issue comment "$num" --repo "$GITHUB_REPOSITORY" \
-              --body "Run \`${GITHUB_RUN_ID}\` : image identique (hash \`${hash}\`)." \
+              --body "Run \`${GITHUB_RUN_ID}\` : image identique (tag \`${CF_TAG}\`, hash \`${hash}\`)." \
               2>/dev/null || true
           else
             gh issue create --repo "$GITHUB_REPOSITORY" --title "$title" \
-              --body "Content-hash \`${hash}\` inchangé mais image reconstruite, poussée et signée (run \`${GITHUB_RUN_ID}\`)." \
+              --body "Content-hash \`${hash}\` inchangé pour le tag \`${CF_TAG}\` mais image reconstruite, poussée et signée (run \`${GITHUB_RUN_ID}\`)." \
               2>/dev/null || true
           fi
