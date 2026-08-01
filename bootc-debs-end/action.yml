@@ -29,6 +29,7 @@ runs:
       id: rebuilt
       shell: bash
       run: |
+        set -euo pipefail
         command -v jq >/dev/null 2>&1 \
           || { apt-get update >/dev/null; apt-get install -y jq >/dev/null; }
         any=false
@@ -50,7 +51,7 @@ runs:
         signing-key: ${{ inputs.apt_gpg_key }}
         codename: trixie
         components: main
-        architectures: amd64
+        architectures: amd64 arm64
 
     # Publish the content-addressed deb cache alongside the APT repo so the
     # build-deb action can reuse unchanged packages on the next run:
@@ -123,5 +124,6 @@ runs:
       if: steps.deploy_1.outcome == 'failure' && steps.deploy_2.outcome == 'failure' && steps.deploy_3.outcome == 'failure'
       shell: bash
       run: |
+        set -euo pipefail
         echo "::error::All 3 GitHub Pages deploy attempts failed. This is a transient issue on the GitHub Pages service side; re-run the workflow later."
         exit 1

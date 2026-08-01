@@ -35,6 +35,25 @@ on:
       run_iso:
         type: string
         default: 'true'
+      # Opt-in disk-image (.img) build, split per format. NEVER activated by
+      # default — only via the workflow_dispatch checkboxes. The img job runs
+      # after the container image build and produces flashable .img files.
+      # See img-builder.yml.
+      #
+      # Format availability (authoritative — matches the img job matrix):
+      #   rpi     — arm64 only (Pi 3/4/5 are aarch64)
+      #   gallium — arm64 only (Linux Gallium raw image)
+      # The `changes` job computes which formats actually run based on these
+      # inputs AND the arch availability above (a format requested for an arch
+      # it does not support is dropped).
+      run_img_rpi:
+        description: 'Build Raspberry Pi .img (arm64 only)'
+        type: string
+        default: 'false'
+      run_img_gallium:
+        description: 'Build Linux Gallium .img (arm64 only)'
+        type: string
+        default: 'false'
 
 permissions:
   contents: write
@@ -52,6 +71,7 @@ jobs:
     steps:
       - id: name
         run: |
+          set -euo pipefail
           name="${GITHUB_REPOSITORY##*/}"   # cut at the slash -> repo name
           name="${name//-/ }"               # replace dashes with spaces
           echo "product_name=$name" >> "$GITHUB_OUTPUT"
@@ -64,6 +84,8 @@ jobs:
       debs: ${{ steps.plan.outputs.debs }}
       image: ${{ steps.plan.outputs.image }}
       iso: ${{ steps.plan.outputs.iso }}
+      img_rpi: ${{ steps.plan.outputs.img_rpi }}
+      img_gallium: ${{ steps.plan.outputs.img_gallium }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -78,18 +100,38 @@ jobs:
           IN_DEBS: ${{ inputs.run_debs }}
           IN_IMAGE: ${{ inputs.run_image }}
           IN_ISO: ${{ inputs.run_iso }}
+          IN_IMG_RPI: ${{ inputs.run_img_rpi }}
+          IN_IMG_GALLIUM: ${{ inputs.run_img_gallium }}
         run: |
           set -euo pipefail
           env=false; debs=false; image=false; iso=false
+          # Per-format img flags. Each is gated by arch availability:
+          #   rpi     -> arm64 only
+          #   gallium -> arm64 only
+          # (iso is amd64+arm64, but the iso job itself stays amd64-only for
+          # now — see the iso job comment. The arch availability here only
+          # governs the img formats.)
+          img_rpi=false; img_gallium=false
           case "$EVENT" in
             schedule)
-              # Monthly full rebuild.
+              # Monthly full rebuild. img stays opt-in: schedule does NOT build
+              # disk images (the .img is a flash target, not a CI artifact that
+              # needs monthly refresh).
               env=true; debs=true; image=true; iso=true ;;
             workflow_dispatch)
-              # Manual override: the checkboxes decide, verbatim.
-              env="$IN_ENV"; debs="$IN_DEBS"; image="$IN_IMAGE"; iso="$IN_ISO" ;;
+              # Manual override: the checkboxes decide, verbatim. img formats
+              # are opt-in (default false) — only built when the operator ticks
+              # the box. A format requested for an unsupported arch is dropped
+              # (rpi and gallium are arm64-only).
+              env="$IN_ENV"; debs="$IN_DEBS"; image="$IN_IMAGE"; iso="$IN_ISO"
+              img_rpi="$IN_IMG_RPI"
+              img_gallium="$IN_IMG_GALLIUM" ;;
             push)
               # New branch or unknown/zero base -> can't diff, rebuild all.
+              # img auto-rebuild: a push to a format's dependencies rebuilds
+              # that format (Containerfile, kernel configs, packages.yml).
+              # img is NOT rebuilt on a bare pipeline.yml push (the all-rebuild
+              # fallback below covers env/debs/image/iso only).
               if [ -z "$BEFORE" ] \
                  || [ "$BEFORE" = "0000000000000000000000000000000000000000" ] \
                  || ! git cat-file -e "${BEFORE}^{commit}" 2>/dev/null; then
@@ -103,15 +145,40 @@ jobs:
                 match '^(Containerfile|src/|assets/|workflows/image-tests/)' && image=true || true
                 match '^workflows/build-iso/'                            && iso=true   || true
                 # Any change to the caller pipeline itself -> full rebuild (safe).
+                # img formats are NOT cascaded by a pipeline.yml push (opt-in
+                # only); their own dependency matches below handle auto-rebuild.
                 match '^\.github/workflows/pipeline\.yml$' && { env=true; debs=true; image=true; iso=true; } || true
                 # Cascade: rebuilt debs feed the image and the ISO; a rebuilt
-                # image feeds the ISO.
+                # image feeds the ISO. img formats are NOT cascaded by the
+                # image/debs cascade alone (they have their own dep matches).
                 [ "$debs" = "true" ]  && { image=true; iso=true; } || true
                 [ "$image" = "true" ] && iso=true || true
+                # ── img auto-rebuild on dependency change ──────────────────
+                # A format is auto-rebuilt when its dependencies change.
+                #   Containerfile  -> base of every img format (both rebuilt)
+                #   packages.yml   -> debs feed every img format (both rebuilt)
+                #   kernel/config-rpi*   -> rpi boot layout (rpi only)
+                #   kernel/config-rk3588 -> rpi-adjacent SBC (rpi only)
+                #   kernel/config-x86_64  -> ISO, NOT any img format (no img)
+                # Only trigger a format whose deps actually changed; never
+                # cascade between img formats.
+                match '^Containerfile(\.minimal)?$' && { img_rpi=true; img_gallium=true; } || true
+                match '^workflows/bootc-debs-builder/packages\.yml$' && { img_rpi=true; img_gallium=true; } || true
+                match '^kernel/config-(rpi|rk3588)' && img_rpi=true || true
               fi ;;
           esac
-          printf 'env=%s\ndebs=%s\nimage=%s\niso=%s\n' \
-            "$env" "$debs" "$image" "$iso" | tee -a "$GITHUB_OUTPUT"
+          # img cascade (manual dispatch + push): when a format was opted in OR
+          # auto-triggered AND the image stage ran, keep the flag; if the image
+          # stage was skipped, there is nothing to flash, so drop the flag.
+          # This is per-format now (each format independently gated on image).
+          if [ "$img_rpi" = "true" ] && [ "$image" != "true" ]; then
+            img_rpi=false
+          fi
+          if [ "$img_gallium" = "true" ] && [ "$image" != "true" ]; then
+            img_gallium=false
+          fi
+          printf 'env=%s\ndebs=%s\nimage=%s\niso=%s\nimg_rpi=%s\nimg_gallium=%s\n' \
+            "$env" "$debs" "$image" "$iso" "$img_rpi" "$img_gallium" | tee -a "$GITHUB_OUTPUT"
 
   base:
     name: Rebuild debian-bootc base first
@@ -136,50 +203,161 @@ jobs:
     name: Rebuild the deb-builder env image
     needs: [changes]
     # Monthly schedule, checkbox, or a push touching workflows/build-env/.
+    # Single-arch: the build-env image is the host toolchain (buildah on amd64);
+    # it builds both amd64 and arm64 debs via the arch-aware waves below.
     if: ${{ !cancelled() && needs.changes.outputs.env == 'true' }}
     uses: DaemonCores/DaemonCores-CI/.github/workflows/build-env.yml@main
     secrets: inherit
 
-  debs:
-    name: Build .deb packages
+  debs_amd64:
+    name: Build .deb packages (amd64)
     needs: [changes, base, build_env]
-    # !cancelled() lets debs run (but stops on cancel) even when base/build_env were skipped.
     if: |
       !cancelled() &&
       needs.changes.outputs.debs == 'true' &&
       (needs.base.result == 'success' || needs.base.result == 'skipped') &&
       (needs.build_env.result == 'success' || needs.build_env.result == 'skipped')
     uses: DaemonCores/DaemonCores-CI/.github/workflows/bootc-debs-builder.yml@main
+    with:
+      arch: amd64
     secrets: inherit
 
-  image:
-    name: Build container image
-    needs: [changes, debs, base]
-    # !cancelled() runs the job (but stops on cancel) even when the debs/base jobs were skipped.
+  debs_arm64:
+    name: Build .deb packages (arm64)
+    needs: [changes, base, build_env]
+    if: |
+      !cancelled() &&
+      needs.changes.outputs.debs == 'true' &&
+      (needs.base.result == 'success' || needs.base.result == 'skipped') &&
+      (needs.build_env.result == 'success' || needs.build_env.result == 'skipped')
+    uses: DaemonCores/DaemonCores-CI/.github/workflows/bootc-debs-builder.yml@main
+    with:
+      arch: arm64
+    secrets: inherit
+
+  # Aggregate any_rebuilt from both arches: a rebuild on either arch forces a
+  # no-cache image rebuild. workflow_call outputs from reusable workflows are
+  # available via needs.<job>.outputs only for jobs that declared them.
+  debs_aggregate:
+    name: Aggregate debs outputs
+    needs: [debs_amd64, debs_arm64]
+    if: ${{ !cancelled() && !failure() }}
+    runs-on: ubuntu-latest
+    outputs:
+      any_rebuilt: ${{ steps.agg.outputs.any_rebuilt }}
+    steps:
+      - id: agg
+        run: |
+          set -euo pipefail
+          any=false
+          [ "${{ needs.debs_amd64.outputs.any_rebuilt }}" = "true" ] && any=true || true
+          [ "${{ needs.debs_arm64.outputs.any_rebuilt }}" = "true" ] && any=true || true
+          echo "any_rebuilt=${any}" >> "$GITHUB_OUTPUT"
+
+  image_amd64:
+    name: Build container image (amd64)
+    needs: [changes, debs_aggregate, base]
     if: |
       !cancelled() &&
       needs.changes.outputs.image == 'true' &&
       (needs.base.result == 'success' || needs.base.result == 'skipped') &&
-      (needs.debs.result == 'success' || needs.debs.result == 'skipped')
+      (needs.debs_aggregate.result == 'success' || needs.debs_aggregate.result == 'skipped')
     uses: DaemonCores/DaemonCores-CI/.github/workflows/bootc-build.yml@main
     with:
-      # Force a no-cache image rebuild when at least one .deb was rebuilt
-      # (schedule already forces no-cache inside bootc-build.yml).
-      force_no_cache: ${{ needs.debs.outputs.any_rebuilt == 'true' }}
+      # Force a no-cache image rebuild when at least one .deb was rebuilt on
+      # either arch (schedule already forces no-cache inside bootc-build.yml).
+      force_no_cache: ${{ needs.debs_aggregate.outputs.any_rebuilt == 'true' }}
+    secrets: inherit
+
+  image_arm64:
+    name: Build container image (arm64)
+    needs: [changes, debs_aggregate, base]
+    if: |
+      !cancelled() &&
+      needs.changes.outputs.image == 'true' &&
+      (needs.base.result == 'success' || needs.base.result == 'skipped') &&
+      (needs.debs_aggregate.result == 'success' || needs.debs_aggregate.result == 'skipped')
+    uses: DaemonCores/DaemonCores-CI/.github/workflows/bootc-build.yml@main
+    with:
+      force_no_cache: ${{ needs.debs_aggregate.outputs.any_rebuilt == 'true' }}
     secrets: inherit
 
   iso:
     name: Build ISO
-    needs: [changes, debs, image, meta, base]
+    needs: [changes, debs_amd64, debs_arm64, image_amd64, image_arm64, meta, base]
     # !cancelled() runs the job (but stops on cancel) even when debs, image or base were skipped.
+    # The ISO is amd64-only today (Fedora netinstall + bootc), so it depends on
+    # the amd64 image; arm64 image is awaited to keep the pipeline a single wave
+    # but only the amd64 image is embedded in the ISO. arm64 ISO support is
+    # pending a Fedora arm64 netinstall source and a kickstart variant.
     if: |
       !cancelled() &&
       needs.changes.outputs.iso == 'true' &&
       (needs.base.result == 'success' || needs.base.result == 'skipped') &&
-      (needs.debs.result == 'success' || needs.debs.result == 'skipped') &&
-      (needs.image.result == 'success' || needs.image.result == 'skipped') &&
+      (needs.debs_amd64.result == 'success' || needs.debs_amd64.result == 'skipped') &&
+      (needs.debs_arm64.result == 'success' || needs.debs_arm64.result == 'skipped') &&
+      (needs.image_amd64.result == 'success' || needs.image_amd64.result == 'skipped') &&
+      (needs.image_arm64.result == 'success' || needs.image_arm64.result == 'skipped') &&
       needs.meta.result == 'success'
     uses: DaemonCores/DaemonCores-CI/.github/workflows/iso-builder.yml@main
     with:
+      product_name: ${{ needs.meta.outputs.product_name }}
+    secrets: inherit
+
+  # ── Disk image (.img) ────────────────────────────────────────────────────
+  # Opt-in (workflow_dispatch checkboxes run_img_rpi / run_img_gallium, default
+  # false) AND auto-rebuilt on push when the format's dependencies change
+  # (Containerfile, kernel configs, packages.yml — see the `changes` job). On
+  # schedule it never runs (a .img is a flash target, not a monthly artifact).
+  #
+  # One job per (format, arch). GitHub Actions does NOT support per-matrix-entry
+  # `if:` on a `uses:` job (a job cannot mix `steps:` with `uses:`, and the
+  # job-level `if:` has no access to the `matrix` context), so per-format
+  # gating is implemented as two jobs — one per format — each gated by its own
+  # `changes.outputs.img_<format>` flag. This honours the task's per-format
+  # computation without building a format the operator did not request.
+  #
+  # Format availability (authoritative — matches the changes job):
+  #   rpi     -> arm64 only (Pi 3/4/5 are aarch64)
+  #   gallium -> arm64 only (gallium-amd64 was dropped; the format is now
+  #              arm64-only per the pipeline-format-choice task)
+  #
+  # `format` selects the image layout (see img-builder.yml):
+  #   rpi     -> Raspberry Pi bootable .img (FAT32 /boot with kernel + DTB +
+  #              config.txt + cmdline.txt, ext4 / with the ostree deployment)
+  #   gallium -> Linux Gallium raw .img (single ext4 root partition laid from
+  #              the container image; no phone-specific config)
+  # `arch` selects the container image arch to pull.
+  img_rpi:
+    name: Build rpi .img (arm64)
+    needs: [changes, image_amd64, image_arm64, meta, base]
+    if: |
+      !cancelled() &&
+      needs.changes.outputs.img_rpi == 'true' &&
+      (needs.base.result == 'success' || needs.base.result == 'skipped') &&
+      (needs.image_amd64.result == 'success' || needs.image_amd64.result == 'skipped') &&
+      (needs.image_arm64.result == 'success' || needs.image_arm64.result == 'skipped') &&
+      needs.meta.result == 'success'
+    uses: DaemonCores/DaemonCores-CI/.github/workflows/img-builder.yml@main
+    with:
+      target: rpi
+      arch: arm64
+      product_name: ${{ needs.meta.outputs.product_name }}
+    secrets: inherit
+
+  img_gallium:
+    name: Build gallium .img (arm64)
+    needs: [changes, image_amd64, image_arm64, meta, base]
+    if: |
+      !cancelled() &&
+      needs.changes.outputs.img_gallium == 'true' &&
+      (needs.base.result == 'success' || needs.base.result == 'skipped') &&
+      (needs.image_amd64.result == 'success' || needs.image_amd64.result == 'skipped') &&
+      (needs.image_arm64.result == 'success' || needs.image_arm64.result == 'skipped') &&
+      needs.meta.result == 'success'
+    uses: DaemonCores/DaemonCores-CI/.github/workflows/img-builder.yml@main
+    with:
+      target: gallium
+      arch: arm64
       product_name: ${{ needs.meta.outputs.product_name }}
     secrets: inherit

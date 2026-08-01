@@ -9,6 +9,12 @@ name: Build & Publish Bootc .deb
 on:
   workflow_dispatch:
   workflow_call:
+    inputs:
+      arch:
+        description: 'Target architecture (amd64 or arm64). Forwarded to build-one-deb and to the yq binary download.'
+        required: false
+        type: string
+        default: amd64
     outputs:
       any_rebuilt:
         description: 'true if at least one package was rebuilt (not cache-reused).'
@@ -29,12 +35,23 @@ jobs:
       - name: Compute dependency waves
         id: waves
         shell: bash
+        env:
+          ARCH: ${{ inputs.arch }}
         run: |
           set -euo pipefail
           echo "env_image=ghcr.io/${GITHUB_REPOSITORY,,}:buildenv" \
             >>"$GITHUB_OUTPUT"
+          # Arch-aware yq download: pick the binary matching the target arch
+          # (default amd64). The setup job runs on the amd64 runner regardless
+          # of the target arch (it only computes the wave plan), but the yq
+          # binary must match the runner arch (amd64 here).
+          yarch="${ARCH:-amd64}"
+          case "$yarch" in
+            aarch64) yarch=arm64 ;;
+            x86_64)  yarch=amd64 ;;
+          esac
           curl -fsSL \
-            https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 \
+            "https://github.com/mikefarah/yq/releases/latest/download/yq_linux_${yarch}" \
             -o /usr/local/bin/yq
           chmod +x /usr/local/bin/yq
           yq -o=json '.' workflows/bootc-debs-builder/packages.yml >/tmp/pkgs.json
@@ -68,6 +85,7 @@ jobs:
     with:
       package: ${{ matrix.package }}
       container_image: ${{ needs.setup.outputs.env_image }}
+      arch: ${{ inputs.arch }}
     secrets: inherit
 
   wave1:
@@ -81,6 +99,7 @@ jobs:
     with:
       package: ${{ matrix.package }}
       container_image: ${{ needs.setup.outputs.env_image }}
+      arch: ${{ inputs.arch }}
     secrets: inherit
 
   wave2:
@@ -94,6 +113,7 @@ jobs:
     with:
       package: ${{ matrix.package }}
       container_image: ${{ needs.setup.outputs.env_image }}
+      arch: ${{ inputs.arch }}
     secrets: inherit
 
   wave3:
@@ -107,6 +127,7 @@ jobs:
     with:
       package: ${{ matrix.package }}
       container_image: ${{ needs.setup.outputs.env_image }}
+      arch: ${{ inputs.arch }}
     secrets: inherit
 
   publish:
