@@ -22,10 +22,15 @@ on:
         description: 'Pre-baked build-env image the job runs in (ghcr :buildenv tag).'
         required: true
         type: string
+      arch:
+        description: 'Target architecture (amd64 or arm64). Selects the yq binary variant and is forwarded to build-deb for deb naming.'
+        required: false
+        type: string
+        default: amd64
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.arch == 'arm64' && 'ubuntu-24.04-arm' || 'ubuntu-latest' }}
     container:
       image: ${{ inputs.container_image }}
       credentials:
@@ -41,6 +46,8 @@ jobs:
       SECRETVAL_GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       SECRETVAL_SB_SIGNING_KEY: ${{ secrets.SB_SIGNING_KEY }}
       SECRETVAL_SB_SIGNING_CERT: ${{ secrets.SB_SIGNING_CERT }}
+      # Target arch propagates to the build-deb action and to deb globbing.
+      BUILD_ARCH: ${{ inputs.arch }}
     steps:
       - uses: DaemonCores/DaemonCores-CI/bootc-debs-start@main
 
@@ -50,11 +57,19 @@ jobs:
         env:
           MAN: ${{ inputs.manifest }}
           PKG: ${{ inputs.package }}
+          ARCH: ${{ inputs.arch }}
         run: |
           set -euo pipefail
           command -v yq >/dev/null 2>&1 || {
+            # Arch-aware yq download: pick the binary matching the target arch
+            # (amd64 or arm64). Falls back to the host arch when ARCH is unset.
+            yarch="${ARCH:-$(dpkg --print-architecture 2>/dev/null || uname -m)}"
+            case "$yarch" in
+              aarch64) yarch=arm64 ;;
+              x86_64)  yarch=amd64 ;;
+            esac
             curl -fsSL \
-              https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 \
+              "https://github.com/mikefarah/yq/releases/latest/download/yq_linux_${yarch}" \
               -o /usr/local/bin/yq
             chmod +x /usr/local/bin/yq
           }
@@ -138,6 +153,7 @@ jobs:
           deb-glob: ${{ steps.def.outputs.deb_glob }}
           env: ${{ steps.def.outputs.env }}
           build: ${{ steps.def.outputs.build }}
+          arch: ${{ inputs.arch }}
 
       # The build failed but the last-good published deb was kept, so the
       # pipeline is not blocked. Record the breakage as an issue (deduped by
@@ -177,6 +193,6 @@ jobs:
       - name: Upload ${{ inputs.package }} debs
         uses: actions/upload-artifact@v7
         with:
-          name: debs-${{ inputs.package }}
+          name: debs-${{ inputs.package }}-${{ inputs.arch }}
           path: /debs
           include-hidden-files: true

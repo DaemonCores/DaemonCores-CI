@@ -1,0 +1,193 @@
+name: img-builder
+
+# Reusable workflow that builds a flashable disk image (.img) from a published
+# bootc container image. Called by full-pipeline.yml when the operator opts in
+# via the `run_img` workflow_dispatch checkbox (default false — never auto-runs
+# on push or schedule).
+#
+# Two targets:
+#   rpi     — Raspberry Pi bootable .img (arm64 only).
+#             Layout: GPT with a FAT32 /boot partition (label "boot-se")
+#             containing the kernel, device-tree blobs, config.txt and
+#             cmdline.txt, and an ext4 / root partition (label "root") laid
+#             from the bootc ostree deployment via `bootc install to-filesystem`
+#             (the same proven path used by the ISO kickstart and image-test
+#             harness). The Pi firmware reads config.txt from the FAT32
+#             partition and chain-loads the kernel.
+#   gallium — Linux Gallium raw .img (amd64 | arm64).
+#             Layout: GPT with a single ext4 root partition (label "root") laid
+#             from the container image. No phone-specific config — just the raw
+#             image output ready to be flashed or converted.
+#
+# The partitioning + install logic lives in scripts/build-img.sh (a dedicated
+# shell script, like scripts/inject-iso.sh) so heredocs and indentation stay
+# unambiguous. This workflow only prepares the runner, pulls the image, runs
+# the script, and uploads the .img to the install-iso release.
+#
+# This workflow is PREPARATORY: it is wired into the pipeline but gated behind
+# the opt-in checkbox. It does not change any existing job.
+
+on:
+  workflow_call:
+    inputs:
+      target:
+        description: 'Image target: rpi (Raspberry Pi, arm64) or gallium (Linux Gallium, amd64|arm64).'
+        type: string
+        required: true
+      arch:
+        description: 'Container image architecture to pull (amd64 | arm64).'
+        type: string
+        required: true
+      product_name:
+        description: 'Product display name (for .img filename branding).'
+        type: string
+        default: ""
+
+jobs:
+  build-img:
+    name: Build ${{ inputs.target }} .img (${{ inputs.arch }})
+    runs-on: ${{ inputs.arch == 'arm64' && 'ubuntu-24.04-arm' || 'ubuntu-latest' }}
+    container:
+      image: almalinux:10
+      # --privileged is required for loop mount (mount -o loop) and partition
+      # tools (sfdisk, partprobe, mkfs.*) when building a disk image. Do not
+      # remove — same constraint as the ISO builder.
+      options: --privileged
+    permissions:
+      contents: write
+
+    steps:
+
+      - uses: actions/checkout@v7
+
+      # ─── INSTALL ─────────────────────────────────────────────────────────
+      # Same dependency set as the ISO builder plus dosfstools (mkfs.vfat) and
+      # mtools (for FAT32 inspection) for the rpi target's /boot partition.
+      # sfdisk ships in util-linux; e2fsprogs provides mkfs.ext4. For the
+      # gallium arm64 phone target, android-tools-mkbootimg provides mkbootimg
+      # (packs the Android boot.img from kernel + initramfs + DTB).
+      - name: Install dependencies
+        run: |
+          set -euo pipefail
+          dnf install -y epel-release
+          dnf install -y 'dnf-command(config-manager)'
+          dnf config-manager -y \
+            --add-repo https://cli.github.com/packages/rpm/gh-cli.repo
+          dnf makecache --refresh
+          dnf install -y \
+            git gh curl cpio gzip podman fuse-overlayfs \
+            dosfstools mtools \
+            parted e2fsprogs \
+            util-linux \
+            android-tools-mkbootimg
+          git config --system --add safe.directory '*'
+
+      # ─── VARIABLES ───────────────────────────────────────────────────────
+      - name: Compute names
+        id: names
+        env:
+          TARGET: ${{ inputs.target }}
+          ARCH: ${{ inputs.arch }}
+          PRODUCT_NAME: ${{ inputs.product_name }}
+        run: |
+          set -euo pipefail
+          REPO_TAIL="${GITHUB_REPOSITORY##*/}"
+          # Filename: <base>-<target>-<arch>.img
+          # (e.g. debian-bootc-rpi-arm64.img). Use the product display name
+          # (spaces -> dashes, lowercased) for branding if set; else the repo
+          # tail.
+          if [ -n "${PRODUCT_NAME}" ]; then
+            base=$(printf '%s' "${PRODUCT_NAME}" | tr ' ' '-' | tr '[:upper:]' '[:lower:]')
+          else
+            base="${REPO_TAIL}"
+          fi
+          IMG_FILE="${base}-${TARGET}-${ARCH}.img"
+          # Per-arch image tag from bootc-build.yml: <tag>_<arch>_autoupdate.
+          # We pull the autoupdate variant (the canonical one).
+          IMG_REF="ghcr.io/${GITHUB_REPOSITORY,,}:latest_${ARCH}_autoupdate"
+          {
+            echo "img_file=${IMG_FILE}"
+            echo "img_ref=${IMG_REF}"
+            echo "target=${TARGET}"
+            echo "arch=${ARCH}"
+            echo "base=${base}"
+          } >> "$GITHUB_OUTPUT"
+          echo "Building ${IMG_FILE} from ${IMG_REF}"
+
+      # ─── BUILD THE .img ──────────────────────────────────────────────────
+      # The partitioning + bootc install + FAT32 /boot population lives in
+      # scripts/build-img.sh. It creates a sparse .img, attaches a loop device,
+      # partitions it, formats, lays the filesystem from the bootc image, and
+      # sparsifies the result. The script is idempotent and cleans up the loop
+      # device via a trap.
+      - name: Build ${{ inputs.target }} .img
+        env:
+          TARGET: ${{ inputs.target }}
+          ARCH: ${{ inputs.arch }}
+          IMG_FILE: ${{ steps.names.outputs.img_file }}
+          IMG_REF: ${{ steps.names.outputs.img_ref }}
+        run: |
+          set -euo pipefail
+          bash scripts/build-img.sh "${TARGET}" "${ARCH}" "${IMG_FILE}" "${IMG_REF}"
+
+      # ─── UPLOAD ────────────────────────────────────────────────────────────
+      # Upload the .img to the same release the ISO builder uses (install-iso).
+      # The .img and the ISO are alternative install media for the same product,
+      # so they belong in the same release. --clobber replaces a prior upload of
+      # the same filename (e.g. a re-run of the manual dispatch).
+      - name: Create or update release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          title="Install media — $(date -u +%Y-%m-%d)"
+          notes="ISO and flashable .img disk images for ${GITHUB_REPOSITORY}."
+          if gh release view install-iso \
+               --repo "${GITHUB_REPOSITORY}" \
+               --json name >/dev/null 2>&1; then
+            gh release edit install-iso \
+              --repo    "${GITHUB_REPOSITORY}" \
+              --title   "$title" \
+              --notes   "$notes" \
+              --target  "${GITHUB_SHA}" \
+              --latest=false
+          else
+            gh release create install-iso \
+              --repo    "${GITHUB_REPOSITORY}" \
+              --title   "$title" \
+              --notes   "$notes" \
+              --target  "${GITHUB_SHA}" \
+              --latest=false
+          fi
+
+      - name: Upload .img to release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          IMG_FILE: ${{ steps.names.outputs.img_file }}
+        run: |
+          set -euo pipefail
+          gh release upload install-iso \
+            --repo "${GITHUB_REPOSITORY}" \
+            "out/${IMG_FILE}" --clobber
+
+      # ── Phone boot.img (gallium/arm64 only) ────────────────────────────────
+      # The gallium arm64 (phone) target packs an Android boot.img separately
+      # so the operator can flash it via `fastboot flash boot boot.img` without
+      # touching the full .img. The script writes it to
+      # out/boot-<base>-gallium-arm64.img. On the rpi and gallium/amd64 targets
+      # this file does not exist, so the step is skipped (no --clobber needed).
+      - name: Upload phone boot.img (gallium/arm64 only)
+        if: ${{ inputs.target == 'gallium' && inputs.arch == 'arm64' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          IMG_FILE: ${{ steps.names.outputs.img_file }}
+        run: |
+          set -euo pipefail
+          BOOT_IMG="out/boot-${IMG_FILE%.img}.img"
+          if [ ! -f "${BOOT_IMG}" ]; then
+            echo "::error::Expected phone boot.img not found at ${BOOT_IMG}" >&2
+            exit 1
+          fi
+          gh release upload install-iso \
+            --repo "${GITHUB_REPOSITORY}" \
+            "${BOOT_IMG}" --clobber
