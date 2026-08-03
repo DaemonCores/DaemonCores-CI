@@ -10,30 +10,30 @@ on:
         default: false
 
 jobs:
-  # Discover every Containerfile* at the repo root and emit a matrix of
-  # { file, tag } entries. Tag rule: 'Containerfile' -> 'latest',
-  # 'Containerfile.<suffix>' -> '<suffix>'. Also discovers per-device kernel
-  # module files under modules-kernel/ in the caller repo: each file becomes a
-  # device variant. When modules-kernel/ is absent or empty, a single 'generic'
-  # device is emitted (zero regression: the build matrix and tag shape collapse
-  # to the pre-device behavior). Also computes a global hash over all
-  # Containerfiles so any variant change invalidates every variant's
-  # "identical to previous" cache (a change in one Containerfile is a signal
-  # the whole image family should be reconsidered). Per-device module hashes
-  # are NOT folded into the global hash — a module change only invalidates its
-  # own device's cache (via the content-hash step), not every variant.
+  # Discover every Containerfile* at the repo root and emit a FLAT build
+  # matrix where each entry is { file, tag, arch, autoupdate }. The autoupdate
+  # dimension is driven by the Containerfile itself: when the file carries
+  # `LABEL org.daemoncores.autoupdate-variants` BOTH the autoupdate (1) and
+  # lock (0) variants are emitted; when the LABEL is absent only the autoupdate
+  # (1) variant is emitted. Both arches (amd64, arm64) are always included.
+  # Also computes a global hash over all Containerfiles so any variant change
+  # invalidates every variant's "identical to previous" cache.
+  #
+  # A second output, manifest_matrix, lists the unique variant tags with a
+  # `lock` boolean telling the manifest job whether a _lock manifest list
+  # should be produced for that tag.
   discover:
     name: Discover Containerfiles
     runs-on: ubuntu-latest
     outputs:
       matrix: ${{ steps.list.outputs.matrix }}
-      devices: ${{ steps.list.outputs.devices }}
+      manifest_matrix: ${{ steps.list.outputs.manifest_matrix }}
       global_hash: ${{ steps.list.outputs.global_hash }}
     steps:
       - name: Checkout
         uses: actions/checkout@v7
 
-      - name: List Containerfiles, devices and build matrix
+      - name: List Containerfiles and build matrix
         id: list
         run: |
           set -euo pipefail
@@ -45,35 +45,8 @@ jobs:
             echo "No Containerfile found at repo root." >&2
             exit 1
           fi
-          # Discover per-device kernel module files under modules-kernel/.
-          # Each file becomes a device variant; the device id is the file
-          # basename with one extension stripped (rpi4.conf -> rpi4). Files
-          # with no extension keep their full name. 'generic' is the
-          # no-modules fallback so a repo without modules-kernel/ behaves
-          # exactly like the pre-device pipeline (only 'generic' is built,
-          # with the legacy no-device tag shape).
-          if [ -d modules-kernel ]; then
-            mapfile -t modfiles < <(find modules-kernel -maxdepth 1 -type f \
-              | sort)
-          else
-            modfiles=()
-          fi
-          devices='[]'
-          if [ "${#modfiles[@]}" -gt 0 ]; then
-            for f in "${modfiles[@]}"; do
-              device="${f##*/}"
-              device="${device%.*}"
-              mhash=$(sha256sum "$f" | cut -d' ' -f1)
-              devices=$(printf '%s' "$devices" | jq -c \
-                --arg d "$device" --arg f "$f" --arg h "$mhash" \
-                '. += [{device: $d, module_file: $f, module_hash: $h}]')
-            done
-          else
-            # No modules-kernel/ -> single generic device, no module file.
-            devices=$(printf '%s' "$devices" | jq -c \
-              '. += [{device: "generic", module_file: "", module_hash: ""}]')
-          fi
           matrix='[]'
+          manifest_matrix='[]'
           global_inputs=""
           for name in "${files[@]}"; do
             if [[ "$name" == "Containerfile" ]]; then
@@ -81,25 +54,42 @@ jobs:
             else
               tag="${name#Containerfile.}"
             fi
-            matrix=$(printf '%s' "$matrix" | jq -c \
-              --arg file "$name" --arg tag "$tag" \
-              '. += [{file: $file, tag: $tag}]')
+            # Check for the autoupdate-variants LABEL. When present, the file
+            # declares both autoupdate and lock variants; when absent, only
+            # autoupdate is built (the default bootc behavior).
+            if grep -qE '^[[:space:]]*LABEL[[:space:]]+org\.daemoncores\.autoupdate-variants' "$name"; then
+              has_lock=true
+              autoupdates=(1 0)
+            else
+              has_lock=false
+              autoupdates=(1)
+            fi
+            for arch in amd64 arm64; do
+              for au in "${autoupdates[@]}"; do
+                matrix=$(printf '%s' "$matrix" | jq -c \
+                  --arg file "$name" --arg tag "$tag" --arg arch "$arch" --argjson au "$au" \
+                  '. += [{file: $file, tag: $tag, arch: $arch, autoupdate: $au}]')
+              done
+            done
+            manifest_matrix=$(printf '%s' "$manifest_matrix" | jq -c \
+              --arg tag "$tag" --argjson lock "$has_lock" \
+              '. += [{tag: $tag, lock: $lock}]')
             global_inputs+="${name} $(sha256sum "$name" | cut -d' ' -f1)"$'\n'
           done
           global_hash=$(printf '%s' "$global_inputs" | sha256sum | cut -d' ' -f1)
           echo "matrix=$(printf '%s' "$matrix" | jq -c .)" >>"$GITHUB_OUTPUT"
-          echo "devices=$(printf '%s' "$devices" | jq -c .)" >>"$GITHUB_OUTPUT"
+          echo "manifest_matrix=$(printf '%s' "$manifest_matrix" | jq -c .)" >>"$GITHUB_OUTPUT"
           echo "global_hash=${global_hash}" >>"$GITHUB_OUTPUT"
-          echo "Discovered variants:"
+          echo "Discovered build matrix:"
           printf '%s' "$matrix" | jq .
-          echo "Discovered devices:"
-          printf '%s' "$devices" | jq .
+          echo "Manifest matrix:"
+          printf '%s' "$manifest_matrix" | jq .
           echo "Global Containerfiles hash: ${global_hash}"
 
   build-test-push:
-    name: Build ${{ matrix.variant.tag }}-${{ matrix.arch }}-${{ matrix.autoupdate == '1' && 'autoupdate' || 'lock' }}${{ matrix.devices.device != 'generic' && format('-{0}', matrix.devices.device) || '' }}
+    name: Build ${{ matrix.entry.tag }}-${{ matrix.entry.arch }}-${{ matrix.entry.autoupdate == '1' && 'autoupdate' || 'lock' }}
     needs: discover
-    runs-on: ${{ matrix.arch == 'arm64' && 'ubuntu-24.04-arm' || 'ubuntu-latest' }}
+    runs-on: ${{ matrix.entry.arch == 'arm64' && 'ubuntu-24.04-arm' || 'ubuntu-latest' }}
     permissions:
       contents: read
       packages: write
@@ -109,16 +99,12 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        variant: ${{ fromJSON(needs.discover.outputs.matrix) }}
-        devices: ${{ fromJSON(needs.discover.outputs.devices) }}
-        arch: [amd64, arm64]
-        # AUTOUPDATE=1 -> bootc auto-updates enabled variant; AUTOUPDATE=0 -> locked
-        # variant. Forwarded to the Containerfile via ARG AUTOUPDATE.
-        autoupdate: ['1', '0']
-        # Per-device kernel modules: each entry under devices/ is a device
-        # variant with an optional module file. 'generic' (no module file) is
-        # always present and reproduces the pre-device behavior byte-for-byte
-        # (same tag, same content-hash) when modules-kernel/ is absent.
+        # Flat matrix: each entry is { file, tag, arch, autoupdate }. The
+        # autoupdate dimension (1/0) is decided per-Containerfile in the discover
+        # job based on the org.daemoncores.autoupdate-variants LABEL, and the
+        # arch dimension (amd64/arm64) is folded in here. Both arches always
+        # build natively on their matching runner (no QEMU cross-build).
+        entry: ${{ fromJSON(needs.discover.outputs.matrix) }}
 
     steps:
       - name: Free disk space
@@ -133,41 +119,32 @@ jobs:
       - name: Set image name and tags
         id: tags
         env:
-          CF_FILE: ${{ matrix.variant.file }}
-          CF_TAG: ${{ matrix.variant.tag }}
-          ARCH: ${{ matrix.arch }}
-          AUTOUPDATE: ${{ matrix.autoupdate }}
-          DEVICE: ${{ matrix.devices.device }}
+          CF_FILE: ${{ matrix.entry.file }}
+          CF_TAG: ${{ matrix.entry.tag }}
+          ARCH: ${{ matrix.entry.arch }}
+          AUTOUPDATE: ${{ matrix.entry.autoupdate }}
         run: |
           set -euo pipefail
           echo "IMAGE=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_ENV"
           # Suffix per autoupdate variant: 1 -> autoupdate, 0 -> lock.
           if [ "$AUTOUPDATE" = "1" ]; then autosuffix=autoupdate; else autosuffix=lock; fi
-          # Per-arch per-autoupdate tag, device-aware. 'generic' (no module)
-          # keeps the legacy no-device tag shape '<tag>_<arch>_<autosuffix>' so
-          # the existing pulls/manifest lists keep working byte-for-byte when
-          # modules-kernel/ is absent (zero regression). A named device inserts
-          # a device segment: '<tag>_<arch>_<device>_<autosuffix>'.
-          if [ "$DEVICE" = "generic" ]; then
-            primary="${CF_TAG}_${ARCH}_${autosuffix}"
-          else
-            primary="${CF_TAG}_${ARCH}_${DEVICE}_${autosuffix}"
-          fi
+          # Per-arch per-autoupdate tag. The autoupdate variant carries the
+          # suffix, the lock variant carries _lock. No device segment (the
+          # kernel modules are now selected per-arch inside the Containerfile
+          # instead of being a build dimension).
+          primary="${CF_TAG}_${ARCH}_${autosuffix}"
           echo "primary=${primary}" >>"$GITHUB_OUTPUT"
           echo "autosuffix=${autosuffix}" >>"$GITHUB_OUTPUT"
-          # Canonical combo = amd64 + autoupdate + generic. Only this one keeps
-          # the historical tags (:latest / :<sha> / :monthly-*) for retrocompat
-          # with the single-arch / no-device era, so existing amd64 pulls/tags
-          # keep working. Named devices never get the legacy tags (they are
-          # device-specific variants referenced only by their primary tag).
+          # Canonical combo = amd64 + autoupdate. Only this one keeps the
+          # historical tags (:latest / :<sha> / :monthly-*) for retrocompat
+          # with the single-arch era, so existing amd64 pulls/tags keep
+          # working.
           canonical=false
-          if [ "$ARCH" = "amd64" ] && [ "$AUTOUPDATE" = "1" ] \
-             && [ "$DEVICE" = "generic" ]; then canonical=true; fi
+          if [ "$ARCH" = "amd64" ] && [ "$AUTOUPDATE" = "1" ]; then canonical=true; fi
           echo "canonical=${canonical}" >>"$GITHUB_OUTPUT"
           echo "ARCH=${ARCH}" >>"$GITHUB_ENV"
           echo "AUTOUPDATE=${AUTOUPDATE}" >>"$GITHUB_ENV"
           echo "AUTOSUFFIX=${autosuffix}" >>"$GITHUB_ENV"
-          echo "DEVICE=${DEVICE}" >>"$GITHUB_ENV"
 
       - name: Log in to GHCR
         env:
@@ -187,24 +164,17 @@ jobs:
       # Deterministic content id of what actually goes into the image: the
       # published deb hashes + the base image digest (per-arch) + this variant's
       # Containerfile + the global Containerfiles hash + the arch + the
-      # autoupdate variant + the device + the device's kernel module hash.
-      # Stamped as a label so the next run can tell whether a rebuild changed
-      # anything. The arch+autoupdate+device are part of the id so cross-arch,
-      # lock/autoupdate and per-device variants get distinct cache identities.
-      # The device's module hash is only folded in when a module file exists;
-      # for 'generic' (no module) it is empty and changes nothing, so a repo
-      # without modules-kernel/ keeps the exact same content-hash as before
-      # (zero regression).
+      # autoupdate variant. Stamped as a label so the next run can tell whether
+      # a rebuild changed anything. The arch+autoupdate are part of the id so
+      # cross-arch and lock/autoupdate variants get distinct cache identities.
       - name: Compute content hash
         id: chash
         env:
-          CF_FILE: ${{ matrix.variant.file }}
-          CF_TAG: ${{ matrix.variant.tag }}
+          CF_FILE: ${{ matrix.entry.file }}
+          CF_TAG: ${{ matrix.entry.tag }}
           GLOBAL_HASH: ${{ needs.discover.outputs.global_hash }}
-          ARCH: ${{ matrix.arch }}
-          AUTOUPDATE: ${{ matrix.autoupdate }}
-          DEVICE: ${{ matrix.devices.device }}
-          MODULE_HASH: ${{ matrix.devices.module_hash }}
+          ARCH: ${{ matrix.entry.arch }}
+          AUTOUPDATE: ${{ matrix.entry.autoupdate }}
           PRIMARY: ${{ steps.tags.outputs.primary }}
         run: |
           set -euo pipefail
@@ -222,9 +192,9 @@ jobs:
           base_digest=$(sudo skopeo inspect --override-arch "${ARCH}" \
             --format '{{.Digest}}' "docker://${base}" 2>/dev/null || echo none)
           cf=$(sha256sum "$CF_FILE" | cut -d' ' -f1)
-          hash=$(printf '%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n' \
+          hash=$(printf '%s\n%s\n%s\n%s\n%s\n%s\n%s\n' \
             "${debs}" "${base_digest}" "${cf}" "${GLOBAL_HASH}" "${CF_TAG}" \
-            "${ARCH}" "${AUTOUPDATE}" "${DEVICE} ${MODULE_HASH}" \
+            "${ARCH}" "${AUTOUPDATE}" \
             | sha256sum | cut -d' ' -f1)
           echo "hash=${hash}" >>"$GITHUB_OUTPUT"
           # Content-hash label of the currently published per-arch image.
@@ -240,11 +210,10 @@ jobs:
 
       - name: Build
         env:
-          CF_FILE: ${{ matrix.variant.file }}
-          CF_TAG: ${{ matrix.variant.tag }}
-          ARCH: ${{ matrix.arch }}
-          AUTOUPDATE: ${{ matrix.autoupdate }}
-          DEVICE: ${{ matrix.devices.device }}
+          CF_FILE: ${{ matrix.entry.file }}
+          CF_TAG: ${{ matrix.entry.tag }}
+          ARCH: ${{ matrix.entry.arch }}
+          AUTOUPDATE: ${{ matrix.entry.autoupdate }}
           PRIMARY: ${{ steps.tags.outputs.primary }}
           CANONICAL: ${{ steps.tags.outputs.canonical }}
         run: |
@@ -255,9 +224,7 @@ jobs:
             flags+=(--no-cache)
           fi
           # Monthly tag: 'monthly-YYYYMMDD' for the canonical latest combo only
-          # (preserves the historical amd64-only / generic-only monthly tag).
-          # Per-arch, per-device monthly tags are not produced to keep the tag
-          # namespace minimal.
+          # (preserves the historical amd64-only monthly tag).
           if [[ "${{ github.event_name }}" == "schedule" && "$CANONICAL" == "true" ]]; then
             if [[ "$CF_TAG" == "latest" ]]; then
               flags+=(--tag "${IMAGE}:monthly-$(date -u +%Y%m%d)")
@@ -275,8 +242,8 @@ jobs:
 
           # SHA tag (retrocompat with the single-Containerfile era): bare '<sha>'
           # for latest canonical, '<tag>-<sha>' for non-latest canonical. Only the
-          # canonical combo (amd64 + autoupdate + generic) produces a SHA tag to
-          # preserve the historical amd64 sha tag as a single-arch artifact.
+          # canonical combo (amd64 + autoupdate) produces a SHA tag to preserve
+          # the historical amd64 sha tag as a single-arch artifact.
           if [[ "$CANONICAL" == "true" ]]; then
             sha=$(git rev-parse --short HEAD)
             if [[ "$CF_TAG" == "latest" ]]; then
@@ -287,26 +254,21 @@ jobs:
           fi
 
           # Canonical combo also keeps the bare :latest / :<variant> tag pointing
-          # at the amd64 autoupdate generic image (retrocompat: an amd64 pull of
-          # :latest gets the amd64 image directly, before the manifest list job
-          # promotes it to a multi-arch manifest). Named devices never carry the
-          # bare :<variant> tag.
+          # at the amd64 autoupdate image (retrocompat: an amd64 pull of :latest
+          # gets the amd64 image directly, before the manifest list job promotes
+          # it to a multi-arch manifest).
           if [[ "$CANONICAL" == "true" ]]; then
             flags+=(--tag "${IMAGE}:${CF_TAG}")
           fi
 
-          # The device's kernel module file already lives in the checkout at
-          # modules-kernel/<basename> (discovered by the discover job), so the
-          # build context '.' already contains it. The Containerfile picks it
-          # up via --build-arg DEVICE=<device> and COPYs modules-kernel/<device>.*
-          # when DEVICE is not 'generic'. For 'generic' MODULE_FILE is empty,
-          # DEVICE=generic, and the build context + args are byte-identical to
-          # the pre-device pipeline (zero regression).
+          # The Containerfile selects its kernel modules per-arch internally
+          # (RUN if [ "${ARCH}" = "amd64" ]; then ... else ... fi), so the build
+          # context is the same for every arch and the only build-args are
+          # PRODUCT_NAME and AUTOUPDATE. No DEVICE build-arg anymore.
           sudo podman build \
             "${flags[@]}" \
             --build-arg "PRODUCT_NAME=${product_name}" \
             --build-arg "AUTOUPDATE=${AUTOUPDATE}" \
-            --build-arg "DEVICE=${DEVICE}" \
             --label "org.daemoncores.content-hash=${{ steps.chash.outputs.hash }}" \
             --tag "${IMAGE}:${PRIMARY}" \
             -f "$CF_FILE" \
@@ -339,7 +301,7 @@ jobs:
         if: github.ref == 'refs/heads/main'
         id: push
         env:
-          CF_TAG: ${{ matrix.variant.tag }}
+          CF_TAG: ${{ matrix.entry.tag }}
           PRIMARY: ${{ steps.tags.outputs.primary }}
           CANONICAL: ${{ steps.tags.outputs.canonical }}
         run: |
@@ -380,9 +342,9 @@ jobs:
 
       # The image was built, pushed and signed but its content is byte-identical
       # to what was already published (same debs + base + Containerfiles + arch
-      # + autoupdate + device). Report it as a suspicious/wasteful run without
-      # failing the pipeline. One issue per variant-arch-device-autoupdate combo
-      # (title keyed by the primary tag) so each combo's status is visible.
+      # + autoupdate). Report it as a suspicious/wasteful run without failing
+      # the pipeline. One issue per variant-arch-autoupdate combo (title keyed by
+      # the primary tag) so each combo's status is visible.
       - name: Flag identical image
         if: github.ref == 'refs/heads/main' && steps.chash.outputs.identical == 'true'
         env:
@@ -396,7 +358,7 @@ jobs:
             echo
             echo "Le pipeline a reconstruit, poussé **et signé** une image dont le"
             echo "content-hash \`${hash}\` est identique à celle déjà publiée (tag \`${PRIMARY}\`) :"
-            echo "ni les .deb, ni l'image de base, ni les Containerfiles, ni l'arch/autoupdate/device n'ont changé."
+            echo "ni les .deb, ni l'image de base, ni les Containerfiles, ni l'arch/autoupdate n'ont changé."
             echo "Le rebuild/push/signature était probablement inutile."
           } >>"$GITHUB_STEP_SUMMARY"
           title="⚠️ Pipeline douteuse : image identique poussée (${PRIMARY})"
@@ -414,24 +376,20 @@ jobs:
           fi
 
   # Promote per-arch images into multi-arch manifest lists. Runs once all
-  # build-test-push combos (variant x device x arch x autoupdate) are green.
-  # For each (variant tag V, device D) it creates three manifest lists:
-  #   generic device (zero regression, same tags as before):
-  #     :V            -> :V_amd64_autoupdate + :V_arm64_autoupdate
-  #     :V_autoupdate -> :V_amd64_autoupdate + :V_arm64_autoupdate
-  #     :V_lock       -> :V_amd64_lock     + :V_arm64_lock
-  #   named device D (new):
-  #     :V_D            -> :V_amd64_D_autoupdate + :V_arm64_D_autoupdate
-  #     :V_D_autoupdate -> :V_amd64_D_autoupdate + :V_arm64_D_autoupdate
-  #     :V_D_lock       -> :V_amd64_D_lock     + :V_arm64_D_lock
+  # build-test-push combos (variant x arch x autoupdate) are green.
+  # For each variant tag V, the manifest job creates:
+  #   :V            -> :V_amd64_autoupdate + :V_arm64_autoupdate  (always)
+  #   :V_autoupdate -> :V_amd64_autoupdate + :V_arm64_autoupdate  (always)
+  #   :V_lock       -> :V_amd64_lock     + :V_arm64_lock         (only when the
+  #                  Containerfile declared org.daemoncores.autoupdate-variants)
   # The :latest (and bare :<variant>) tag stays a multi-arch manifest list over
-  # the generic device, so `podman pull :latest` resolves to the right arch on
-  # each host exactly as before. The canonical amd64 generic image was also
-  # pushed on :latest by build-test-push; this manifest job overwrites that
-  # single-arch tag with the manifest list (the amd64 entry points at the same
-  # image, so amd64 pulls are unchanged).
+  # the autoupdate variant, so `podman pull :latest` resolves to the right arch
+  # on each host. The canonical amd64 autoupdate image was also pushed on :latest
+  # by build-test-push; this manifest job overwrites that single-arch tag with
+  # the manifest list (the amd64 entry points at the same image, so amd64 pulls
+  # are unchanged).
   manifest:
-    name: Manifest lists ${{ matrix.variant.tag }}${{ matrix.devices.device != 'generic' && format('-{0}', matrix.devices.device) || '' }}
+    name: Manifest lists ${{ matrix.entry.tag }}
     needs: [discover, build-test-push]
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
@@ -442,8 +400,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        variant: ${{ fromJSON(needs.discover.outputs.matrix) }}
-        devices: ${{ fromJSON(needs.discover.outputs.devices) }}
+        entry: ${{ fromJSON(needs.discover.outputs.manifest_matrix) }}
     steps:
       - name: Log in to GHCR
         env:
@@ -456,45 +413,38 @@ jobs:
 
       - name: Create and push manifest lists
         env:
-          CF_TAG: ${{ matrix.variant.tag }}
-          DEVICE: ${{ matrix.devices.device }}
+          CF_TAG: ${{ matrix.entry.tag }}
+          HAS_LOCK: ${{ matrix.entry.lock }}
           IMAGE: ghcr.io/${{ github.repository }}
         run: |
           set -euo pipefail
           IMAGE="${IMAGE,,}"
-          # Device segment in the per-arch tag and the manifest-list tag.
-          # generic -> empty segment (legacy shape: <tag>_<arch>_<autosuffix>
-          # and manifest :<tag>, :<tag>_autoupdate, :<tag>_lock).
-          # named   -> '_<device>' segment.
-          if [ "$DEVICE" = "generic" ]; then
-            dseg=""
-          else
-            dseg="_${DEVICE}"
+          # Per-arch per-autoupdate tags pushed by build-test-push.
+          amd64_auto="${IMAGE}:${CF_TAG}_amd64_autoupdate"
+          arm64_auto="${IMAGE}:${CF_TAG}_arm64_autoupdate"
+          amd64_lock="${IMAGE}:${CF_TAG}_amd64_lock"
+          arm64_lock="${IMAGE}:${CF_TAG}_arm64_lock"
+
+          # :<tag> and :<tag>_autoupdate always present (multi-arch over the
+          # autoupdate variant).
+          docker manifest create "${IMAGE}:${CF_TAG}" \
+            "${amd64_auto}" "${arm64_auto}"
+          docker manifest annotate --arch arm64 "${IMAGE}:${CF_TAG}" "${arm64_auto}"
+          docker manifest push "${IMAGE}:${CF_TAG}"
+
+          docker manifest create "${IMAGE}:${CF_TAG}_autoupdate" \
+            "${amd64_auto}" "${arm64_auto}"
+          docker manifest annotate --arch arm64 "${IMAGE}:${CF_TAG}_autoupdate" "${arm64_auto}"
+          docker manifest push "${IMAGE}:${CF_TAG}_autoupdate"
+
+          # :<tag>_lock only when the Containerfile declared the autoupdate-
+          # variants LABEL (i.e. it produces both lock and autoupdate builds).
+          if [ "$HAS_LOCK" = "true" ]; then
+            docker manifest create "${IMAGE}:${CF_TAG}_lock" \
+              "${amd64_lock}" "${arm64_lock}"
+            docker manifest annotate --arch arm64 "${IMAGE}:${CF_TAG}_lock" "${arm64_lock}"
+            docker manifest push "${IMAGE}:${CF_TAG}_lock"
           fi
-          # Build the manifest lists using docker manifest. Each per-arch
-          # image was already pushed by build-test-push as
-          # <tag>_<arch>[_<device>]_<autosuffix>.
-          amd64_auto="${IMAGE}:${CF_TAG}_amd64${dseg}_autoupdate"
-          arm64_auto="${IMAGE}:${CF_TAG}_arm64${dseg}_autoupdate"
-          amd64_lock="${IMAGE}:${CF_TAG}_amd64${dseg}_lock"
-          arm64_lock="${IMAGE}:${CF_TAG}_arm64${dseg}_lock"
-
-          base_tag="${CF_TAG}${dseg}"
-
-          docker manifest create "${IMAGE}:${base_tag}" \
-            "${amd64_auto}" "${arm64_auto}"
-          docker manifest annotate --arch arm64 "${IMAGE}:${base_tag}" "${arm64_auto}"
-          docker manifest push "${IMAGE}:${base_tag}"
-
-          docker manifest create "${IMAGE}:${base_tag}_autoupdate" \
-            "${amd64_auto}" "${arm64_auto}"
-          docker manifest annotate --arch arm64 "${IMAGE}:${base_tag}_autoupdate" "${arm64_auto}"
-          docker manifest push "${IMAGE}:${base_tag}_autoupdate"
-
-          docker manifest create "${IMAGE}:${base_tag}_lock" \
-            "${amd64_lock}" "${arm64_lock}"
-          docker manifest annotate --arch arm64 "${IMAGE}:${base_tag}_lock" "${arm64_lock}"
-          docker manifest push "${IMAGE}:${base_tag}_lock"
 
       - name: Install cosign
         uses: sigstore/cosign-installer@v3
@@ -504,19 +454,17 @@ jobs:
 
       - name: Sign manifest lists
         env:
-          CF_TAG: ${{ matrix.variant.tag }}
-          DEVICE: ${{ matrix.devices.device }}
+          CF_TAG: ${{ matrix.entry.tag }}
+          HAS_LOCK: ${{ matrix.entry.lock }}
           IMAGE: ghcr.io/${{ github.repository }}
         run: |
           set -euo pipefail
           IMAGE="${IMAGE,,}"
-          if [ "$DEVICE" = "generic" ]; then
-            dseg=""
-          else
-            dseg="_${DEVICE}"
+          tags=("${CF_TAG}" "${CF_TAG}_autoupdate")
+          if [ "$HAS_LOCK" = "true" ]; then
+            tags+=("${CF_TAG}_lock")
           fi
-          base_tag="${CF_TAG}${dseg}"
-          for t in "${base_tag}" "${base_tag}_autoupdate" "${base_tag}_lock"; do
+          for t in "${tags[@]}"; do
             digest=$(docker manifest inspect "${IMAGE}:${t}" \
               | jq -r '.manifests[0].digest // .config.digest // empty' \
               || true)

@@ -19,7 +19,17 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    # Per-arch build-env image so a package built for arm64 uses an arm64
+    # build-env, and an amd64 build uses an amd64 build-env. Each arch runs
+    # natively on its matching runner (no QEMU cross-build): amd64 on
+    # ubuntu-latest, arm64 on ubuntu-24.04-arm. The resulting image is tagged
+    # :buildenv-<arch> so the downstream .deb builder can pull the matching
+    # arch image via :buildenv-${{ inputs.arch }}.
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [amd64, arm64]
+    runs-on: ${{ matrix.arch == 'arm64' && 'ubuntu-24.04-arm' || 'ubuntu-latest' }}
     permissions:
       contents: read
       packages: write
@@ -32,15 +42,25 @@ jobs:
           MAN: ${{ inputs.manifest }}
           GH_ACTOR: ${{ github.actor }}
           PAT_PKG: ${{ secrets.PAT_PKG }}
+          ARCH: ${{ matrix.arch }}
         run: |
           set -euo pipefail
+          # Arch-aware yq download: pick the binary matching the RUNNER arch
+          # (the job runs natively on the target-arch runner). Detect the
+          # native arch via dpkg --print-architecture (fallback to uname -m
+          # on non-Debian), normalise to amd64/arm64.
           command -v yq >/dev/null 2>&1 || {
+            yarch="$(dpkg --print-architecture 2>/dev/null || uname -m)"
+            case "$yarch" in
+              aarch64|arm64) yarch=arm64 ;;
+              x86_64|amd64)  yarch=amd64 ;;
+            esac
             sudo curl -fsSL \
-              https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 \
+              "https://github.com/mikefarah/yq/releases/latest/download/yq_linux_${yarch}" \
               -o /usr/local/bin/yq
             sudo chmod +x /usr/local/bin/yq
           }
-          img="ghcr.io/${GITHUB_REPOSITORY,,}:buildenv"
+          img="ghcr.io/${GITHUB_REPOSITORY,,}:buildenv-${ARCH}"
           ctr=$(buildah from "$(yq '.base' "$MAN")")
           buildah config \
             --label "org.opencontainers.image.source=https://github.com/${GITHUB_REPOSITORY}" \
