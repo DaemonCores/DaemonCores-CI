@@ -83,6 +83,20 @@ runs:
         done
         echo "debs-cache: $(jq 'keys | length' "${out}") package(s) recorded"
 
+    - name: Clean stale deb cache
+      shell: bash
+      env:
+        REPO_DIR: ${{ steps.create-apt-repo.outputs.dir }}
+      run: |
+        cache="${REPO_DIR}/debs-cache"
+        hashes="${cache}/hashes.json"
+        for deb in "${cache}"/*.deb; do
+          basename=$(basename "${deb}")
+          if ! jq -e --arg f "${basename}" '[.[].debs[]?] | index($f)' "${hashes}" >/dev/null 2>&1; then
+            rm -f "${deb}"
+          fi
+        done
+
     - name: Upload Pages artifact
       uses: actions/upload-pages-artifact@v5
       with:
