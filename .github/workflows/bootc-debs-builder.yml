@@ -41,14 +41,15 @@ jobs:
           set -euo pipefail
           echo "env_image=ghcr.io/${GITHUB_REPOSITORY,,}:buildenv" \
             >>"$GITHUB_OUTPUT"
-          # Arch-aware yq download: pick the binary matching the target arch
-          # (default amd64). The setup job runs on the amd64 runner regardless
-          # of the target arch (it only computes the wave plan), but the yq
-          # binary must match the runner arch (amd64 here).
-          yarch="${ARCH:-amd64}"
+          # Arch-aware yq download: pick the binary matching the runner arch.
+          # The setup job runs on the amd64 runner regardless of the target
+          # arch (it only computes the wave plan), so the yq binary must match
+          # the RUNNER arch, not the target build arch. Detect the native arch
+          # via dpkg --print-architecture (fallback to uname -m on non-Debian).
+          yarch="$(dpkg --print-architecture 2>/dev/null || uname -m)"
           case "$yarch" in
-            aarch64) yarch=arm64 ;;
-            x86_64)  yarch=amd64 ;;
+            aarch64|arm64) yarch=arm64 ;;
+            x86_64|amd64)  yarch=amd64 ;;
           esac
           curl -fsSL \
             "https://github.com/mikefarah/yq/releases/latest/download/yq_linux_${yarch}" \

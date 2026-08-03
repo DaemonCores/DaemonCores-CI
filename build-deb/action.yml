@@ -34,6 +34,11 @@ inputs:
     description: 'APT repo base URL. Derived from the repository if empty.'
     required: false
     default: ''
+  arch:
+    description: 'Target architecture for the build (e.g. amd64, arm64).'
+    required: false
+    type: string
+    default: 'amd64'
 
 outputs:
   skipped:
@@ -61,4 +66,5 @@ runs:
         EXTRA_ENV: ${{ inputs.env }}
         DEB_GLOB: ${{ inputs.deb-glob }}
         PAGES_URL: ${{ inputs.pages-url }}
+        ARCH: ${{ inputs.arch }}
       run: bash "${GITHUB_ACTION_PATH}/build-deb.sh"
