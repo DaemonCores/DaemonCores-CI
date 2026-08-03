@@ -39,7 +39,12 @@ jobs:
           ARCH: ${{ inputs.arch }}
         run: |
           set -euo pipefail
-          echo "env_image=ghcr.io/${GITHUB_REPOSITORY,,}:buildenv" \
+          # Per-arch build-env image (built by build-env.yml as
+          # :buildenv-<arch> so each arch's .deb builds on a matching-arch
+          # build-env). Falls back to :buildenv for the default amd64 to keep
+          # zero regression while the per-arch tags roll out.
+          arch="${ARCH:-amd64}"
+          echo "env_image=ghcr.io/${GITHUB_REPOSITORY,,}:buildenv-${arch}" \
             >>"$GITHUB_OUTPUT"
           # Arch-aware yq download: pick the binary matching the runner arch.
           # The setup job runs on the amd64 runner regardless of the target
