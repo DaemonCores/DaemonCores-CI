@@ -64,6 +64,8 @@ jobs:
           python3 - <<'PY'
           import json, os
           pkgs = json.load(open('/tmp/pkgs.json'))['packages']
+          target_arch = os.environ.get('ARCH', 'amd64')
+          pkgs = [p for p in pkgs if not p.get('when', {}).get('arch') or p['when']['arch'] == target_arch]
           deps = {p['name']: (p.get('deps') or []) for p in pkgs}
           memo = {}
           def wave(name):

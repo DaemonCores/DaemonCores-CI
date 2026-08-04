@@ -190,6 +190,16 @@ jobs:
           echo "::warning::${PKG} build cassé — issue ouverte/mise à jour," \
             "dernier .deb valide conservé"
 
+      - name: Delete old artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          artifact_name="debs-${{ inputs.package }}-${{ inputs.arch }}"
+          ids=$(gh api "repos/${{ github.repository }}/actions/artifacts?name=${artifact_name}" --jq '.artifacts[].id')
+          for id in $ids; do
+            gh api --method DELETE "repos/${{ github.repository }}/actions/artifacts/$id"
+          done
+
       - name: Upload ${{ inputs.package }} debs
         uses: actions/upload-artifact@v7
         with:
