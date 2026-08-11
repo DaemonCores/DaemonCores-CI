@@ -225,6 +225,7 @@ jobs:
       actions: write
       contents: write
       packages: write
+      pages: write
       id-token: write
     if: |
       !cancelled() &&
@@ -245,6 +246,7 @@ jobs:
       actions: write
       contents: write
       packages: write
+      pages: write
       id-token: write
     if: |
       !cancelled() &&
