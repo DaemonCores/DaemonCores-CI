@@ -212,6 +212,20 @@ jobs:
   debs_amd64:
     name: Build .deb packages (amd64)
     needs: [changes, base, build_env]
+    # The nested waveN jobs in bootc-debs-builder.yml (and build-one-deb.yml's
+    # build job) request 'actions: write' to delete stale CI artifacts via the
+    # gh api DELETE endpoint. GitHub intersects the caller's top-level/job-level
+    # permissions with the callee's request, and the top-level block of this
+    # workflow grants only contents/packages/pages/id-token/issues — so the
+    # intersection collapses to 'actions: none' and the nested call is rejected
+    # with "The nested job 'wave0' is requesting 'actions: write', but is only
+    # allowed 'actions: none'". Granting actions: write here (job-level) keeps
+    # least-privilege: only the debs callers get it, not the whole workflow.
+    permissions:
+      actions: write
+      contents: write
+      packages: write
+      id-token: write
     if: |
       !cancelled() &&
       needs.changes.outputs.debs == 'true' &&
@@ -225,6 +239,13 @@ jobs:
   debs_arm64:
     name: Build .deb packages (arm64)
     needs: [changes, base, build_env]
+    # Same actions: write grant as debs_amd64 — see that job's comment for the
+    # rationale (nested waveN jobs need to delete stale artifacts via gh api).
+    permissions:
+      actions: write
+      contents: write
+      packages: write
+      id-token: write
     if: |
       !cancelled() &&
       needs.changes.outputs.debs == 'true' &&
