@@ -38,6 +38,9 @@ jobs:
         password: ${{ secrets.PAT_PKG }}
     permissions:
       contents: read
+      # The Delete old artifacts step calls gh api DELETE on actions/artifacts,
+      # which requires the actions: write scope on GITHUB_TOKEN.
+      actions: write
       # Some guarded repack builds open a "patch drift" issue on skip.
       issues: write
     env:
@@ -68,9 +71,29 @@ jobs:
               aarch64) yarch=arm64 ;;
               x86_64)  yarch=amd64 ;;
             esac
+            # Pin yq to a fixed version and verify the SHA256 checksum so a
+            # compromised or tampered release cannot replace the binary
+            # silently. Downloading from releases/latest/download/ with no
+            # checksum lets a upstream-tagged malicious binary run as root
+            # in the build container.
+            YQ_VERSION="v4.44.3"
+            YQ_BINARY="yq_linux_${yarch}"
+            case "$yarch" in
+              amd64)
+                YQ_SHA256="a2c097580dd72e8fd5033837c5652c1f94dc1864ae9a6e2163f7c6c603b9d826"
+                ;;
+              arm64)
+                YQ_SHA256="0f9f6f9fdb51d2cddb1be8ba4c00c4dd5316064c8a8b12e3e9e8bb8ad6d1e242"
+                ;;
+              *)
+                echo "ERROR: unsupported yq arch: ${yarch}" >&2
+                exit 1
+                ;;
+            esac
             curl -fsSL \
-              "https://github.com/mikefarah/yq/releases/latest/download/yq_linux_${yarch}" \
+              "https://github.com/mikefarah/yq/releases/download/${YQ_VERSION}/${YQ_BINARY}" \
               -o /usr/local/bin/yq
+            echo "${YQ_SHA256}  /usr/local/bin/yq" | sha256sum -c -
             chmod +x /usr/local/bin/yq
           }
           sel=".packages[] | select(.name == \"${PKG}\")"
