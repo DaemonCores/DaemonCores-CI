@@ -91,7 +91,13 @@ jobs:
             [ -n "${pair}" ] || continue
             key="${pair%%=*}"
             ref="SECRETVAL_${pair#*=}"
-            envlines="${envlines}"$'\n'"${key}=${!ref}"
+            val="${!ref}"
+            # Mask the resolved secret value BEFORE it can appear in any log
+            # output (the build-deb action logs its `env` input, and the value
+            # is also written to $GITHUB_OUTPUT below). ::add-mask:: must be
+            # emitted before the value is referenced anywhere visible.
+            echo "::add-mask::${val}"
+            envlines="${envlines}"$'\n'"${key}=${val}"
           done < <(yq "${sel} | (.\"secret-env\" // {}) | to_entries | .[] \
             | .key + \"=\" + .value" "${MAN}")
           {
