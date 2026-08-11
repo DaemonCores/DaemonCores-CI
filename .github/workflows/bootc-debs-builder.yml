@@ -20,6 +20,15 @@ on:
         description: 'true if at least one package was rebuilt (not cache-reused).'
         value: ${{ jobs.publish.outputs.any_rebuilt }}
 
+# The waveN caller jobs invoke build-one-deb.yml, whose nested 'build' job
+# requests 'actions: write' (to delete stale artifacts via gh api DELETE).
+# GitHub intersects the caller's and callee's permissions, so the caller must
+# grant at least as much. Setting this at the workflow level grants it to every
+# job that does not override permissions (the waveN jobs); publish keeps its own
+# block (pages + id-token) which fully overrides this top-level scope.
+permissions:
+  actions: write
+
 jobs:
   setup:
     runs-on: ubuntu-latest
