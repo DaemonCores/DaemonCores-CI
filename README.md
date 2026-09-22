@@ -119,10 +119,6 @@ The caller also needs GitHub Pages configured for Actions deployment and the per
 
 The current callers reference this repository at `@main`. Treat workflow input names, manifest structure, artifact names, and tag formats as shared interfaces: coordinate incompatible changes with every caller in the same change set.
 
-## License
-
-[LGPL-2.1](LICENSE)
-
 ---
 
 <p>
