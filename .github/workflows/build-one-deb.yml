@@ -230,7 +230,7 @@ jobs:
           done
 
       - name: Upload ${{ inputs.package }} debs
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v8
         with:
           name: debs-${{ inputs.package }}-${{ inputs.arch }}
           path: /debs
