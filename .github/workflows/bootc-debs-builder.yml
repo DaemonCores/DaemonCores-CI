@@ -156,9 +156,14 @@ jobs:
 
   publish:
     needs: [setup, wave0, wave1, wave2, wave3]
-    # Run when the waves succeeded or were skipped (empty waves), but stop on a
-    # cancel and skip if any wave failed.
-    if: ${{ !cancelled() && !failure() }}
+    # Run unless the workflow was cancelled. Individual wave failures do NOT
+    # block publishing: packages that succeeded (or fell back to a prior deb)
+    # write a .meta file and update hashes.json so they can be cached on the
+    # next run. Packages that failed without a prior deb simply have no .meta
+    # file and are retried next run. Blocking publish on any failure would
+    # prevent ALL hashes from updating, causing every package to rebuild on
+    # every run even when nothing changed.
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     permissions:
       pages: write
