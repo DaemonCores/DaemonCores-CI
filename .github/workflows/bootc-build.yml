@@ -261,12 +261,26 @@ jobs:
             flags+=(--tag "${IMAGE}:${CF_TAG}")
           fi
 
-          # The Containerfile selects its kernel modules per-arch internally
-          # (RUN if [ "${ARCH}" = "amd64" ]; then ... else ... fi), so the build
-          # context is the same for every arch and the only build-args are
-          # PRODUCT_NAME and AUTOUPDATE. No DEVICE build-arg anymore.
+          # Pass ARCH so the Containerfile selects the right kernel metapackage
+          # (linux-image-${ARCH}), boot stack, firmware set, and module path.
+          # The other ARGs are arch-specific too: BOOT_PKG differs between
+          # amd64 (grub-efi-amd64-signed) and arm64 (u-boot-tools), and the
+          # FIRMWARE_PKGS for arm64 drops the x86 microcode blobs.
+          if [[ "${ARCH}" == "arm64" ]]; then
+            boot_pkg="u-boot-tools"
+            firmware_pkgs="firmware-linux-free firmware-linux firmware-misc-nonfree"
+            apt_hold_pkg=""
+          else
+            boot_pkg="grub-efi-amd64-signed"
+            firmware_pkgs="intel-microcode amd64-microcode firmware-linux-free firmware-linux firmware-misc-nonfree"
+            apt_hold_pkg="grub-efi-amd64-signed"
+          fi
           sudo podman build \
             "${flags[@]}" \
+            --build-arg "ARCH=${ARCH}" \
+            --build-arg "BOOT_PKG=${boot_pkg}" \
+            --build-arg "FIRMWARE_PKGS=${firmware_pkgs}" \
+            --build-arg "APT_HOLD_PKG=${apt_hold_pkg}" \
             --build-arg "PRODUCT_NAME=${product_name}" \
             --build-arg "AUTOUPDATE=${AUTOUPDATE}" \
             --label "org.daemoncores.content-hash=${{ steps.chash.outputs.hash }}" \

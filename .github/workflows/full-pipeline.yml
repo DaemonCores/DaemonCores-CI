@@ -142,6 +142,7 @@ jobs:
                 match() { printf '%s\n' "$changed" | grep -qE "$1"; }
                 match '^workflows/build-env/'                            && env=true   || true
                 match '^workflows/bootc-debs-builder/'                   && debs=true  || true
+                match '^(kernel/|modules-kernel/)'                        && debs=true  || true
                 match '^(Containerfile|src/|assets/|workflows/image-tests/)' && image=true || true
                 match '^workflows/build-iso/'                            && iso=true   || true
                 # Any change to the caller pipeline itself -> full rebuild (safe).
@@ -279,8 +280,11 @@ jobs:
           [ "${{ needs.debs_arm64.outputs.any_rebuilt }}" = "true" ] && any=true || true
           echo "any_rebuilt=${any}" >> "$GITHUB_OUTPUT"
 
-  image_amd64:
-    name: Build container image (amd64)
+  # bootc-build.yml already builds both arches (its discover job emits a
+  # matrix over amd64 + arm64). A single call is enough; two calls would
+  # double the work and create manifest-list race conditions on GHCR.
+  image:
+    name: Build container images (amd64 + arm64)
     needs: [changes, debs_aggregate, base]
     if: |
       !cancelled() &&
@@ -294,35 +298,21 @@ jobs:
       force_no_cache: ${{ needs.debs_aggregate.outputs.any_rebuilt == 'true' }}
     secrets: inherit
 
-  image_arm64:
-    name: Build container image (arm64)
-    needs: [changes, debs_aggregate, base]
-    if: |
-      !cancelled() &&
-      needs.changes.outputs.image == 'true' &&
-      (needs.base.result == 'success' || needs.base.result == 'skipped') &&
-      (needs.debs_aggregate.result == 'success' || needs.debs_aggregate.result == 'skipped')
-    uses: DaemonCores/DaemonCores-CI/.github/workflows/bootc-build.yml@main
-    with:
-      force_no_cache: ${{ needs.debs_aggregate.outputs.any_rebuilt == 'true' }}
-    secrets: inherit
-
   iso:
     name: Build ISO
-    needs: [changes, debs_amd64, debs_arm64, image_amd64, image_arm64, meta, base]
+    needs: [changes, debs_amd64, debs_arm64, image, meta, base]
     # !cancelled() runs the job (but stops on cancel) even when debs, image or base were skipped.
     # The ISO is amd64-only today (Fedora netinstall + bootc), so it depends on
-    # the amd64 image; arm64 image is awaited to keep the pipeline a single wave
-    # but only the amd64 image is embedded in the ISO. arm64 ISO support is
-    # pending a Fedora arm64 netinstall source and a kickstart variant.
+    # the amd64 image; arm64 image is awaited via the shared `image` job to keep
+    # the pipeline a single wave. arm64 ISO support is pending a Fedora arm64
+    # netinstall source and a kickstart variant.
     if: |
       !cancelled() &&
       needs.changes.outputs.iso == 'true' &&
       (needs.base.result == 'success' || needs.base.result == 'skipped') &&
       (needs.debs_amd64.result == 'success' || needs.debs_amd64.result == 'skipped') &&
       (needs.debs_arm64.result == 'success' || needs.debs_arm64.result == 'skipped') &&
-      (needs.image_amd64.result == 'success' || needs.image_amd64.result == 'skipped') &&
-      (needs.image_arm64.result == 'success' || needs.image_arm64.result == 'skipped') &&
+      (needs.image.result == 'success' || needs.image.result == 'skipped') &&
       needs.meta.result == 'success'
     uses: DaemonCores/DaemonCores-CI/.github/workflows/iso-builder.yml@main
     with:
@@ -355,13 +345,12 @@ jobs:
   # `arch` selects the container image arch to pull.
   img_rpi:
     name: Build rpi .img (arm64)
-    needs: [changes, image_amd64, image_arm64, meta, base]
+    needs: [changes, image, meta, base]
     if: |
       !cancelled() &&
       needs.changes.outputs.img_rpi == 'true' &&
       (needs.base.result == 'success' || needs.base.result == 'skipped') &&
-      (needs.image_amd64.result == 'success' || needs.image_amd64.result == 'skipped') &&
-      (needs.image_arm64.result == 'success' || needs.image_arm64.result == 'skipped') &&
+      (needs.image.result == 'success' || needs.image.result == 'skipped') &&
       needs.meta.result == 'success'
     uses: DaemonCores/DaemonCores-CI/.github/workflows/img-builder.yml@main
     with:
@@ -372,13 +361,12 @@ jobs:
 
   img_gallium:
     name: Build gallium .img (arm64)
-    needs: [changes, image_amd64, image_arm64, meta, base]
+    needs: [changes, image, meta, base]
     if: |
       !cancelled() &&
       needs.changes.outputs.img_gallium == 'true' &&
       (needs.base.result == 'success' || needs.base.result == 'skipped') &&
-      (needs.image_amd64.result == 'success' || needs.image_amd64.result == 'skipped') &&
-      (needs.image_arm64.result == 'success' || needs.image_arm64.result == 'skipped') &&
+      (needs.image.result == 'success' || needs.image.result == 'skipped') &&
       needs.meta.result == 'success'
     uses: DaemonCores/DaemonCores-CI/.github/workflows/img-builder.yml@main
     with:
