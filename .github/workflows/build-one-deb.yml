@@ -136,7 +136,12 @@ jobs:
         if: steps.def.outputs.deps != ''
         uses: actions/download-artifact@v8
         with:
-          pattern: debs-*
+          # Scope to this arch only: both amd64 and arm64 artifacts are present
+          # in the run (from the parallel wave jobs). Without the arch suffix,
+          # merge-multiple would land both libcomposefs_*_amd64.deb and
+          # libcomposefs_*_arm64.deb in /tmp/prior, causing a multi-arch
+          # Conflicts error when apt tries to install them together.
+          pattern: debs-*-${{ inputs.arch }}
           merge-multiple: true
           path: /tmp/prior
 
