@@ -148,7 +148,7 @@ jobs:
                 match '^workflows/bootc-debs-builder/'                   && debs=true  || true
                 match '^(kernel/|modules-kernel/)'                        && debs=true  || true
                 match '^(Containerfile|src/|assets/|workflows/image-tests/)' && image=true || true
-                match '^workflows/build-iso/'                            && iso=true   || true
+                match '^(Containerfile\.iso|workflows/build-iso/)'       && { image=true; iso=true; } || true
                 # Any change to the caller pipeline itself -> full rebuild (safe).
                 # img formats are NOT cascaded by a pipeline.yml push (opt-in
                 # only); their own dependency matches below handle auto-rebuild.
