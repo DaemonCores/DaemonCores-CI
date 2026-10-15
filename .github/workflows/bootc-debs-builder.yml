@@ -32,25 +32,15 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - name: Compute dependency waves
-        id: waves
+      # Arch-aware yq download: pick the binary matching the runner arch.
+      # The setup job runs on the amd64 runner regardless of the target
+      # arch (it only computes the wave plan), so the yq binary must match
+      # the RUNNER arch, not the target build arch. Detect the native arch
+      # via dpkg --print-architecture (fallback to uname -m on non-Debian).
+      - name: Install yq
         shell: bash
-        env:
-          ARCH: ${{ inputs.arch }}
         run: |
           set -euo pipefail
-          # Per-arch build-env image (built by build-env.yml as
-          # :buildenv-<arch> so each arch's .deb builds on a matching-arch
-          # build-env). Falls back to :buildenv for the default amd64 to keep
-          # zero regression while the per-arch tags roll out.
-          arch="${ARCH:-amd64}"
-          echo "env_image=ghcr.io/${GITHUB_REPOSITORY,,}:buildenv-${arch}" \
-            >>"$GITHUB_OUTPUT"
-          # Arch-aware yq download: pick the binary matching the runner arch.
-          # The setup job runs on the amd64 runner regardless of the target
-          # arch (it only computes the wave plan), so the yq binary must match
-          # the RUNNER arch, not the target build arch. Detect the native arch
-          # via dpkg --print-architecture (fallback to uname -m on non-Debian).
           yarch="$(dpkg --print-architecture 2>/dev/null || uname -m)"
           case "$yarch" in
             aarch64|arm64) yarch=arm64 ;;
@@ -60,33 +50,35 @@ jobs:
             "https://github.com/mikefarah/yq/releases/latest/download/yq_linux_${yarch}" \
             -o /usr/local/bin/yq
           chmod +x /usr/local/bin/yq
-          yq -o=json '.' workflows/bootc-debs-builder/packages.yml >/tmp/pkgs.json
+
+      # Expand variants (and drop the other arch's packages) once, here. The
+      # wave plan, the job matrix and every downstream build then work on plain
+      # packages, and there is a single place that knows about templates.
+      - name: Expand manifest variants
+        id: expand
+        uses: DaemonCores/DaemonCores-CI/manifest-expand@main
+        with:
+          arch: ${{ inputs.arch }}
+
+      - name: Compute dependency waves
+        id: waves
+        shell: bash
+        env:
+          ARCH: ${{ inputs.arch }}
+          MAN: ${{ steps.expand.outputs.manifest }}
+        run: |
+          set -euo pipefail
+          # Per-arch build-env image (built by build-env.yml as
+          # :buildenv-<arch> so each arch's .deb builds on a matching-arch
+          # build-env). Falls back to :buildenv for the default amd64 to keep
+          # zero regression while the per-arch tags roll out.
+          arch="${ARCH:-amd64}"
+          echo "env_image=ghcr.io/${GITHUB_REPOSITORY,,}:buildenv-${arch}" \
+            >>"$GITHUB_OUTPUT"
+          yq -o=json '.' "${MAN}" >/tmp/pkgs.json
           python3 - <<'PY'
           import json, os
           pkgs = json.load(open('/tmp/pkgs.json'))['packages']
-          target_arch = os.environ.get('ARCH', 'amd64')
-          # Expand variant templates before arch-filtering and wave computation.
-          # A package with a `variants:` dict is a template; each variant key
-          # produces an independent package whose name is (variant-name-prefix +
-          # variant_key), with DEVICE and any extra vars injected into env, and
-          # the per-variant source (variant-source pattern) appended to sources.
-          expanded = []
-          for p in pkgs:
-              if 'variants' not in p:
-                  expanded.append(p)
-                  continue
-              prefix = p.get('variant-name-prefix', p['name'] + '-')
-              vs_pattern = p.get('variant-source', '')
-              for vkey, vvars in (p.get('variants') or {}).items():
-                  ep = {k: v for k, v in p.items()
-                        if k not in ('variants', 'variant-name-prefix', 'variant-source')}
-                  ep['name'] = prefix + vkey
-                  ep['env'] = {**(p.get('env') or {}), 'DEVICE': vkey, **(vvars or {})}
-                  if vs_pattern:
-                      ep['sources'] = list(p.get('sources') or []) + [vs_pattern.replace('{variant}', vkey)]
-                  expanded.append(ep)
-          pkgs = expanded
-          pkgs = [p for p in pkgs if not p.get('when', {}).get('arch') or p['when']['arch'] == target_arch]
           deps = {p['name']: (p.get('deps') or []) for p in pkgs}
           memo = {}
           def wave(name):
