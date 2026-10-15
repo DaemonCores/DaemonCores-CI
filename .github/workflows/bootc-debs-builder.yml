@@ -15,6 +15,11 @@ on:
         required: false
         type: string
         default: amd64
+      signing_active:
+        description: 'yes to sign .ko files; empty/no to skip. Forwarded to build-one-deb.'
+        required: false
+        type: string
+        default: 'no'
     outputs:
       any_rebuilt:
         description: 'true if at least one package was rebuilt (not cache-reused).'
@@ -111,6 +116,7 @@ jobs:
       package: ${{ matrix.package }}
       container_image: ${{ needs.setup.outputs.env_image }}
       arch: ${{ inputs.arch }}
+      signing_active: ${{ inputs.signing_active }}
     secrets: inherit
 
   wave1:
@@ -129,6 +135,7 @@ jobs:
       package: ${{ matrix.package }}
       container_image: ${{ needs.setup.outputs.env_image }}
       arch: ${{ inputs.arch }}
+      signing_active: ${{ inputs.signing_active }}
     secrets: inherit
 
   wave2:
@@ -149,6 +156,7 @@ jobs:
       package: ${{ matrix.package }}
       container_image: ${{ needs.setup.outputs.env_image }}
       arch: ${{ inputs.arch }}
+      signing_active: ${{ inputs.signing_active }}
     secrets: inherit
 
   wave3:
@@ -167,6 +175,7 @@ jobs:
       package: ${{ matrix.package }}
       container_image: ${{ needs.setup.outputs.env_image }}
       arch: ${{ inputs.arch }}
+      signing_active: ${{ inputs.signing_active }}
     secrets: inherit
 
   publish:

@@ -27,6 +27,11 @@ on:
         required: false
         type: string
         default: amd64
+      signing_active:
+        description: 'yes to sign .ko files with MODULE_SIGNING_KEY/CERT secrets; empty/no to skip.'
+        required: false
+        type: string
+        default: 'no'
 
 jobs:
   build:
@@ -49,6 +54,11 @@ jobs:
       SECRETVAL_GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       SECRETVAL_SB_SIGNING_KEY: ${{ secrets.SB_SIGNING_KEY }}
       SECRETVAL_SB_SIGNING_CERT: ${{ secrets.SB_SIGNING_CERT }}
+      # Module signing key/cert — available to all module build scripts when
+      # signing_active=yes. Injected here so no manifest secret-env change is
+      # needed; the build script checks MODULE_SIGNING_ACTIVE before using them.
+      MODULE_SIGNING_KEY: ${{ secrets.MODULE_SIGNING_KEY }}
+      MODULE_SIGNING_CERT: ${{ secrets.MODULE_SIGNING_CERT }}
       # Target arch propagates to the build-deb action and to deb globbing.
       BUILD_ARCH: ${{ inputs.arch }}
     steps:
@@ -198,6 +208,7 @@ jobs:
           env: ${{ steps.def.outputs.env }}
           build: ${{ steps.def.outputs.build }}
           arch: ${{ inputs.arch }}
+          extra-env: MODULE_SIGNING_ACTIVE=${{ inputs.signing_active }}
 
       # The build failed but the last-good published deb was kept, so the
       # pipeline is not blocked. Record the breakage as an issue (deduped by

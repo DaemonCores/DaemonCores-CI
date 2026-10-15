@@ -54,6 +54,10 @@ on:
         description: 'Build Linux Gallium .img (arm64 only)'
         type: string
         default: 'false'
+      sign_modules:
+        description: 'Override signing mode: nosign | sign | both | "" (use config.yml default).'
+        type: string
+        default: ''
 
 permissions:
   contents: write
@@ -61,6 +65,7 @@ permissions:
   pages: write
   id-token: write
   issues: write
+  secrets: write
 
 jobs:
   meta:
@@ -200,6 +205,38 @@ jobs:
           # dispatch cross-repo). Provided by the caller via `secrets: inherit`.
           token: ${{ secrets.PAT_DISPATCH }}
 
+  setup_signing:
+    name: Setup module signing
+    needs: [changes]
+    if: ${{ !cancelled() && needs.changes.outputs.debs == 'true' }}
+    runs-on: ubuntu-latest
+    permissions:
+      secrets: write
+    outputs:
+      active: ${{ steps.setup.outputs.active }}
+    steps:
+      - uses: actions/checkout@v7
+      - id: mode
+        shell: bash
+        env:
+          OVERRIDE: ${{ inputs.sign_modules }}
+        run: |
+          set -euo pipefail
+          # Dispatch override takes precedence over config.yml default.
+          if [ -n "${OVERRIDE}" ]; then
+            echo "mode=${OVERRIDE}" >> "$GITHUB_OUTPUT"
+          elif [ -f config.yml ]; then
+            mode=$(yq '.signing.modules.default // "nosign"' config.yml 2>/dev/null || echo nosign)
+            echo "mode=${mode}" >> "$GITHUB_OUTPUT"
+          else
+            echo "mode=nosign" >> "$GITHUB_OUTPUT"
+          fi
+      - id: setup
+        uses: DaemonCores/DaemonCores-CI/module-signing-setup@main
+        with:
+          mode: ${{ steps.mode.outputs.mode }}
+          gh-token: ${{ secrets.GITHUB_TOKEN }}
+
   build_env:
     name: Rebuild the deb-builder env image
     needs: [changes]
@@ -212,7 +249,7 @@ jobs:
 
   debs_amd64:
     name: Build .deb packages (amd64)
-    needs: [changes, base, build_env]
+    needs: [changes, base, build_env, setup_signing]
     # The nested waveN jobs in bootc-debs-builder.yml (and build-one-deb.yml's
     # build job) request 'actions: write' to delete stale CI artifacts via the
     # gh api DELETE endpoint. GitHub intersects the caller's top-level/job-level
@@ -233,15 +270,17 @@ jobs:
       !cancelled() &&
       needs.changes.outputs.debs == 'true' &&
       (needs.base.result == 'success' || needs.base.result == 'skipped') &&
-      (needs.build_env.result == 'success' || needs.build_env.result == 'skipped')
+      (needs.build_env.result == 'success' || needs.build_env.result == 'skipped') &&
+      (needs.setup_signing.result == 'success' || needs.setup_signing.result == 'skipped')
     uses: DaemonCores/DaemonCores-CI/.github/workflows/bootc-debs-builder.yml@main
     with:
       arch: amd64
+      signing_active: ${{ needs.setup_signing.outputs.active }}
     secrets: inherit
 
   debs_arm64:
     name: Build .deb packages (arm64)
-    needs: [changes, base, build_env]
+    needs: [changes, base, build_env, setup_signing]
     # Same actions: write grant as debs_amd64 — see that job's comment for the
     # rationale (nested waveN jobs need to delete stale artifacts via gh api).
     permissions:
@@ -255,10 +294,12 @@ jobs:
       !cancelled() &&
       needs.changes.outputs.debs == 'true' &&
       (needs.base.result == 'success' || needs.base.result == 'skipped') &&
-      (needs.build_env.result == 'success' || needs.build_env.result == 'skipped')
+      (needs.build_env.result == 'success' || needs.build_env.result == 'skipped') &&
+      (needs.setup_signing.result == 'success' || needs.setup_signing.result == 'skipped')
     uses: DaemonCores/DaemonCores-CI/.github/workflows/bootc-debs-builder.yml@main
     with:
       arch: arm64
+      signing_active: ${{ needs.setup_signing.outputs.active }}
     secrets: inherit
 
   # Aggregate any_rebuilt from both arches: a rebuild on either arch forces a
