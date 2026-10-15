@@ -65,6 +65,27 @@ jobs:
           import json, os
           pkgs = json.load(open('/tmp/pkgs.json'))['packages']
           target_arch = os.environ.get('ARCH', 'amd64')
+          # Expand variant templates before arch-filtering and wave computation.
+          # A package with a `variants:` dict is a template; each variant key
+          # produces an independent package whose name is (variant-name-prefix +
+          # variant_key), with DEVICE and any extra vars injected into env, and
+          # the per-variant source (variant-source pattern) appended to sources.
+          expanded = []
+          for p in pkgs:
+              if 'variants' not in p:
+                  expanded.append(p)
+                  continue
+              prefix = p.get('variant-name-prefix', p['name'] + '-')
+              vs_pattern = p.get('variant-source', '')
+              for vkey, vvars in (p.get('variants') or {}).items():
+                  ep = {k: v for k, v in p.items()
+                        if k not in ('variants', 'variant-name-prefix', 'variant-source')}
+                  ep['name'] = prefix + vkey
+                  ep['env'] = {**(p.get('env') or {}), 'DEVICE': vkey, **(vvars or {})}
+                  if vs_pattern:
+                      ep['sources'] = list(p.get('sources') or []) + [vs_pattern.replace('{variant}', vkey)]
+                  expanded.append(ep)
+          pkgs = expanded
           pkgs = [p for p in pkgs if not p.get('when', {}).get('arch') or p['when']['arch'] == target_arch]
           deps = {p['name']: (p.get('deps') or []) for p in pkgs}
           memo = {}
