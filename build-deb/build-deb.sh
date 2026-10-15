@@ -151,22 +151,29 @@ env_hash() {
 
 #######################################
 # Compute the combined content hash for this package.
+# ARCH is included so amd64 and arm64 builds of the same custom package
+# (upstream=none, same sources) get distinct hashes and distinct cache entries.
+# Without this, both arches compute the same hash, their .meta files overwrite
+# each other on merge-multiple, and the losing arch rebuilds every run.
 # Outputs:
 #   Hex digest on stdout.
 #######################################
 content_hash() {
-  local src up env build
+  local src up env build arch
   src=$(sources_hash)
   up=$(upstream_id)
   env=$(env_hash)
   build=$(printf '%s' "${BUILD:-}" | sha256sum | cut -d' ' -f1)
-  echo "content-hash(${PACKAGE}): src=${src} upstream=${up} env=${env}" >&2
-  printf '%s\n%s\n%s\n%s\n' "${src}" "${up}" "${env}" "${build}" \
+  arch="${ARCH:-amd64}"
+  echo "content-hash(${PACKAGE}/${arch}): src=${src} upstream=${up} env=${env}" >&2
+  printf '%s\n%s\n%s\n%s\n%s\n' "${src}" "${up}" "${env}" "${build}" "${arch}" \
     | sha256sum | cut -d' ' -f1
 }
 
 #######################################
-# Write /debs/.meta/<pkg>.json describing this package's result.
+# Write /debs/.meta/<pkg>-<arch>.json describing this package's result.
+# The file is arch-qualified so amd64 and arm64 artifacts don't overwrite
+# each other when merge-multiple merges them in the publish job.
 # Arguments:
 #   $1 - content hash
 #   $2 - skipped ("true"/"false")
@@ -174,8 +181,9 @@ content_hash() {
 #######################################
 write_meta() {
   mkdir -p "${META_DIR}"
+  local arch="${ARCH:-amd64}"
   jq -n --arg h "$1" --argjson s "$2" --argjson d "$3" \
-    '{hash: $h, skipped: $s, debs: $d}' >"${META_DIR}/${PACKAGE}.json"
+    '{hash: $h, skipped: $s, debs: $d}' >"${META_DIR}/${PACKAGE}-${arch}.json"
 }
 
 #######################################
@@ -235,30 +243,33 @@ run_build() {
 
 main() {
   ensure_tools
-  local base hash prior prior_hash debs
+  local base hash prior prior_hash debs cache_key
   base=$(pages_base)
   hash=$(content_hash)
   set_output hash "${hash}"
+  # Arch-qualified cache key: both amd64 and arm64 builds of the same package
+  # coexist in hashes.json without overwriting each other.
+  cache_key="${PACKAGE}-${ARCH:-amd64}"
 
   prior=$(curl -fsSL "${base}/debs-cache/hashes.json" 2>/dev/null || echo '{}')
   prior_hash=$(printf '%s' "${prior}" \
-    | jq -r --arg p "${PACKAGE}" '.[$p].hash // empty')
+    | jq -r --arg p "${cache_key}" '.[$p].hash // empty')
 
   # Diagnostics: shows why a package did (not) skip on the next run.
-  echo "cache[${PACKAGE}]: hash=${hash} prior=${prior_hash:-<none>}" \
+  echo "cache[${cache_key}]: hash=${hash} prior=${prior_hash:-<none>}" \
     "src=${base}/debs-cache/hashes.json" >&2
 
   if [[ -n "${prior_hash}" && "${prior_hash}" == "${hash}" ]]; then
     local cached_debs
     cached_debs=$(printf '%s' "${prior}" \
-      | jq -c --arg p "${PACKAGE}" '.[$p].debs // []')
+      | jq -c --arg p "${cache_key}" '.[$p].debs // []')
     if restore_cached "${base}" "${cached_debs}"; then
-      echo "::notice::${PACKAGE} unchanged; reused cached deb(s)"
+      echo "::notice::${PACKAGE} (${ARCH:-amd64}) unchanged; reused cached deb(s)"
       write_meta "${hash}" true "${cached_debs}"
       set_output skipped true
       return 0
     fi
-    echo "::warning::${PACKAGE} cache download failed; rebuilding"
+    echo "::warning::${PACKAGE} (${ARCH:-amd64}) cache download failed; rebuilding"
   fi
 
   # Build. On failure (compile error, or a content check the build runs after
@@ -278,24 +289,24 @@ main() {
   if [[ "${ok}" -eq 1 ]]; then
     write_meta "${hash}" false "${debs}"
     set_output skipped false
-    echo "::notice::${PACKAGE} built (${debs})"
+    echo "::notice::${PACKAGE} (${ARCH:-amd64}) built (${debs})"
     return 0
   fi
 
   local last_debs
   last_debs=$(printf '%s' "${prior}" \
-    | jq -c --arg p "${PACKAGE}" '.[$p].debs // []')
+    | jq -c --arg p "${cache_key}" '.[$p].debs // []')
   if [[ -n "${prior_hash}" ]] && restore_cached "${base}" "${last_debs}"; then
-    echo "::warning::${PACKAGE} build failed; kept the last-good published" \
-      "deb(s) and left the cache hash unchanged so the fix is retried" >&2
+    echo "::warning::${PACKAGE} (${ARCH:-amd64}) build failed; kept the last-good" \
+      "published deb(s) and left the cache hash unchanged so the fix is retried" >&2
     write_meta "${prior_hash}" true "${last_debs}"
     set_output skipped true
     set_output build_failed true
     return 0
   fi
 
-  echo "::error::${PACKAGE} build failed and has no prior deb to fall back" \
-    "to; failing the job" >&2
+  echo "::error::${PACKAGE} (${ARCH:-amd64}) build failed and has no prior deb to" \
+    "fall back to; failing the job" >&2
   set_output build_failed true
   return 1
 }

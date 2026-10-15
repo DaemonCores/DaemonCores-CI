@@ -120,7 +120,9 @@ jobs:
 
   wave2:
     needs: [setup, wave1]
-    if: ${{ needs.setup.outputs.wave2 != '[]' }}
+    # always() lets wave2 run even when wave1 has partial failures (some
+    # packages may still build successfully if their specific deps succeeded).
+    if: ${{ always() && !cancelled() && needs.setup.outputs.wave2 != '[]' }}
     permissions:
       actions: write
       issues: write
@@ -138,7 +140,7 @@ jobs:
 
   wave3:
     needs: [setup, wave2]
-    if: ${{ needs.setup.outputs.wave3 != '[]' }}
+    if: ${{ always() && !cancelled() && needs.setup.outputs.wave3 != '[]' }}
     permissions:
       actions: write
       issues: write
@@ -156,14 +158,12 @@ jobs:
 
   publish:
     needs: [setup, wave0, wave1, wave2, wave3]
-    # Run unless the workflow was cancelled. Individual wave failures do NOT
-    # block publishing: packages that succeeded (or fell back to a prior deb)
-    # write a .meta file and update hashes.json so they can be cached on the
-    # next run. Packages that failed without a prior deb simply have no .meta
-    # file and are retried next run. Blocking publish on any failure would
-    # prevent ALL hashes from updating, causing every package to rebuild on
-    # every run even when nothing changed.
-    if: ${{ !cancelled() }}
+    # always() && !cancelled(): run even when some wave jobs fail so that
+    # hashes.json is updated for packages that succeeded. Without this,
+    # any single failure blocks ALL packages from caching, causing every
+    # package to rebuild on every run. Packages that failed without a prior
+    # deb have no .meta file and are simply retried next run.
+    if: ${{ always() && !cancelled() }}
     runs-on: ubuntu-latest
     permissions:
       pages: write
