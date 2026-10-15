@@ -9,9 +9,11 @@
 #   TESTS_FILE  path to the tests manifest (yaml)
 #   MEM         VM memory in MiB (default 4096)
 #   VCPUS       VM vCPUs (default 2)
+#   ARCH        target architecture: amd64 (default) or arm64
 #   RUNNER_TEMP scratch dir provided by Actions
 set -euo pipefail
 
+ARCH="${ARCH:-amd64}"
 WORK="${RUNNER_TEMP:-/tmp}"
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 DISK="${WORK}/test-disk.raw"
@@ -44,11 +46,27 @@ SSH_OPTS=(
 #######################################
 install_deps() {
   sudo apt-get update
-  sudo apt-get install -y --no-install-recommends qemu-system-x86 ovmf jq
+  if [ "${ARCH}" = "arm64" ]; then
+    sudo apt-get install -y --no-install-recommends qemu-system-arm ovmf jq
+  else
+    sudo apt-get install -y --no-install-recommends qemu-system-x86 ovmf jq
+  fi
   command -v yq >/dev/null 2>&1 || {
+    # Pinned version with SHA256 checksum — downloading from latest/download/
+    # with no checksum lets a compromised upstream binary run in the runner.
+    YQ_VERSION="v4.44.3"
+    case "${ARCH}" in
+      arm64)
+        YQ_SHA256="0e7e1524f68d91b3ff9b089872d185940ab0fa020a5a9052046ef10547023156"
+        ;;
+      *)
+        YQ_SHA256="a2c097180dd884a8d50c956ee16a9cec070f30a7947cf4ebf87d5f36213e9ed7"
+        ;;
+    esac
     sudo curl -fsSL \
-      https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 \
+      "https://github.com/mikefarah/yq/releases/download/${YQ_VERSION}/yq_linux_${ARCH}" \
       -o /usr/local/bin/yq
+    echo "${YQ_SHA256}  /usr/local/bin/yq" | sha256sum -c -
     sudo chmod +x /usr/local/bin/yq
   }
   echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
@@ -57,6 +75,12 @@ install_deps() {
   sudo udevadm trigger --name-match=kvm
 
   if [ "${SECURE_BOOT}" = 1 ]; then
+    # Secure Boot varstore generation is amd64-only: OVMF on arm64 (AAVMF) has
+    # the same Security Violation issue and has not been investigated yet.
+    if [ "${ARCH}" != "amd64" ]; then
+      echo "::error::SECURE_BOOT=1 is only supported on amd64 (arm64 not yet investigated)"
+      exit 1
+    fi
     # virt-firmware builds the Secure Boot varstore (it bundles the Microsoft
     # UEFI CAs); openssl generates our own PK/KEK. Kept in a venv so the runner's
     # system Python is untouched (PEP 668).
@@ -81,7 +105,10 @@ install_disk() {
   # to-filesystem into the same layout as the ISO (btrfs pool + varlog quota).
   # bootc-build.yml builds with sudo podman, so this root podman sees the freshly
   # built image directly (no registry pull).
+  # ARCH is forwarded so install-fs.sh can set the right console= kernel arg
+  # (ttyS0 on x86, ttyAMA0 on arm64 QEMU virt machine).
   sudo podman run --rm --privileged --pid=host --security-opt label=disable \
+    -e ARCH="${ARCH}" \
     -v /dev:/dev -v /var/lib/containers:/var/lib/containers \
     -v "${DISK}:/disk.raw" \
     -v "${KEY}.pub:/key.pub:ro" \
@@ -138,33 +165,51 @@ build_sb_vars() {
 #   DISK, SERIAL, SSH_PORT, WORK, MEM, VCPUS, SECURE_BOOT
 #######################################
 boot_vm() {
-  local code secure=off
-  if [ "${SECURE_BOOT}" = 1 ]; then
-    code=$(find /usr/share/OVMF -name 'OVMF_CODE*.fd' -name '*secboot*' \
-      | head -1)
-    secure=on
-    # ${WORK}/OVMF_VARS.fd already written by build_sb_vars.
-  else
-    # Setup Mode: our grub's MOK is not enrolled in a fresh VM and distro *.ms
-    # varstores carry a dbx that rejects the shim, so with SB off we validate the
-    # OS boot path. Ref: Ubuntu UEFI/OVMF file naming.
-    local vars
-    code=$(find /usr/share/OVMF -name 'OVMF_CODE*.fd' ! -name '*secboot*' \
-      | head -1)
-    vars=$(find /usr/share/OVMF -name 'OVMF_VARS*.fd' ! -name '*.ms.*' \
-      ! -name '*secboot*' | head -1)
+  local code vars
+  if [ "${ARCH}" = "arm64" ]; then
+    # arm64: QEMU virt machine with KVM, AAVMF (arm64 UEFI from ovmf package).
+    # SECURE_BOOT is not supported on arm64 yet (see install_deps guard).
+    code=$(find /usr/share/AAVMF -name 'AAVMF_CODE*.fd' | head -1)
+    vars=$(find /usr/share/AAVMF -name 'AAVMF_VARS*.fd' | head -1)
     cp "${vars}" "${WORK}/OVMF_VARS.fd"
+    sudo qemu-system-aarch64 \
+      -enable-kvm -m "${MEM:-4096}" -smp "${VCPUS:-2}" \
+      -machine virt -cpu host \
+      -drive "if=pflash,format=raw,unit=0,readonly=on,file=${code}" \
+      -drive "if=pflash,format=raw,unit=1,file=${WORK}/OVMF_VARS.fd" \
+      -drive "file=${DISK},format=raw,if=virtio" \
+      -netdev "user,id=n0,hostfwd=tcp::${SSH_PORT}-:22" \
+      -device virtio-net,netdev=n0 \
+      -display none -serial "file:${SERIAL}" -monitor none \
+      -daemonize -pidfile "${WORK}/qemu.pid"
+  else
+    local secure=off
+    if [ "${SECURE_BOOT}" = 1 ]; then
+      code=$(find /usr/share/OVMF -name 'OVMF_CODE*.fd' -name '*secboot*' \
+        | head -1)
+      secure=on
+      # ${WORK}/OVMF_VARS.fd already written by build_sb_vars.
+    else
+      # Setup Mode: our grub's MOK is not enrolled in a fresh VM and distro *.ms
+      # varstores carry a dbx that rejects the shim, so with SB off we validate the
+      # OS boot path. Ref: Ubuntu UEFI/OVMF file naming.
+      code=$(find /usr/share/OVMF -name 'OVMF_CODE*.fd' ! -name '*secboot*' \
+        | head -1)
+      vars=$(find /usr/share/OVMF -name 'OVMF_VARS*.fd' ! -name '*.ms.*' \
+        ! -name '*secboot*' | head -1)
+      cp "${vars}" "${WORK}/OVMF_VARS.fd"
+    fi
+    sudo qemu-system-x86_64 \
+      -enable-kvm -m "${MEM:-4096}" -smp "${VCPUS:-2}" -machine q35 \
+      -global "driver=cfi.pflash01,property=secure,value=${secure}" \
+      -drive "if=pflash,format=raw,unit=0,readonly=on,file=${code}" \
+      -drive "if=pflash,format=raw,unit=1,file=${WORK}/OVMF_VARS.fd" \
+      -drive "file=${DISK},format=raw,if=virtio" \
+      -netdev "user,id=n0,hostfwd=tcp::${SSH_PORT}-:22" \
+      -device virtio-net,netdev=n0 \
+      -display none -serial "file:${SERIAL}" -monitor none \
+      -daemonize -pidfile "${WORK}/qemu.pid"
   fi
-  sudo qemu-system-x86_64 \
-    -enable-kvm -m "${MEM:-4096}" -smp "${VCPUS:-2}" -machine q35 \
-    -global "driver=cfi.pflash01,property=secure,value=${secure}" \
-    -drive "if=pflash,format=raw,unit=0,readonly=on,file=${code}" \
-    -drive "if=pflash,format=raw,unit=1,file=${WORK}/OVMF_VARS.fd" \
-    -drive "file=${DISK},format=raw,if=virtio" \
-    -netdev "user,id=n0,hostfwd=tcp::${SSH_PORT}-:22" \
-    -device virtio-net,netdev=n0 \
-    -display none -serial "file:${SERIAL}" -monitor none \
-    -daemonize -pidfile "${WORK}/qemu.pid"
 }
 
 #######################################
@@ -212,10 +257,16 @@ wait_ssh() {
 #   0 if all tests pass, 1 otherwise.
 #######################################
 run_tests() {
-  local n i name cmd expect diag out rc fail=0 pass
+  local n i name cmd expect diag test_arch out rc fail=0 pass
   n=$(yq '.tests | length' "${TESTS_FILE}")
   for ((i = 0; i < n; i++)); do
     name=$(yq ".tests[${i}].name" "${TESTS_FILE}")
+    # Skip tests that are pinned to a different arch.
+    test_arch=$(yq ".tests[${i}].arch // \"\"" "${TESTS_FILE}")
+    if [ -n "${test_arch}" ] && [ "${test_arch}" != "${ARCH}" ]; then
+      echo "  SKIP  ${name} (arch: ${test_arch}, running: ${ARCH})"
+      continue
+    fi
     cmd=$(yq ".tests[${i}].run" "${TESTS_FILE}")
     expect=$(yq ".tests[${i}].expect // \"\"" "${TESTS_FILE}")
     # cmd is the manifest's test command; expanding it here into the ssh
