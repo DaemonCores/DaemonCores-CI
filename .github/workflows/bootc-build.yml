@@ -310,6 +310,7 @@ jobs:
         uses: DaemonCores/DaemonCores-CI/image-test@main
         with:
           image: ${{ env.IMAGE }}:${{ steps.tags.outputs.primary }}
+          arch: ${{ matrix.entry.arch }}
 
       - name: Push
         if: github.ref == 'refs/heads/main'
