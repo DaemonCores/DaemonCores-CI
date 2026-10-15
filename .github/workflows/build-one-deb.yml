@@ -54,64 +54,21 @@ jobs:
     steps:
       - uses: DaemonCores/DaemonCores-CI/bootc-debs-start@main
 
-      - name: Resolve variant templates in manifest
-        id: resolve
-        shell: bash
-        env:
-          MAN: ${{ inputs.manifest }}
-          ARCH: ${{ inputs.arch }}
-        run: |
-          set -euo pipefail
-          # Install yq if not already present (pinned version, same as
-          # Read package definition — whichever step runs first owns the install).
-          command -v yq >/dev/null 2>&1 || {
-            yarch="${ARCH:-$(dpkg --print-architecture 2>/dev/null || uname -m)}"
-            case "$yarch" in aarch64|arm64) yarch=arm64 ;; *) yarch=amd64 ;; esac
-            YQ_VERSION="v4.44.3"
-            case "$yarch" in
-              amd64) YQ_SHA256="a2c097180dd884a8d50c956ee16a9cec070f30a7947cf4ebf87d5f36213e9ed7" ;;
-              arm64) YQ_SHA256="0e7e1524f68d91b3ff9b089872d185940ab0fa020a5a9052046ef10547023156" ;;
-            esac
-            curl -fsSL \
-              "https://github.com/mikefarah/yq/releases/download/${YQ_VERSION}/yq_linux_${yarch}" \
-              -o /usr/local/bin/yq
-            echo "${YQ_SHA256}  /usr/local/bin/yq" | sha256sum -c -
-            chmod +x /usr/local/bin/yq
-          }
-          # Expand variant templates so the lookup step can find packages whose
-          # names were generated from a variants: block (e.g. linux-modules-rpi3
-          # lives inside linux-modules-arm-device with variant-name-prefix).
-          # Writes /tmp/packages-resolved.json; subsequent steps use it instead.
-          python3 - <<'PY'
-          import json, subprocess, os
-          man = os.environ['MAN']
-          raw = subprocess.check_output(['yq', '-o=json', '.', man]).decode()
-          packages = json.loads(raw)['packages']
-          expanded = []
-          for p in packages:
-              if 'variants' not in p:
-                  expanded.append(p)
-                  continue
-              prefix = p.get('variant-name-prefix', p['name'] + '-')
-              vs_pattern = p.get('variant-source', '')
-              for vkey, vvars in (p.get('variants') or {}).items():
-                  ep = {k: v for k, v in p.items()
-                        if k not in ('variants', 'variant-name-prefix', 'variant-source')}
-                  ep['name'] = prefix + vkey
-                  ep['env'] = {**(p.get('env') or {}), 'DEVICE': vkey, **(vvars or {})}
-                  if vs_pattern:
-                      ep['sources'] = list(p.get('sources') or []) + [vs_pattern.replace('{variant}', vkey)]
-                  expanded.append(ep)
-          with open('/tmp/packages-resolved.json', 'w') as f:
-              json.dump({'packages': expanded}, f)
-          PY
-          echo "manifest=/tmp/packages-resolved.json" >>"$GITHUB_OUTPUT"
+      # Expand any `variants:` template into plain packages before the lookup
+      # below. A variant-generated name (e.g. linux-modules-rpi3) does not exist
+      # as a literal entry in the source manifest, so the select() in "Read
+      # package definition" would find nothing.
+      - name: Expand manifest variants
+        id: expand
+        uses: DaemonCores/DaemonCores-CI/manifest-expand@main
+        with:
+          manifest: ${{ inputs.manifest }}
 
       - name: Read package definition
         id: def
         shell: bash
         env:
-          MAN: ${{ steps.resolve.outputs.manifest || inputs.manifest }}
+          MAN: ${{ steps.expand.outputs.manifest }}
           PKG: ${{ inputs.package }}
           ARCH: ${{ inputs.arch }}
         run: |
@@ -202,7 +159,7 @@ jobs:
         if: steps.def.outputs.deps != ''
         shell: bash
         env:
-          MAN: ${{ steps.resolve.outputs.manifest || inputs.manifest }}
+          MAN: ${{ steps.expand.outputs.manifest }}
           DEPS: ${{ steps.def.outputs.deps }}
         run: |
           set -euo pipefail

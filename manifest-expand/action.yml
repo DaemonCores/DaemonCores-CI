@@ -1,0 +1,64 @@
+name: 'Expand manifest variants'
+description: >-
+  Expand the `variants:` templates in a bootc-debs-builder packages.yml into one
+  plain package entry per variant, and optionally drop the other arch's
+  packages. Called by every manifest-driven workflow so the expansion lives in
+  exactly one place.
+
+inputs:
+  manifest:
+    description: 'Path to the packages.yml manifest in the caller workspace.'
+    required: false
+    default: workflows/bootc-debs-builder/packages.yml
+  out:
+    description: 'Where to write the resolved manifest.'
+    required: false
+    default: /tmp/packages-resolved.yml
+  arch:
+    description: >-
+      Target architecture. When set, packages whose when.arch differs are
+      dropped in the same pass. Empty keeps every arch.
+    required: false
+    default: ''
+
+outputs:
+  manifest:
+    description: 'Path to the resolved manifest.'
+    value: ${{ steps.expand.outputs.manifest }}
+  packages:
+    description: 'JSON array of the resolved package names.'
+    value: ${{ steps.expand.outputs.packages }}
+
+runs:
+  using: 'composite'
+  steps:
+    - id: expand
+      shell: bash
+      env:
+        MAN: ${{ inputs.manifest }}
+        OUT: ${{ inputs.out }}
+        ARCH: ${{ inputs.arch }}
+      run: |
+        set -euo pipefail
+        # yq reads the YAML and jq does the expansion (the jq language has the
+        # if/def the filter needs; yq's own evaluator does not). Both are
+        # already baked into every build-env image.
+        for tool in yq jq; do
+          command -v "${tool}" >/dev/null 2>&1 || {
+            echo "ERROR: ${tool} not found on PATH" >&2
+            exit 1
+          }
+        done
+        # The output must be YAML, not JSON: every downstream consumer reads it
+        # with yq, and yq renders JSON strings as quoted, backslash-escaped
+        # scalars. That turns a build script into one long "set -euo ...\n"
+        # line and, worse, leaves the quotes on env values so the caller's
+        # `KEY=$val` assignment fails with `invalid variable name`.
+        mkdir -p "$(dirname "${OUT}")"
+        yq -o=json '.' "${MAN}" \
+          | jq -f "${GITHUB_ACTION_PATH}/expand.jq" \
+          | yq -P '.' >"${OUT}"
+        {
+          echo "manifest=${OUT}"
+          echo "packages=$(jq -c '[.packages[].name]' <(yq -o=json '.' "${OUT}"))"
+        } >>"$GITHUB_OUTPUT"
