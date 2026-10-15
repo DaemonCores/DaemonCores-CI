@@ -221,13 +221,12 @@ jobs:
           PKG: ${{ inputs.package }}
         run: |
           set -euo pipefail
-          title="⚠️ Build cassé : ${PKG} (dernier .deb valide conservé)"
+          title="⚠️ Broken build: ${PKG} (last valid .deb reused)"
           body=$(printf '%s' \
-            "Le build de \`${PKG}\` a échoué (compilation ou check de contenu " \
-            "post-patch). Le dernier .deb publié a été réutilisé pour ne pas " \
-            "casser la prod, et le hash de cache est laissé inchangé (le fix " \
-            "sera re-tenté au prochain run). Run : " \
-            "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}")
+            "The \`${PKG}\` build failed (compilation or post-patch content check). " \
+            "The last published .deb was reused to avoid breaking production. " \
+            "The cache hash is left unchanged so the fix will be retried on the next run. " \
+            "Run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}")
           api="${GITHUB_API_URL}/repos/${GITHUB_REPOSITORY}"
           auth=(-H "Authorization: Bearer ${GH_TOKEN}"
             -H "Accept: application/vnd.github+json")
@@ -242,8 +241,33 @@ jobs:
               -d "$(jq -n --arg t "${title}" --arg b "${body}" \
                 '{title: $t, body: $b}')" >/dev/null
           fi
-          echo "::warning::${PKG} build cassé — issue ouverte/mise à jour," \
-            "dernier .deb valide conservé"
+          echo "::warning::${PKG} build broken — issue opened/updated, last valid .deb reused"
+
+      # When the build succeeds, close any open issue for this package so the
+      # tracker stays clean.
+      - name: Close broken-build issue on success
+        if: steps.build.outputs.build_failed != 'true'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PKG: ${{ inputs.package }}
+        run: |
+          set -euo pipefail
+          title="⚠️ Broken build: ${PKG} (last valid .deb reused)"
+          api="${GITHUB_API_URL}/repos/${GITHUB_REPOSITORY}"
+          auth=(-H "Authorization: Bearer ${GH_TOKEN}"
+            -H "Accept: application/vnd.github+json")
+          num=$(curl -fsSL "${auth[@]}" "${api}/issues?state=open&per_page=100" \
+            | jq -r --arg t "${title}" \
+              'map(select(.title == $t)) | .[0].number // empty')
+          if [ -n "${num}" ]; then
+            comment="Build of \`${PKG}\` succeeded in run [${GITHUB_RUN_ID}](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}). Closing."
+            curl -fsSL "${auth[@]}" -X POST "${api}/issues/${num}/comments" \
+              -d "$(jq -n --arg b "${comment}" '{body: $b}')" >/dev/null
+            curl -fsSL "${auth[@]}" -X PATCH "${api}/issues/${num}" \
+              -d '{"state":"closed"}' >/dev/null
+            echo "Closed issue #${num} for ${PKG} (build recovered)"
+          fi
 
       - name: Delete old artifacts
         env:
