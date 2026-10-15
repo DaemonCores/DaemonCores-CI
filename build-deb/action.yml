@@ -26,6 +26,14 @@ inputs:
       secret keys also feed the content hash; secret-looking keys are excluded.
     required: false
     default: ''
+  extra-env:
+    description: >-
+      Additional KEY=VALUE lines merged into the build env BEFORE hashing.
+      Use for CI-injected build-affecting flags (e.g. MODULE_SIGNING_ACTIVE=yes)
+      that do not live in the manifest. Unlike secret-env, these lines ARE
+      included in the content hash, so toggling them invalidates the cache.
+    required: false
+    default: ''
   deb-glob:
     description: 'Glob (relative to /debs, without .deb) matching this package output. Defaults to <package>_*.'
     required: false
@@ -64,6 +72,7 @@ runs:
         SOURCES: ${{ inputs.sources }}
         UPSTREAM: ${{ inputs.upstream }}
         EXTRA_ENV: ${{ inputs.env }}
+        EXTRA_ENV_CI: ${{ inputs.extra-env }}
         DEB_GLOB: ${{ inputs.deb-glob }}
         PAGES_URL: ${{ inputs.pages-url }}
         ARCH: ${{ inputs.arch }}
