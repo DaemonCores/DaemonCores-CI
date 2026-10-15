@@ -77,6 +77,25 @@ echo "=== ESP contents (${T}/boot/efi) ==="
 find "${T}/boot/efi" | sort
 echo "=== end ESP ==="
 
+# Stage a second identical deployment so CI rollback tests have two deployment
+# slots to work with. bootc install creates exactly one deployment; deploying
+# the same commit again gives the VM a rollback target without network access.
+# The commit hash comes from the deploy directory name (<hash>.0) — reliable
+# because bootc install always produces exactly one deployment.
+stateroot=$(ls "${T}/ostree/deploy/" 2>/dev/null | head -1)
+stateroot="${stateroot:-default}"
+deployed_dir=$(ls -d "${T}/ostree/deploy/${stateroot}/deploy/"*.0 2>/dev/null | head -1)
+if [ -n "${deployed_dir}" ]; then
+  deployed_rev="${deployed_dir##*/}"
+  deployed_rev="${deployed_rev%.0}"
+  ostree --repo="${T}/ostree/repo" refs --create="testrollback/0" "${deployed_rev}"
+  ostree admin --sysroot="${T}" deploy --os="${stateroot}" "testrollback/0"
+  echo "=== rollback slot staged: ${deployed_rev} (stateroot: ${stateroot}) ==="
+  ostree admin --sysroot="${T}" status
+else
+  echo "::warning::could not find deployed commit — rollback slot not staged; rollback tests will fail"
+fi
+
 # Seed the first-boot done flag so firstboot-user-setup skips its interactive
 # wizard and the VM reaches multi-user in CI. bootc finalizes ${T} read-only
 # once installed, so write straight into the var subvol via its own mount
