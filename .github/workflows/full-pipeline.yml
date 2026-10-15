@@ -223,18 +223,18 @@ jobs:
           if [ -n "${OVERRIDE}" ]; then
             echo "mode=${OVERRIDE}" >> "$GITHUB_OUTPUT"
           elif [ -f config.yml ]; then
-            # yq is not pre-installed on ubuntu-latest; fall back to python3.
-            mode=$(python3 -c "
-import sys
-try:
-    import yaml
-    with open('config.yml') as f:
-        d = yaml.safe_load(f)
-    print(d.get('signing', {}).get('modules', {}).get('default', 'nosign'))
-except Exception as e:
-    print('nosign', file=sys.stderr)
-    print('nosign')
-" 2>&1 | tail -1)
+            # yq is not pre-installed on ubuntu-latest; use python3 via
+            # stdin heredoc so indentation stays within the YAML block.
+            mode=$(python3 - <<'PY'
+          import yaml, sys
+          try:
+              d = yaml.safe_load(open('config.yml'))
+              print(d.get('signing', {}).get('modules', {}).get('default', 'nosign'))
+          except Exception as e:
+              sys.stderr.write(str(e) + '\n')
+              print('nosign')
+          PY
+            )
             echo "mode=${mode}" >> "$GITHUB_OUTPUT"
           else
             echo "mode=nosign" >> "$GITHUB_OUTPUT"
