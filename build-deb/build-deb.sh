@@ -243,6 +243,12 @@ run_build() {
 
 main() {
   ensure_tools
+  # Merge CI-injected extra env (not from the manifest) into EXTRA_ENV before
+  # hashing. These lines ARE hashed, so toggling MODULE_SIGNING_ACTIVE=yes
+  # invalidates the cache and forces a fresh build with the signing code active.
+  if [[ -n "${EXTRA_ENV_CI:-}" ]]; then
+    EXTRA_ENV="${EXTRA_ENV}${EXTRA_ENV:+$'\n'}${EXTRA_ENV_CI}"
+  fi
   local base hash prior prior_hash debs cache_key
   base=$(pages_base)
   hash=$(content_hash)

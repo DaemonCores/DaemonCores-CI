@@ -1,0 +1,64 @@
+name: 'Setup module signing'
+description: >-
+  Determines whether module signing is active for this run, and ensures the
+  persistent MODULE_SIGNING_KEY / MODULE_SIGNING_CERT GitHub secrets exist,
+  creating them (once) if absent. On the very first run the secrets are written
+  but not yet visible to sibling jobs; a second run will sign. The key is
+  long-lived so the build cache is not broken on every run.
+
+inputs:
+  mode:
+    description: 'Effective signing mode: nosign | sign | both. Derived from config.yml + dispatch override.'
+    required: true
+  gh-token:
+    description: 'GitHub token with secrets:write on the calling repository.'
+    required: true
+
+outputs:
+  active:
+    description: 'yes when signing should run this build; no otherwise.'
+    value: ${{ steps.decide.outputs.active }}
+
+runs:
+  using: composite
+  steps:
+    - id: decide
+      shell: bash
+      env:
+        MODE: ${{ inputs.mode }}
+        GH_TOKEN: ${{ inputs.gh-token }}
+      run: |
+        set -euo pipefail
+
+        case "${MODE}" in
+          sign|both) active=yes ;;
+          *)         active=no  ;;
+        esac
+
+        if [ "${active}" = "yes" ]; then
+          # Check whether the persistent signing key already exists.
+          status=$(gh api \
+            "repos/${GITHUB_REPOSITORY}/actions/secrets/MODULE_SIGNING_KEY" \
+            --silent -i 2>/dev/null \
+            | head -1 | cut -d' ' -f2 || echo 000)
+
+          if [ "${status}" != "200" ]; then
+            echo "MODULE_SIGNING_KEY absent — generating persistent keypair" >&2
+            openssl req -new -x509 -newkey rsa:4096 \
+              -keyout /tmp/mod_sign.pem \
+              -out /tmp/mod_sign.x509 \
+              -days 36500 -nodes \
+              -subj "/CN=Module Signing Key/O=${GITHUB_REPOSITORY}/OU=CI" \
+              2>/dev/null
+            gh secret set MODULE_SIGNING_KEY < /tmp/mod_sign.pem
+            gh secret set MODULE_SIGNING_CERT < /tmp/mod_sign.x509
+            rm -f /tmp/mod_sign.pem /tmp/mod_sign.x509
+            # The secret was just created: it may not be visible to sibling
+            # jobs in this same run (GitHub propagation delay). Signing will
+            # be fully active from the next run onward.
+            echo "::notice::Module signing key created. Signing will be active from the next CI run."
+            active=no
+          fi
+        fi
+
+        echo "active=${active}" >> "$GITHUB_OUTPUT"
