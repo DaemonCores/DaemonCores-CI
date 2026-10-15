@@ -21,6 +21,10 @@ inputs:
     description: 'VM vCPUs.'
     required: false
     default: '2'
+  arch:
+    description: 'Target architecture: amd64 or arm64. Selects the QEMU binary, UEFI firmware, and filters arch-specific tests.'
+    required: false
+    default: amd64
 
 runs:
   using: composite
@@ -31,4 +35,5 @@ runs:
         TESTS_FILE: ${{ inputs.tests }}
         MEM: ${{ inputs.memory }}
         VCPUS: ${{ inputs.vcpus }}
+        ARCH: ${{ inputs.arch }}
       run: bash "${GITHUB_ACTION_PATH}/image-test.sh"
