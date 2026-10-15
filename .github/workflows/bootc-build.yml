@@ -306,7 +306,11 @@ jobs:
 
       # Real boot test: install to a disk, boot under QEMU/KVM, run the repo's
       # image-tests over SSH. A failure fails this job, so Push never runs.
+      # Skipped for the installer image (tag=iso): it is a live graphical
+      # installer with no SSH server, so the boot-test infrastructure cannot
+      # connect. The installer image is validated by bootc container lint only.
       - name: Boot-test the image
+        if: matrix.entry.tag != 'iso'
         uses: DaemonCores/DaemonCores-CI/image-test@main
         with:
           image: ${{ env.IMAGE }}:${{ steps.tags.outputs.primary }}
