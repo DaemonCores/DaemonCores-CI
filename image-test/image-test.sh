@@ -257,18 +257,19 @@ wait_ssh() {
 #   0 if all tests pass, 1 otherwise.
 #######################################
 run_tests() {
+  local section="${1:-tests}"
   local n i name cmd expect diag test_arch out rc fail=0 pass
-  n=$(yq '.tests | length' "${TESTS_FILE}")
+  n=$(yq ".${section} | length" "${TESTS_FILE}")
   for ((i = 0; i < n; i++)); do
-    name=$(yq ".tests[${i}].name" "${TESTS_FILE}")
+    name=$(yq ".${section}[${i}].name" "${TESTS_FILE}")
     # Skip tests that are pinned to a different arch.
-    test_arch=$(yq ".tests[${i}].arch // \"\"" "${TESTS_FILE}")
+    test_arch=$(yq ".${section}[${i}].arch // \"\"" "${TESTS_FILE}")
     if [ -n "${test_arch}" ] && [ "${test_arch}" != "${ARCH}" ]; then
       echo "  SKIP  ${name} (arch: ${test_arch}, running: ${ARCH})"
       continue
     fi
-    cmd=$(yq ".tests[${i}].run" "${TESTS_FILE}")
-    expect=$(yq ".tests[${i}].expect // \"\"" "${TESTS_FILE}")
+    cmd=$(yq ".${section}[${i}].run" "${TESTS_FILE}")
+    expect=$(yq ".${section}[${i}].expect // \"\"" "${TESTS_FILE}")
     # cmd is the manifest's test command; expanding it here into the ssh
     # argument (to run on the VM) is intentional.
     # shellcheck disable=SC2029
@@ -282,11 +283,11 @@ run_tests() {
     if [ "${pass}" -eq 1 ]; then
       echo "  PASS  ${name}"
     else
-      echo "::error::image test failed: ${name}"
+      echo "::error::image test failed [${section}]: ${name}"
       printf '%s\n' "${out}" | sed 's/^/      /'
       # Run this test's own diagnostic so the failure is self-explaining. The
       # manifest is validated up front, so diag is always present.
-      diag=$(yq ".tests[${i}].diag" "${TESTS_FILE}")
+      diag=$(yq ".${section}[${i}].diag" "${TESTS_FILE}")
       echo "      ----- diag: ${name} -----"
       # shellcheck disable=SC2029
       ssh "${SSH_OPTS[@]}" root@localhost "${diag}" 2>&1 | sed 's/^/      | /' || true
@@ -297,38 +298,54 @@ run_tests() {
 }
 
 #######################################
+# Validate one named section of the manifest (tests or reboot_tests). Exits 1
+# if any entry is missing name, run, or diag.
+# Arguments:
+#   $1 - YAML section key (tests | reboot_tests)
+#######################################
+_validate_section() {
+  local section="$1" n i name run diag missing=0
+  n=$(yq ".${section} | length" "${TESTS_FILE}")
+  for ((i = 0; i < n; i++)); do
+    name=$(yq ".${section}[${i}].name // \"\"" "${TESTS_FILE}")
+    run=$(yq ".${section}[${i}].run // \"\"" "${TESTS_FILE}")
+    diag=$(yq ".${section}[${i}].diag // \"\"" "${TESTS_FILE}")
+    if [ -z "${name}" ] || [ "${name}" = "null" ]; then
+      echo "::error::${section}[${i}] has no name"
+      missing=1
+    fi
+    if [ -z "${run}" ] || [ "${run}" = "null" ]; then
+      echo "::error::${section} test '${name}' (index ${i}) has no run:"
+      missing=1
+    fi
+    if [ -z "${diag}" ] || [ "${diag}" = "null" ]; then
+      echo "::error::${section} test '${name}' (index ${i}) has no diag: — every test MUST ship its own diagnostic so a failure is never undiagnosable"
+      missing=1
+    fi
+  done
+  if [ "${missing}" -ne 0 ]; then
+    echo "::error::${TESTS_FILE} [${section}]: one or more tests are missing name/run/diag"
+    exit 1
+  fi
+}
+
+#######################################
 # Enforce that every test ships its own `diag:` command. A test with no diag is
 # a manifest error and fails the run BEFORE the VM is even booted — so a test
 # can never regress into a blind, undiagnosable failure later. Also checks the
-# mandatory name/run fields.
+# mandatory name/run fields. Validates both `tests:` and `reboot_tests:` if
+# the latter section is present.
 # Globals:
 #   TESTS_FILE
 # Returns:
 #   Exits 1 if any test is missing name, run, or diag.
 #######################################
 validate_manifest() {
-  local n i name run diag missing=0
-  n=$(yq '.tests | length' "${TESTS_FILE}")
-  for ((i = 0; i < n; i++)); do
-    name=$(yq ".tests[${i}].name // \"\"" "${TESTS_FILE}")
-    run=$(yq ".tests[${i}].run // \"\"" "${TESTS_FILE}")
-    diag=$(yq ".tests[${i}].diag // \"\"" "${TESTS_FILE}")
-    if [ -z "${name}" ] || [ "${name}" = "null" ]; then
-      echo "::error::tests[${i}] has no name"
-      missing=1
-    fi
-    if [ -z "${run}" ] || [ "${run}" = "null" ]; then
-      echo "::error::test '${name}' (index ${i}) has no run:"
-      missing=1
-    fi
-    if [ -z "${diag}" ] || [ "${diag}" = "null" ]; then
-      echo "::error::test '${name}' (index ${i}) has no diag: — every test MUST ship its own diagnostic so a failure is never undiagnosable"
-      missing=1
-    fi
-  done
-  if [ "${missing}" -ne 0 ]; then
-    echo "::error::${TESTS_FILE}: one or more tests are missing name/run/diag"
-    exit 1
+  _validate_section "tests"
+  local reboot_n
+  reboot_n=$(yq '.reboot_tests | length // 0' "${TESTS_FILE}" 2>/dev/null || echo 0)
+  if [ "${reboot_n:-0}" -gt 0 ]; then
+    _validate_section "reboot_tests"
   fi
 }
 
@@ -381,7 +398,28 @@ main() {
     exit 1
   fi
   wait_boot
-  run_tests
+  run_tests "tests"
+
+  # Optional second phase: if the manifest defines reboot_tests, trigger a VM
+  # reboot and run them. Used for rollback and other post-reboot checks.
+  local reboot_n
+  reboot_n=$(yq '.reboot_tests | length // 0' "${TESTS_FILE}" 2>/dev/null || echo 0)
+  if [ "${reboot_n:-0}" -gt 0 ]; then
+    echo "--- triggering VM reboot for post-reboot test phase ---"
+    # reboot exits non-zero (connection reset) — that is expected.
+    ssh "${SSH_OPTS[@]}" root@localhost "reboot" 2>/dev/null || true
+    # Brief pause so the VM starts going down before we poll SSH.
+    sleep 5
+    local reboot_timeout
+    reboot_timeout=$(yq '.reboot_timeout // 300' "${TESTS_FILE}")
+    if ! wait_ssh "${reboot_timeout}"; then
+      echo "::error::VM did not come back after reboot within ${reboot_timeout}s"
+      sudo tail -n 50 "${SERIAL}" 2>/dev/null || true
+      exit 1
+    fi
+    wait_boot
+    run_tests "reboot_tests"
+  fi
 }
 
 main "$@"
