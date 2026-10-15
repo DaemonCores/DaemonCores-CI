@@ -209,8 +209,6 @@ jobs:
     needs: [changes]
     if: ${{ !cancelled() && needs.changes.outputs.debs == 'true' }}
     runs-on: ubuntu-latest
-    permissions:
-      secrets: write
     outputs:
       active: ${{ steps.setup.outputs.active }}
     steps:
