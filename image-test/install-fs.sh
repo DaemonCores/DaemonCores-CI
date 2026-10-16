@@ -45,6 +45,13 @@ command -v partprobe >/dev/null 2>&1 || {
 partprobe "${dev}"
 udevadm settle 2>/dev/null || sleep 1
 
+# Minimal images omit mkfs.vfat (dosfstools package). Install it on-demand,
+# refreshing the lists again for the same 99-apt-clean reason as above.
+command -v mkfs.vfat >/dev/null 2>&1 || {
+  apt-get update -qq >/dev/null
+  apt-get install -y --no-install-recommends dosfstools >/dev/null
+}
+
 mkfs.vfat -n EFI "${dev}p1" >/dev/null
 mkfs.ext4 -q -L boot "${dev}p2"
 mkfs.btrfs -q -L dcos "${dev}p3"
