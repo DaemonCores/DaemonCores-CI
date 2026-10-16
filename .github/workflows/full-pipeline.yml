@@ -284,6 +284,7 @@ jobs:
     with:
       arch: amd64
       signing_active: ${{ needs.setup_signing.outputs.active }}
+      deploy_pages: false
     secrets: inherit
 
   debs_arm64:
@@ -308,14 +309,46 @@ jobs:
     with:
       arch: arm64
       signing_active: ${{ needs.setup_signing.outputs.active }}
+      deploy_pages: false
     secrets: inherit
+
+  # Single publish job that waits for both arches to finish before deploying
+  # the APT repo to GitHub Pages. This prevents the duplicate github-pages
+  # artifact error that occurs when amd64 and arm64 both run their own publish
+  # step concurrently (actions/upload-pages-artifact creates an artifact always
+  # named "github-pages"; two parallel uploads conflict at deploy time).
+  debs_publish:
+    name: Publish .deb packages (APT repo → GitHub Pages)
+    needs: [changes, debs_amd64, debs_arm64]
+    if: |
+      always() && !cancelled() &&
+      needs.changes.outputs.debs == 'true' &&
+      (needs.debs_amd64.result == 'success' || needs.debs_amd64.result == 'failure') &&
+      (needs.debs_arm64.result == 'success' || needs.debs_arm64.result == 'failure')
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    outputs:
+      any_rebuilt: ${{ steps.end.outputs.any_rebuilt }}
+    steps:
+      - id: repo
+        shell: bash
+        run: |
+          name="${GITHUB_REPOSITORY##*/}"
+          echo "name=${name,,}" >> "$GITHUB_OUTPUT"
+      - id: end
+        uses: DaemonCores/DaemonCores-CI/bootc-debs-end@main
+        with:
+          repo_name: ${{ steps.repo.outputs.name }}
+          apt_gpg_key: ${{ secrets.APT_GPG_KEY }}
 
   # Aggregate any_rebuilt from both arches: a rebuild on either arch forces a
   # no-cache image rebuild. workflow_call outputs from reusable workflows are
   # available via needs.<job>.outputs only for jobs that declared them.
   debs_aggregate:
     name: Aggregate debs outputs
-    needs: [debs_amd64, debs_arm64]
+    needs: [debs_amd64, debs_arm64, debs_publish]
     if: ${{ !cancelled() && !failure() }}
     runs-on: ubuntu-latest
     outputs:
@@ -327,6 +360,7 @@ jobs:
           any=false
           [ "${{ needs.debs_amd64.outputs.any_rebuilt }}" = "true" ] && any=true || true
           [ "${{ needs.debs_arm64.outputs.any_rebuilt }}" = "true" ] && any=true || true
+          [ "${{ needs.debs_publish.outputs.any_rebuilt }}" = "true" ] && any=true || true
           echo "any_rebuilt=${any}" >> "$GITHUB_OUTPUT"
 
   # bootc-build.yml already builds both arches (its discover job emits a
@@ -349,7 +383,7 @@ jobs:
 
   iso:
     name: Build ISO
-    needs: [changes, debs_amd64, debs_arm64, image, meta, base]
+    needs: [changes, debs_publish, image, meta, base]
     # !cancelled() runs the job (but stops on cancel) even when debs, image or base were skipped.
     # The ISO is amd64-only today (Fedora netinstall + bootc), so it depends on
     # the amd64 image; arm64 image is awaited via the shared `image` job to keep
@@ -359,8 +393,7 @@ jobs:
       !cancelled() &&
       needs.changes.outputs.iso == 'true' &&
       (needs.base.result == 'success' || needs.base.result == 'skipped') &&
-      (needs.debs_amd64.result == 'success' || needs.debs_amd64.result == 'skipped') &&
-      (needs.debs_arm64.result == 'success' || needs.debs_arm64.result == 'skipped') &&
+      (needs.debs_publish.result == 'success' || needs.debs_publish.result == 'skipped') &&
       (needs.image.result == 'success' || needs.image.result == 'skipped') &&
       needs.meta.result == 'success'
     uses: DaemonCores/DaemonCores-CI/.github/workflows/iso-builder.yml@main
