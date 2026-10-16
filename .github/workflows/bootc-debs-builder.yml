@@ -20,6 +20,11 @@ on:
         required: false
         type: string
         default: 'no'
+      deploy_pages:
+        description: 'true to upload and deploy the APT repo to GitHub Pages. Set false when a separate debs_publish job handles deployment (prevents duplicate github-pages artifacts when amd64 and arm64 both run publish in the same workflow run).'
+        required: false
+        type: boolean
+        default: true
     outputs:
       any_rebuilt:
         description: 'true if at least one package was rebuilt (not cache-reused).'
@@ -204,3 +209,4 @@ jobs:
         with:
           repo_name: ${{ steps.repo.outputs.name }}
           apt_gpg_key: ${{ secrets.APT_GPG_KEY }}
+          skip_pages: ${{ !inputs.deploy_pages }}
