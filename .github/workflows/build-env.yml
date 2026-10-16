@@ -15,7 +15,7 @@ on:
         description: 'Path to the build-env recipe in the caller repo.'
         required: false
         type: string
-        default: workflows/build-env/env.yml
+        default: workflows/env.yml
 
 jobs:
   build:

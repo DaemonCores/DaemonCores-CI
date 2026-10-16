@@ -1,18 +1,19 @@
 name: iso
 
-# Builds a live-boot installation ISO from the installer container image
-# (ghcr.io/<owner>/<repo>:iso_amd64_autoupdate, built by the `image` job).
+# Builds live-boot installation ISOs from the installer container image
+# (ghcr.io/<owner>/<repo>:iso-<arch>-autoupdate, built by the `image` job).
 #
-# The installer container is a bootc image that boots directly into a graphical
-# installer (bootc-installer GTK4 + fisherman Go backend). bootc-image-builder
-# converts this container into a dracut live-boot ISO.
+# The installer container is a thin layer on top of the base image. It adds
+# only the graphical installer stack (bootc-installer GTK4 + fisherman Go
+# backend + cage + Mesa). bootc-image-builder converts it to a dracut live ISO.
 #
-# The ISO is uploaded to the `install-iso` GitHub Release as both an online
-# variant (pulls the system image at install time) and an offline variant
-# (embeds the system image for airgapped installs). The online/offline
-# distinction is set in the recipe.json embedded in the installer image.
+# Two modes, determined by the compressed size of the payload image:
+#   - offline (< 1.8 GiB): ISO embeds the clean base image as the install
+#     payload via --bootc-installer-payload-ref; no network needed at install.
+#   - net-install (>= 1.8 GiB): ISO is too large for GitHub Releases; falls
+#     back to the minimal image as the live env; all installs require network.
 #
-# Replaces the previous Fedora/Anaconda-based ISO builder.
+# Both amd64 and arm64 ISOs are built in parallel.
 
 on:
   workflow_call:
@@ -29,6 +30,11 @@ jobs:
     permissions:
       contents: write
       packages: read
+
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [amd64, arm64]
 
     steps:
 
@@ -91,7 +97,7 @@ jobs:
               --latest=false
           fi
 
-      # ─── PULL INSTALLER IMAGE ────────────────────────────────────────────
+      # ─── PULL IMAGES ──────────────────────────────────────────────────────
 
       - name: Log in to GHCR
         env:
@@ -101,12 +107,39 @@ jobs:
             --username "${{ github.actor }}" \
             --password-stdin <<< "${PAT_PKG}"
 
-      - name: Pull installer container image
+      - name: Detect payload size and choose build mode
+        id: mode
         run: |
-          IMAGE="ghcr.io/${GITHUB_REPOSITORY,,}:iso_amd64_autoupdate"
-          echo "Pulling installer image: ${IMAGE}"
-          sudo podman pull "${IMAGE}"
-          echo "INSTALLER_IMAGE=${IMAGE}" >> "$GITHUB_ENV"
+          set -euo pipefail
+          ARCH="${{ matrix.arch }}"
+          REPO="${GITHUB_REPOSITORY,,}"
+
+          # The payload is the clean base image — what gets installed on disk.
+          PAYLOAD="ghcr.io/${REPO}:latest-${ARCH}-autoupdate"
+          # The installer image is the thin live env (base + installer layer).
+          INSTALLER="ghcr.io/${REPO}:iso-${ARCH}-autoupdate"
+
+          sudo podman pull "${PAYLOAD}"
+          sudo podman pull "${INSTALLER}"
+
+          # Sum compressed layer sizes from the manifest to estimate download/ISO size.
+          PAYLOAD_SIZE=$(sudo podman manifest inspect "${PAYLOAD}" \
+            | jq '[.layers[].size] | add // 0')
+          THRESHOLD=$((1800 * 1024 * 1024))  # 1.8 GiB
+
+          if [ "${PAYLOAD_SIZE}" -lt "${THRESHOLD}" ]; then
+            echo "Payload ${PAYLOAD_SIZE} bytes < ${THRESHOLD} — offline ISO mode"
+            echo "offline=true"  >> "$GITHUB_OUTPUT"
+            echo "installer=${INSTALLER}" >> "$GITHUB_OUTPUT"
+          else
+            echo "Payload ${PAYLOAD_SIZE} bytes >= ${THRESHOLD} — net-install ISO mode"
+            # Use minimal image as live env to keep ISO small
+            MINIMAL="ghcr.io/${REPO}:iso-minimal-${ARCH}-autoupdate"
+            sudo podman pull "${MINIMAL}"
+            echo "offline=false" >> "$GITHUB_OUTPUT"
+            echo "installer=${MINIMAL}" >> "$GITHUB_OUTPUT"
+          fi
+          echo "payload=${PAYLOAD}" >> "$GITHUB_OUTPUT"
 
       # ─── BUILD LIVE ISO ───────────────────────────────────────────────────
 
@@ -114,6 +147,18 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p out
+
+          ARCH="${{ matrix.arch }}"
+          INSTALLER="${{ steps.mode.outputs.installer }}"
+          PAYLOAD="${{ steps.mode.outputs.payload }}"
+          OFFLINE="${{ steps.mode.outputs.offline }}"
+
+          # Offline: embed the clean base as the install payload (no network needed).
+          # Net-install: no --bootc-installer-payload-ref; image is pulled at install time.
+          PAYLOAD_ARGS=()
+          if [ "${OFFLINE}" = "true" ]; then
+            PAYLOAD_ARGS=(--bootc-installer-payload-ref "${PAYLOAD}")
+          fi
 
           # bootc-image-builder --type iso produces a dracut live-boot ISO.
           # The container's filesystem is squashfs'd; the kernel + initrd from
@@ -126,8 +171,9 @@ jobs:
             -v "$(pwd)/out:/output" \
             quay.io/centos-bootc/bootc-image-builder:latest \
             --type iso \
-            --target-arch amd64 \
-            "${INSTALLER_IMAGE}"
+            --target-arch "${ARCH}" \
+            "${PAYLOAD_ARGS[@]}" \
+            "${INSTALLER}"
 
           # bootc-image-builder writes the ISO to /output/bootiso/
           ISO=$(find out -name "*.iso" | head -1)
@@ -146,8 +192,16 @@ jobs:
       - name: Rename ISO and compute checksum
         run: |
           set -euo pipefail
+          ARCH="${{ matrix.arch }}"
+          OFFLINE="${{ steps.mode.outputs.offline }}"
           NAME="${{ steps.names.outputs.name }}"
-          DEST="out/${NAME}-installer.iso"
+
+          if [ "${OFFLINE}" = "true" ]; then
+            DEST="out/${NAME}-${ARCH}-installer.iso"
+          else
+            DEST="out/${NAME}-${ARCH}-netinstall.iso"
+          fi
+
           mv "${ISO_PATH}" "${DEST}"
           sha256sum "${DEST}" > "${DEST}.sha256"
           echo "ISO_FINAL=${DEST}" >> "$GITHUB_ENV"
