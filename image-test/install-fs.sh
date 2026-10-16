@@ -33,7 +33,15 @@ size=512M, type=uefi
 size=1G,   type=linux
 type=linux
 PART
-command -v partprobe >/dev/null 2>&1 || apt-get install -y --no-install-recommends parted >/dev/null
+# Minimal images omit partprobe (parted package). Install it on-demand, after
+# refreshing the lists: the image's 99-apt-clean apt.conf.d hook wipes
+# /var/lib/apt/lists/* on every apt Post-Invoke, so the lists populated by the
+# sfdisk install above are already gone by the time we get here and a bare
+# `apt-get install` fails with "Package 'parted' has no installation candidate".
+command -v partprobe >/dev/null 2>&1 || {
+  apt-get update -qq >/dev/null
+  apt-get install -y --no-install-recommends parted >/dev/null
+}
 partprobe "${dev}"
 udevadm settle 2>/dev/null || sleep 1
 
