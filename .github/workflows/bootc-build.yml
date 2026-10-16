@@ -26,7 +26,9 @@ jobs:
     name: Discover Containerfiles
     runs-on: ubuntu-latest
     outputs:
-      matrix: ${{ steps.list.outputs.matrix }}
+      matrix_wave1: ${{ steps.list.outputs.matrix_wave1 }}
+      matrix_wave2: ${{ steps.list.outputs.matrix_wave2 }}
+      has_derived: ${{ steps.list.outputs.has_derived }}
       manifest_matrix: ${{ steps.list.outputs.manifest_matrix }}
       global_hash: ${{ steps.list.outputs.global_hash }}
     steps:
@@ -77,11 +79,34 @@ jobs:
             global_inputs+="${name} $(sha256sum "$name" | cut -d' ' -f1)"$'\n'
           done
           global_hash=$(printf '%s' "$global_inputs" | sha256sum | cut -d' ' -f1)
-          echo "matrix=$(printf '%s' "$matrix" | jq -c .)" >>"$GITHUB_OUTPUT"
+          # Split into wave1 (FROM external) and wave2 (FROM our own registry).
+          # Containerfiles that pull a previously-built image from this run
+          # (e.g. Containerfile.iso: FROM ghcr.io/daemoncores/debian-bootc:latest-*)
+          # must run AFTER wave1 pushes, not concurrently with it.
+          owner="${GITHUB_REPOSITORY%%/*}"
+          matrix_wave1='[]'
+          matrix_wave2='[]'
+          while IFS= read -r entry; do
+            [ -z "$entry" ] && continue
+            file=$(printf '%s' "$entry" | jq -r '.file')
+            from_line=$(grep -m1 -iE '^FROM ' "$file" | awk '{print $2}' || true)
+            if printf '%s' "$from_line" | grep -qi "ghcr\.io/${owner}/"; then
+              matrix_wave2=$(printf '%s' "$matrix_wave2" | jq -c --argjson e "$entry" '. += [$e]')
+            else
+              matrix_wave1=$(printf '%s' "$matrix_wave1" | jq -c --argjson e "$entry" '. += [$e]')
+            fi
+          done < <(printf '%s' "$matrix" | jq -c '.[]')
+          has_derived="false"
+          [ "$matrix_wave2" != '[]' ] && has_derived="true"
+          echo "matrix_wave1=$(printf '%s' "$matrix_wave1" | jq -c .)" >>"$GITHUB_OUTPUT"
+          echo "matrix_wave2=$(printf '%s' "$matrix_wave2" | jq -c .)" >>"$GITHUB_OUTPUT"
+          echo "has_derived=${has_derived}" >>"$GITHUB_OUTPUT"
           echo "manifest_matrix=$(printf '%s' "$manifest_matrix" | jq -c .)" >>"$GITHUB_OUTPUT"
           echo "global_hash=${global_hash}" >>"$GITHUB_OUTPUT"
-          echo "Discovered build matrix:"
-          printf '%s' "$matrix" | jq .
+          echo "Wave 1 matrix (external FROM):"
+          printf '%s' "$matrix_wave1" | jq .
+          echo "Wave 2 matrix (derived FROM our registry):"
+          printf '%s' "$matrix_wave2" | jq .
           echo "Manifest matrix:"
           printf '%s' "$manifest_matrix" | jq .
           echo "Global Containerfiles hash: ${global_hash}"
@@ -104,7 +129,7 @@ jobs:
         # job based on the org.daemoncores.autoupdate-variants LABEL, and the
         # arch dimension (amd64/arm64) is folded in here. Both arches always
         # build natively on their matching runner (no QEMU cross-build).
-        entry: ${{ fromJSON(needs.discover.outputs.matrix) }}
+        entry: ${{ fromJSON(needs.discover.outputs.matrix_wave1) }}
 
     steps:
       - name: Free disk space
@@ -394,6 +419,109 @@ jobs:
               2>/dev/null || true
           fi
 
+  # Wave 2: Containerfiles whose FROM references an image built in wave 1
+  # (e.g. Containerfile.iso pulls latest-<arch>-autoupdate which wave 1 just
+  # pushed). Runs only after build-test-push succeeds so the base image exists.
+  build-iso:
+    name: Build ${{ matrix.entry.tag }}-${{ matrix.entry.arch }}-${{ matrix.entry.autoupdate == '1' && 'autoupdate' || 'lock' }} (wave 2)
+    needs: [discover, build-test-push]
+    if: ${{ !cancelled() && needs.discover.outputs.has_derived == 'true' && needs.build-test-push.result == 'success' }}
+    runs-on: ${{ matrix.entry.arch == 'arm64' && 'ubuntu-24.04-arm' || 'ubuntu-latest' }}
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      issues: write
+    strategy:
+      fail-fast: false
+      matrix:
+        entry: ${{ fromJSON(needs.discover.outputs.matrix_wave2) }}
+    steps:
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android \
+            /opt/ghc /opt/hostedtoolcache/CodeQL /usr/local/share/boost
+          df -h
+      - name: Checkout
+        uses: actions/checkout@v7
+      - name: Set image name and tags
+        id: tags
+        env:
+          CF_FILE: ${{ matrix.entry.file }}
+          CF_TAG: ${{ matrix.entry.tag }}
+          ARCH: ${{ matrix.entry.arch }}
+          AUTOUPDATE: ${{ matrix.entry.autoupdate }}
+        run: |
+          set -euo pipefail
+          echo "IMAGE=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_ENV"
+          if [ "$AUTOUPDATE" = "1" ]; then autosuffix=autoupdate; else autosuffix=lock; fi
+          primary="${CF_TAG}_${ARCH}_${autosuffix}"
+          echo "primary=${primary}" >>"$GITHUB_OUTPUT"
+          echo "autosuffix=${autosuffix}" >>"$GITHUB_OUTPUT"
+          canonical=false
+          if [ "$ARCH" = "amd64" ] && [ "$AUTOUPDATE" = "1" ]; then canonical=true; fi
+          echo "canonical=${canonical}" >>"$GITHUB_OUTPUT"
+          echo "ARCH=${ARCH}" >>"$GITHUB_ENV"
+          echo "AUTOUPDATE=${AUTOUPDATE}" >>"$GITHUB_ENV"
+          echo "AUTOSUFFIX=${autosuffix}" >>"$GITHUB_ENV"
+      - name: Log in to GHCR
+        env:
+          PAT_PKG: ${{ secrets.PAT_PKG }}
+        run: |
+          set -euo pipefail
+          sudo podman login ghcr.io \
+            --username "${{ github.actor }}" \
+            --password-stdin <<< "${PAT_PKG}"
+          docker login ghcr.io \
+            --username "${{ github.actor }}" \
+            --password-stdin <<< "${PAT_PKG}"
+      - name: Build
+        env:
+          CF_FILE: ${{ matrix.entry.file }}
+          CF_TAG: ${{ matrix.entry.tag }}
+          ARCH: ${{ matrix.entry.arch }}
+          AUTOUPDATE: ${{ matrix.entry.autoupdate }}
+          PRIMARY: ${{ steps.tags.outputs.primary }}
+          CANONICAL: ${{ steps.tags.outputs.canonical }}
+        run: |
+          set -euo pipefail
+          flags=()
+          if [[ "${{ github.event_name }}" == "schedule" \
+            || "${{ inputs.force_no_cache }}" == "true" ]]; then
+            flags+=(--no-cache)
+          fi
+          product_name="${GITHUB_REPOSITORY##*/}"
+          product_name="${product_name//-/ }"
+          sudo podman build \
+            --arch "${ARCH}" \
+            --build-arg ARCH="${ARCH}" \
+            --build-arg AUTOUPDATE="${AUTOUPDATE}" \
+            --build-arg PRODUCT_NAME="${product_name}" \
+            --label "org.daemoncores.content-hash=wave2-${PRIMARY}" \
+            --tag "${IMAGE}:${PRIMARY}" \
+            "${flags[@]}" \
+            --file "${CF_FILE}" .
+      - name: Push
+        if: github.ref == 'refs/heads/main'
+        id: push
+        env:
+          PRIMARY: ${{ steps.tags.outputs.primary }}
+        run: |
+          set -euo pipefail
+          sudo podman push --digestfile /tmp/digest_primary.txt "${IMAGE}:${PRIMARY}"
+          echo "digest=$(cat /tmp/digest_primary.txt)" >> "$GITHUB_OUTPUT"
+      - name: Install cosign
+        if: github.ref == 'refs/heads/main'
+        uses: sigstore/cosign-installer@v3
+        with:
+          install-dir: /usr/local/bin
+          use-sudo: true
+      - name: Sign image
+        if: github.ref == 'refs/heads/main'
+        run: |
+          set -euo pipefail
+          cosign sign --yes "${IMAGE}@${{ steps.push.outputs.digest }}"
+
   # Promote per-arch images into multi-arch manifest lists. Runs once all
   # build-test-push combos (variant x arch x autoupdate) are green.
   # For each variant tag V, the manifest job creates:
@@ -409,7 +537,7 @@ jobs:
   # are unchanged).
   manifest:
     name: Manifest lists ${{ matrix.entry.tag }}
-    needs: [discover, build-test-push]
+    needs: [discover, build-test-push, build-iso]
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
