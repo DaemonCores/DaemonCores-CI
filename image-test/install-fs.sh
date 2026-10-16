@@ -33,6 +33,7 @@ size=512M, type=uefi
 size=1G,   type=linux
 type=linux
 PART
+command -v partprobe >/dev/null 2>&1 || apt-get install -y --no-install-recommends parted >/dev/null
 partprobe "${dev}"
 udevadm settle 2>/dev/null || sleep 1
 
