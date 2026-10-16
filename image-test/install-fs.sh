@@ -52,6 +52,37 @@ command -v mkfs.vfat >/dev/null 2>&1 || {
   apt-get install -y --no-install-recommends dosfstools >/dev/null
 }
 
+# `bootc install to-filesystem` drives the install through two external tools
+# that the minimal image deliberately does not ship:
+#   - podman, to create the target's image store. bootc calls
+#     CStorage::create unconditionally before deploying, and that spawns
+#     `podman images` against the new store; with no podman on PATH the spawn
+#     fails and bootc reports "Creating imgstorage: Initializing images:
+#     No such file or directory (os error 2)".
+#   - skopeo, which is the importer bootc uses to pull the source image into
+#     the target ostree repo (deploy::pull_from_prepared). Our bootc package
+#     only Recommends it, and the minimal image installs with
+#     --no-install-recommends, so it is absent there.
+# The ISO installer does not need this: it derives from the full image, which
+# carries both. Installing them here keeps the published minimal image as
+# designed (docs/minimal.md lists Podman among its deliberate omissions) while
+# giving the harness the same environment the installer runs in.
+if ! command -v podman >/dev/null 2>&1 || ! command -v skopeo >/dev/null 2>&1; then
+  apt-get update -qq >/dev/null
+  apt-get install -y --no-install-recommends podman skopeo >/dev/null
+fi
+
+# The minimal image ships no SSH server (also a documented omission), so the
+# harness would have nothing to connect to and every test would fail on the
+# wait_ssh timeout. Install it as the harness's transport, in the container
+# whose /usr bootc install copies into the target. openssh-server's postinst
+# records `ssh` as enabled through deb-systemd-helper, which works without a
+# running systemd, so the installed system starts it on boot.
+command -v sshd >/dev/null 2>&1 || {
+  apt-get update -qq >/dev/null
+  apt-get install -y --no-install-recommends openssh-server >/dev/null
+}
+
 mkfs.vfat -n EFI "${dev}p1" >/dev/null
 mkfs.ext4 -q -L boot "${dev}p2"
 mkfs.btrfs -q -L dcos "${dev}p3"

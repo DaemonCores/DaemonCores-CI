@@ -32,6 +32,11 @@ SSH_PORT=2222
 # real hardware for the SB chain. The SB-on path (build_sb_vars) is kept for a
 # future revisit — see the secureboot-boot-test-state memory.
 SECURE_BOOT="${SECURE_BOOT:-0}"
+# 1 once we know /dev/kvm is present and usable, 0 otherwise (set in
+# install_deps). GitHub's hosted arm64 runners expose no /dev/kvm at all —
+# nested virtualization is not available on that fleet — so the arm64 boot
+# test runs under QEMU TCG emulation instead of KVM. See boot_vm and main.
+KVM=0
 VIRT_FW="${WORK}/sbtool/bin/virt-fw-vars"
 SSH_OPTS=(
   -o StrictHostKeyChecking=no
@@ -69,10 +74,31 @@ install_deps() {
     echo "${YQ_SHA256}  /usr/local/bin/yq" | sha256sum -c -
     sudo chmod +x /usr/local/bin/yq
   }
-  echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
-    | sudo tee /etc/udev/rules.d/99-kvm4all.rules >/dev/null
-  sudo udevadm control --reload-rules
-  sudo udevadm trigger --name-match=kvm
+  # /dev/kvm must exist BEFORE udevadm trigger --name-match=kvm: that option is
+  # resolved through find_device("kvm", "/dev"), which fails with "Failed to open
+  # the device 'kvm': Invalid argument" when the node is absent — and under the
+  # `set -e` above that killed the whole script, which is why every arm64 job
+  # died right here with no usable message.
+  if [ -c /dev/kvm ]; then
+    echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+      | sudo tee /etc/udev/rules.d/99-kvm4all.rules >/dev/null
+    sudo udevadm control --reload-rules
+    sudo udevadm trigger --name-match=kvm
+    KVM=1
+  else
+    KVM=0
+    if [ "${ARCH}" != "arm64" ]; then
+      # GitHub's x86_64 fleet always exposes KVM; its absence means the runner
+      # is not what we expect. TCG-emulating an x86_64 boot test would be far too
+      # slow to be meaningful, so fail loudly rather than limp along.
+      echo "::error::/dev/kvm is missing on an amd64 runner; the boot test needs KVM acceleration"
+      exit 1
+    fi
+    # Hosted arm64 runners expose no /dev/kvm: nested virtualization is not
+    # available on that fleet (actions/runner-images#14062). Boot the VM under
+    # QEMU TCG emulation instead — slower, but the only path on this hardware.
+    echo "::warning::/dev/kvm unavailable on arm64; booting the VM under QEMU TCG emulation"
+  fi
 
   if [ "${SECURE_BOOT}" = 1 ]; then
     # Secure Boot varstore generation is amd64-only: OVMF on arm64 (AAVMF) has
@@ -165,16 +191,25 @@ build_sb_vars() {
 #   DISK, SERIAL, SSH_PORT, WORK, MEM, VCPUS, SECURE_BOOT
 #######################################
 boot_vm() {
-  local code vars
+  local code vars accel cpu
+  if [ "${KVM}" = "1" ]; then
+    accel="-enable-kvm"
+    cpu="host"
+  else
+    # TCG: -cpu host is meaningless without KVM, so ask for the widest emulated
+    # CPU instead (-cpu max is the aarch64 spelling of the same idea).
+    accel=""
+    cpu="max"
+  fi
   if [ "${ARCH}" = "arm64" ]; then
-    # arm64: QEMU virt machine with KVM, AAVMF (arm64 UEFI from ovmf package).
+    # arm64: QEMU virt machine, AAVMF (arm64 UEFI from ovmf package).
     # SECURE_BOOT is not supported on arm64 yet (see install_deps guard).
     code=$(find /usr/share/AAVMF -name 'AAVMF_CODE*.fd' | head -1)
     vars=$(find /usr/share/AAVMF -name 'AAVMF_VARS*.fd' | head -1)
     cp "${vars}" "${WORK}/OVMF_VARS.fd"
     sudo qemu-system-aarch64 \
-      -enable-kvm -m "${MEM:-4096}" -smp "${VCPUS:-2}" \
-      -machine virt -cpu host \
+      ${accel} -m "${MEM:-4096}" -smp "${VCPUS:-2}" \
+      -machine virt -cpu "${cpu}" \
       -drive "if=pflash,format=raw,unit=0,readonly=on,file=${code}" \
       -drive "if=pflash,format=raw,unit=1,file=${WORK}/OVMF_VARS.fd" \
       -drive "file=${DISK},format=raw,if=virtio" \
@@ -200,7 +235,7 @@ boot_vm() {
       cp "${vars}" "${WORK}/OVMF_VARS.fd"
     fi
     sudo qemu-system-x86_64 \
-      -enable-kvm -m "${MEM:-4096}" -smp "${VCPUS:-2}" -machine q35 \
+      ${accel} -m "${MEM:-4096}" -smp "${VCPUS:-2}" -machine q35 \
       -global "driver=cfi.pflash01,property=secure,value=${secure}" \
       -drive "if=pflash,format=raw,unit=0,readonly=on,file=${code}" \
       -drive "if=pflash,format=raw,unit=1,file=${WORK}/OVMF_VARS.fd" \
@@ -392,6 +427,12 @@ main() {
   boot_vm
   local timeout
   timeout=$(yq '.boot_timeout // 600' "${TESTS_FILE}")
+  # TCG emulation is an order of magnitude slower than KVM, so the manifest's
+  # KVM-tuned boot timeout would trip on a boot that is merely slow. Scale it.
+  if [ "${KVM}" != "1" ]; then
+    timeout=$((timeout * 5))
+    echo "TCG emulation: boot timeout scaled to ${timeout}s"
+  fi
   if ! wait_ssh "${timeout}"; then
     echo "::error::VM did not become reachable within ${timeout}s"
     sudo tail -n 50 "${SERIAL}" 2>/dev/null || true
@@ -412,6 +453,9 @@ main() {
     sleep 5
     local reboot_timeout
     reboot_timeout=$(yq '.reboot_timeout // 300' "${TESTS_FILE}")
+    if [ "${KVM}" != "1" ]; then
+      reboot_timeout=$((reboot_timeout * 5))
+    fi
     if ! wait_ssh "${reboot_timeout}"; then
       echo "::error::VM did not come back after reboot within ${reboot_timeout}s"
       sudo tail -n 50 "${SERIAL}" 2>/dev/null || true
