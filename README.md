@@ -66,7 +66,7 @@ workflows/
   build-env/env.yml
   bootc-debs-builder/packages.yml
   bootc-debs-builder/<package sources>
-  image-tests/tests.yml
+  tests.yml
 docs/*.md
 ```
 
@@ -74,7 +74,7 @@ Each root-level `Containerfile*` becomes an image variant. `Containerfile` maps 
 
 Package dependencies declared in `packages.yml` are converted into build waves. Independent packages build in parallel; a package is scheduled after every declared dependency.
 
-Every runtime test in `workflows/image-tests/tests.yml` must include a diagnostic command. The harness rejects incomplete test definitions so a failed boot test always provides actionable state.
+Every runtime test in `workflows/tests.yml` must include a diagnostic command. The harness rejects incomplete test definitions so a failed boot test always provides actionable state.
 
 ## Minimal caller workflow
 
