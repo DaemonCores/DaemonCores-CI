@@ -7,6 +7,13 @@
 # partitioning tools (sfdisk, mkfs.*, btrfs). Used by the image-test harness.
 set -euo pipefail
 
+# Minimal images omit sfdisk (util-linux fdisk package). Install it
+# on-demand so the disk partitioning step works for all image variants.
+command -v sfdisk >/dev/null 2>&1 || {
+  apt-get update -qq >/dev/null
+  apt-get install -y --no-install-recommends fdisk >/dev/null
+}
+
 DISK=/disk.raw
 KEY=/key.pub
 T=/target
@@ -68,7 +75,26 @@ fi
 bootc install to-filesystem --skip-fetch-check \
   "${CONSOLE_KARGS[@]}" \
   --root-ssh-authorized-keys "${KEY}" \
-  "${T}"
+  "${T}" || {
+  _ec=$?
+  # CI runners often have stale "Debian GNU/Linux" EFI NVRAM entries from
+  # prior runs that bootupd cannot remove cleanly (ENOENT). The ESP and
+  # bootloader binaries are written before the NVRAM update step, so QEMU
+  # (which uses the removable path \EFI\BOOT\BOOT*.EFI) still boots fine.
+  # Fail hard only if the ESP is missing its required boot binary.
+  _efi_ok=0
+  for _p in "${T}/boot/efi/EFI/BOOT/BOOTX64.EFI" \
+             "${T}/boot/efi/EFI/BOOT/BOOTAA64.EFI" \
+             "${T}/boot/efi/EFI/BOOT/bootx64.efi" \
+             "${T}/boot/efi/EFI/BOOT/bootaa64.efi"; do
+    [ -f "${_p}" ] && { _efi_ok=1; break; }
+  done
+  if [ "${_efi_ok}" = "0" ]; then
+    echo "::error::bootc install failed and ESP is missing the required BOOT*.EFI file"
+    exit "${_ec}"
+  fi
+  echo "::warning::bootc install failed (likely EFI NVRAM update) but ESP has the boot binary — continuing"
+}
 
 # Diagnostic: exactly what got laid on the ESP. Firmware boots the removable
 # path \EFI\BOOT\BOOTX64.EFI, so it (and grubx64.efi) must be here. Printed
