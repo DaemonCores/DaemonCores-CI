@@ -1,7 +1,7 @@
 name: 'Image test (bootc + QEMU)'
 description: >-
   Install the freshly built bootc image onto a virtual disk, boot it under
-  QEMU/KVM (UEFI), and run the repo's workflows/image-tests/tests.yml over SSH.
+  QEMU/KVM (UEFI), and run the repo's workflows/tests.yml over SSH.
   Fails (blocking the push) if any test fails. Runs on an ubuntu-latest runner
   (KVM available), not in a container.
 
@@ -12,7 +12,7 @@ inputs:
   tests:
     description: 'Path to the tests manifest in the caller repo.'
     required: false
-    default: workflows/image-tests/tests.yml
+    default: workflows/tests.yml
   memory:
     description: 'VM memory in MiB.'
     required: false
