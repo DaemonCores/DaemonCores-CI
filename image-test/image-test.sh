@@ -235,9 +235,9 @@ boot_vm() {
       # it cannot enumerate the disk at all. Fallback to any non-secboot CODE if
       # the 4M variant is absent (unlikely on Ubuntu 24.04+).
       code=$(find /usr/share/OVMF -name 'OVMF_CODE_4M*.fd' ! -name '*secboot*' \
-        | head -1)
+        ! -name '*.ms.*' | head -1)
       code="${code:-$(find /usr/share/OVMF -name 'OVMF_CODE*.fd' ! -name '*secboot*' \
-        | head -1)}"
+        ! -name '*.ms.*' | head -1)}"
       vars=$(find /usr/share/OVMF -name 'OVMF_VARS_4M*.fd' ! -name '*.ms.*' \
         ! -name '*secboot*' | head -1)
       vars="${vars:-$(find /usr/share/OVMF -name 'OVMF_VARS*.fd' ! -name '*.ms.*' \
