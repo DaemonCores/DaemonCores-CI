@@ -142,8 +142,16 @@ fi
 # so no persistent NVRAM state is required.
 mkdir -p /sys/firmware/efi/efivars
 mount -t tmpfs tmpfs /sys/firmware/efi/efivars
+# 4-byte EFI attribute flags (NV|BS|RT = 0x07) + empty entry list.
 printf '\x07\x00\x00\x00' > \
   /sys/firmware/efi/efivars/BootOrder-8be4df61-93ca-11d2-aa0d-00e098032b8c
+# bootupd calls efibootmgr to create/delete NVRAM entries.  On CI runners
+# (VMs with no real UEFI NVRAM) efibootmgr rejects the tmpfs because its
+# statfs magic differs from efivarfs.  Place a no-op stub earlier in PATH so
+# bootupd's efibootmgr calls succeed silently; QEMU boots via the removable
+# path \EFI\BOOT\BOOT*.EFI so no persistent NVRAM state is needed.
+printf '#!/bin/sh\nexit 0\n' > /usr/local/bin/efibootmgr
+chmod +x /usr/local/bin/efibootmgr
 
 bootc install to-filesystem --skip-fetch-check \
   "${CONSOLE_KARGS[@]}" \
