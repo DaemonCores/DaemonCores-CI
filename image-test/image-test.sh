@@ -214,7 +214,7 @@ boot_vm() {
       -drive "if=pflash,format=raw,unit=1,file=${WORK}/OVMF_VARS.fd" \
       -drive "file=${DISK},format=raw,if=virtio" \
       -netdev "user,id=n0,hostfwd=tcp::${SSH_PORT}-:22" \
-      -device virtio-net,netdev=n0 \
+      -device "virtio-net,netdev=n0,romfile=" \
       -display none -serial "file:${SERIAL}" -monitor none \
       -daemonize -pidfile "${WORK}/qemu.pid"
   else
@@ -241,7 +241,7 @@ boot_vm() {
       -drive "if=pflash,format=raw,unit=1,file=${WORK}/OVMF_VARS.fd" \
       -drive "file=${DISK},format=raw,if=virtio" \
       -netdev "user,id=n0,hostfwd=tcp::${SSH_PORT}-:22" \
-      -device virtio-net,netdev=n0 \
+      -device "virtio-net,netdev=n0,romfile=" \
       -display none -serial "file:${SERIAL}" -monitor none \
       -daemonize -pidfile "${WORK}/qemu.pid"
   fi
