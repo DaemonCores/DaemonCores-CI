@@ -175,7 +175,15 @@ if [ -n "${deployed_dir}" ]; then
   # bootc install to-filesystem finalizes the btrfs root subvolume as read-only
   # (btrfs property set ro=true). Temporarily unlock it so ostree can create
   # the testrollback ref, then lock it again before the VM boots.
-  btrfs property set "${T}" ro false 2>/dev/null || true
+  # The direct property-set on the subvol mount point works on amd64 but silently
+  # fails on arm64 runners. Fall back to mounting the raw pool (no subvol filter)
+  # and setting the property on the 'root' subvolume path, which is reliable on
+  # both architectures.
+  if ! btrfs property set "${T}" ro false 2>/dev/null; then
+    mount "${dev}p3" /pool
+    btrfs property set /pool/root ro false 2>/dev/null || true
+    umount /pool
+  fi
   if ostree --repo="${T}/ostree/repo" refs --create="testrollback/0" "${deployed_rev}" \
      && ostree admin --sysroot="${T}" deploy --os="${stateroot}" "testrollback/0"; then
     echo "=== rollback slot staged: ${deployed_rev} (stateroot: ${stateroot}) ==="
