@@ -83,6 +83,17 @@ command -v sshd >/dev/null 2>&1 || {
   apt-get install -y --no-install-recommends openssh-server >/dev/null
 }
 
+# bootupd is required by `bootc install to-filesystem` for UEFI boot data
+# installation (it places the signed shim + grub into the ESP). The minimal
+# image intentionally omits it (it is not needed at runtime); install it
+# on-demand here so the harness gets the same bootloader path as the full image.
+# bootupd pulls grub-efi-*-signed + shim-signed as dependencies, which provide
+# the shim*.efi files bootupd copies into the ESP.
+command -v bootupd >/dev/null 2>&1 || {
+  apt-get update -qq >/dev/null
+  apt-get install -y --no-install-recommends bootupd >/dev/null
+}
+
 mkfs.vfat -n EFI "${dev}p1" >/dev/null
 mkfs.ext4 -q -L boot "${dev}p2"
 mkfs.btrfs -q -L dcos "${dev}p3"

@@ -52,7 +52,7 @@ SSH_OPTS=(
 install_deps() {
   sudo apt-get update
   if [ "${ARCH}" = "arm64" ]; then
-    sudo apt-get install -y --no-install-recommends qemu-system-arm ovmf jq
+    sudo apt-get install -y --no-install-recommends qemu-system-arm qemu-efi-aarch64 jq
   else
     sudo apt-get install -y --no-install-recommends qemu-system-x86 ovmf jq
   fi
@@ -202,7 +202,7 @@ boot_vm() {
     cpu="max"
   fi
   if [ "${ARCH}" = "arm64" ]; then
-    # arm64: QEMU virt machine, AAVMF (arm64 UEFI from ovmf package).
+    # arm64: QEMU virt machine, AAVMF (arm64 UEFI from qemu-efi-aarch64 package).
     # SECURE_BOOT is not supported on arm64 yet (see install_deps guard).
     code=$(find /usr/share/AAVMF -name 'AAVMF_CODE*.fd' | head -1)
     vars=$(find /usr/share/AAVMF -name 'AAVMF_VARS*.fd' | head -1)
