@@ -131,30 +131,19 @@ else
   CONSOLE_KARGS=(--karg console=tty0 --karg console=ttyS0,115200)
 fi
 
-# Sandbox EFI NVRAM so bootupd can write boot entries without touching host
-# firmware variables.  The privileged container inherits the host's efivarfs
-# at /sys/firmware/efi/efivars via the shared /sys mount; overmounting it with
-# a tmpfs shadows the host's real variables inside this namespace only.
-# After mounting, seed an empty BootOrder variable (4-byte EFI attribute flags
-# + zero entries) so bootupd's "clear old Debian entries" step can enumerate
-# the list without hitting ENOENT.  All writes go to the tmpfs and are
-# discarded on unmount; QEMU boots via the removable path \EFI\BOOT\BOOT*.EFI
-# so no persistent NVRAM state is required.
+# Sandbox EFI NVRAM so bootupd does not write or read host firmware variables.
+# bootupd's update_firmware() checks three things in order:
+#   1. is_efi_booted(): Path::new("/sys/firmware/efi").try_exists()
+#   2. fstatvfs on /sys/firmware/efi/efivars (RDONLY flag check)
+#   3. read_dir("/sys/firmware/efi/efivars").next().is_none() (empty check)
+# If (1) is false OR (3) is true OR (2) is RDONLY it returns Ok(()) immediately.
+# We exploit the empty check: mkdir the efivars path so (1) becomes true (the
+# directory exists), then mount an empty tmpfs over it.  The empty tmpfs makes
+# (3) true and update_firmware() short-circuits before ever calling efibootmgr.
+# All this runs inside the privileged podman container whose mount namespace is
+# separate from the host, so the host's efivarfs is unaffected.
 mkdir -p /sys/firmware/efi/efivars
 mount -t tmpfs tmpfs /sys/firmware/efi/efivars
-# 4-byte EFI attribute flags (NV|BS|RT = 0x07) + empty entry list.
-printf '\x07\x00\x00\x00' > \
-  /sys/firmware/efi/efivars/BootOrder-8be4df61-93ca-11d2-aa0d-00e098032b8c
-# bootc calls bootupctl with an explicit cleared environment whose PATH is
-# /bin:/usr/bin:/sbin:/usr/sbin:/usr/local/bin:/usr/local/sbin.  bootupd
-# then calls efibootmgr, which rejects the tmpfs because libefivar checks
-# statfs(2) and requires the real efivarfs magic.  Write the no-op stub at
-# /usr/sbin/efibootmgr so it shadows (latest, which ships the Debian package
-# at that exact path) or fills in (minimal, which has no efibootmgr) the
-# binary before /usr/local/bin would be reached; QEMU boots via the
-# removable path \EFI\BOOT\BOOT*.EFI so NVRAM entries are never consulted.
-printf '#!/bin/sh\nexit 0\n' > /usr/sbin/efibootmgr
-chmod +x /usr/sbin/efibootmgr
 
 bootc install to-filesystem --skip-fetch-check \
   "${CONSOLE_KARGS[@]}" \
