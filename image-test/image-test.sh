@@ -228,10 +228,22 @@ boot_vm() {
       # Setup Mode: our grub's MOK is not enrolled in a fresh VM and distro *.ms
       # varstores carry a dbx that rejects the shim, so with SB off we validate the
       # OS boot path. Ref: Ubuntu UEFI/OVMF file naming.
-      code=$(find /usr/share/OVMF -name 'OVMF_CODE*.fd' ! -name '*secboot*' \
+      # Prefer the 4M firmware variants: OVMF_CODE_4M.fd (4 MB) includes the
+      # VirtIO-BLK and VirtIO-SCSI UEFI drivers that let OVMF discover the
+      # VirtIO disk and boot from it. The 2 MB OVMF_CODE.fd (legacy) omits those
+      # drivers; OVMF then reports "No bootable option or device was found" because
+      # it cannot enumerate the disk at all. Fallback to any non-secboot CODE if
+      # the 4M variant is absent (unlikely on Ubuntu 24.04+).
+      code=$(find /usr/share/OVMF -name 'OVMF_CODE_4M*.fd' ! -name '*secboot*' \
         | head -1)
-      vars=$(find /usr/share/OVMF -name 'OVMF_VARS*.fd' ! -name '*.ms.*' \
+      code="${code:-$(find /usr/share/OVMF -name 'OVMF_CODE*.fd' ! -name '*secboot*' \
+        | head -1)}"
+      vars=$(find /usr/share/OVMF -name 'OVMF_VARS_4M*.fd' ! -name '*.ms.*' \
         ! -name '*secboot*' | head -1)
+      vars="${vars:-$(find /usr/share/OVMF -name 'OVMF_VARS*.fd' ! -name '*.ms.*' \
+        ! -name '*secboot*' | head -1)}"
+      echo "OVMF CODE: ${code}"
+      echo "OVMF VARS: ${vars}"
       cp "${vars}" "${WORK}/OVMF_VARS.fd"
     fi
     sudo qemu-system-x86_64 \
