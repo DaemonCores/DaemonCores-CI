@@ -14,6 +14,13 @@
 set -euo pipefail
 
 ARCH="${ARCH:-amd64}"
+# Variant derived from the image tag: tags containing "minimal" map to "minimal";
+# everything else (latest, gallium, …) maps to "main". Used by run_tests to skip
+# tests whose `variant:` field does not match the image under test.
+VARIANT="main"
+if echo "${IMAGE:-}" | grep -qE ':[^:]*minimal'; then
+  VARIANT="minimal"
+fi
 WORK="${RUNNER_TEMP:-/tmp}"
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 DISK="${WORK}/test-disk.raw"
@@ -305,7 +312,7 @@ wait_ssh() {
 #######################################
 run_tests() {
   local section="${1:-tests}"
-  local n i name cmd expect diag test_arch out rc fail=0 pass
+  local n i name cmd expect diag test_arch test_variant out rc fail=0 pass
   n=$(yq ".${section} | length" "${TESTS_FILE}")
   for ((i = 0; i < n; i++)); do
     name=$(yq ".${section}[${i}].name" "${TESTS_FILE}")
@@ -313,6 +320,12 @@ run_tests() {
     test_arch=$(yq ".${section}[${i}].arch // \"\"" "${TESTS_FILE}")
     if [ -n "${test_arch}" ] && [ "${test_arch}" != "${ARCH}" ]; then
       echo "  SKIP  ${name} (arch: ${test_arch}, running: ${ARCH})"
+      continue
+    fi
+    # Skip tests that are pinned to a different image variant.
+    test_variant=$(yq ".${section}[${i}].variant // \"\"" "${TESTS_FILE}")
+    if [ -n "${test_variant}" ] && [ "${test_variant}" != "${VARIANT}" ]; then
+      echo "  SKIP  ${name} (variant: ${test_variant}, running: ${VARIANT})"
       continue
     fi
     cmd=$(yq ".${section}[${i}].run" "${TESTS_FILE}")
