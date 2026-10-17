@@ -131,17 +131,19 @@ else
   CONSOLE_KARGS=(--karg console=tty0 --karg console=ttyS0,115200)
 fi
 
-# GitHub Actions runners expose no EFI NVRAM filesystem.  bootupd's NVRAM
-# step opens /sys/firmware/efi/efivars to enumerate and clear old boot entries;
-# ENOENT on that path causes `bootc install` to exit non-zero even though the
-# ESP is fully written.  Mount a tmpfs there so bootupd sees an empty
-# variable store, clears nothing, and succeeds cleanly.  The writes it makes
-# (new boot entries) go to the tmpfs and are discarded on unmount, which is
-# harmless: QEMU uses the removable path \EFI\BOOT\BOOT*.EFI anyway.
+# Sandbox EFI NVRAM so bootupd can write boot entries without touching host
+# firmware variables.  The privileged container inherits the host's efivarfs
+# at /sys/firmware/efi/efivars via the shared /sys mount; overmounting it with
+# a tmpfs shadows the host's real variables inside this namespace only.
+# After mounting, seed an empty BootOrder variable (4-byte EFI attribute flags
+# + zero entries) so bootupd's "clear old Debian entries" step can enumerate
+# the list without hitting ENOENT.  All writes go to the tmpfs and are
+# discarded on unmount; QEMU boots via the removable path \EFI\BOOT\BOOT*.EFI
+# so no persistent NVRAM state is required.
 mkdir -p /sys/firmware/efi/efivars
-if ! mount -t efivarfs none /sys/firmware/efi/efivars 2>/dev/null; then
-  mount -t tmpfs tmpfs /sys/firmware/efi/efivars
-fi
+mount -t tmpfs tmpfs /sys/firmware/efi/efivars
+printf '\x07\x00\x00\x00' > \
+  /sys/firmware/efi/efivars/BootOrder-8be4df61-93ca-11d2-aa0d-00e098032b8c
 
 bootc install to-filesystem --skip-fetch-check \
   "${CONSOLE_KARGS[@]}" \
