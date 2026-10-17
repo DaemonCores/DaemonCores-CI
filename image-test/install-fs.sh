@@ -52,6 +52,48 @@ command -v mkfs.vfat >/dev/null 2>&1 || {
   apt-get install -y --no-install-recommends dosfstools >/dev/null
 }
 
+# `bootc install to-filesystem` drives the install through two external tools
+# that the minimal image deliberately does not ship:
+#   - podman, to create the target's image store. bootc calls
+#     CStorage::create unconditionally before deploying, and that spawns
+#     `podman images` against the new store; with no podman on PATH the spawn
+#     fails and bootc reports "Creating imgstorage: Initializing images:
+#     No such file or directory (os error 2)".
+#   - skopeo, which is the importer bootc uses to pull the source image into
+#     the target ostree repo (deploy::pull_from_prepared). Our bootc package
+#     only Recommends it, and the minimal image installs with
+#     --no-install-recommends, so it is absent there.
+# The ISO installer does not need this: it derives from the full image, which
+# carries both. Installing them here keeps the published minimal image as
+# designed (docs/minimal.md lists Podman among its deliberate omissions) while
+# giving the harness the same environment the installer runs in.
+if ! command -v podman >/dev/null 2>&1 || ! command -v skopeo >/dev/null 2>&1; then
+  apt-get update -qq >/dev/null
+  apt-get install -y --no-install-recommends podman skopeo >/dev/null
+fi
+
+# The minimal image ships no SSH server (also a documented omission), so the
+# harness would have nothing to connect to and every test would fail on the
+# wait_ssh timeout. Install it as the harness's transport, in the container
+# whose /usr bootc install copies into the target. openssh-server's postinst
+# records `ssh` as enabled through deb-systemd-helper, which works without a
+# running systemd, so the installed system starts it on boot.
+command -v sshd >/dev/null 2>&1 || {
+  apt-get update -qq >/dev/null
+  apt-get install -y --no-install-recommends openssh-server >/dev/null
+}
+
+# bootupd is required by `bootc install to-filesystem` for UEFI boot data
+# installation (it places the signed shim + grub into the ESP). The minimal
+# image intentionally omits it (it is not needed at runtime); install it
+# on-demand here so the harness gets the same bootloader path as the full image.
+# bootupd pulls grub-efi-*-signed + shim-signed as dependencies, which provide
+# the shim*.efi files bootupd copies into the ESP.
+command -v bootupd >/dev/null 2>&1 || {
+  apt-get update -qq >/dev/null
+  apt-get install -y --no-install-recommends bootupd >/dev/null
+}
+
 mkfs.vfat -n EFI "${dev}p1" >/dev/null
 mkfs.ext4 -q -L boot "${dev}p2"
 mkfs.btrfs -q -L dcos "${dev}p3"
@@ -130,10 +172,18 @@ deployed_dir=$(ls -d "${T}/ostree/deploy/${stateroot}/deploy/"*.0 2>/dev/null | 
 if [ -n "${deployed_dir}" ]; then
   deployed_rev="${deployed_dir##*/}"
   deployed_rev="${deployed_rev%.0}"
-  ostree --repo="${T}/ostree/repo" refs --create="testrollback/0" "${deployed_rev}"
-  ostree admin --sysroot="${T}" deploy --os="${stateroot}" "testrollback/0"
-  echo "=== rollback slot staged: ${deployed_rev} (stateroot: ${stateroot}) ==="
-  ostree admin --sysroot="${T}" status
+  # bootc install to-filesystem finalizes the btrfs root subvolume as read-only
+  # (btrfs property set ro=true). Temporarily unlock it so ostree can create
+  # the testrollback ref, then lock it again before the VM boots.
+  btrfs property set "${T}" ro false 2>/dev/null || true
+  if ostree --repo="${T}/ostree/repo" refs --create="testrollback/0" "${deployed_rev}" \
+     && ostree admin --sysroot="${T}" deploy --os="${stateroot}" "testrollback/0"; then
+    echo "=== rollback slot staged: ${deployed_rev} (stateroot: ${stateroot}) ==="
+    ostree admin --sysroot="${T}" status || true
+  else
+    echo "::warning::testrollback slot not staged (sysroot locked after bootc install) — rollback tests will fail"
+  fi
+  btrfs property set "${T}" ro true 2>/dev/null || true
 else
   echo "::warning::could not find deployed commit — rollback slot not staged; rollback tests will fail"
 fi
