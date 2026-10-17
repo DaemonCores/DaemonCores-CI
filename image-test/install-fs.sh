@@ -174,18 +174,15 @@ deployed_dir=$(ls -d "${T}/ostree/deploy/${stateroot}/deploy/"*.0 2>/dev/null | 
 if [ -n "${deployed_dir}" ]; then
   deployed_rev="${deployed_dir##*/}"
   deployed_rev="${deployed_rev%.0}"
-  # bootc install to-filesystem finalizes the btrfs root subvolume as read-only
-  # (btrfs property set ro=true). Temporarily unlock it so ostree can create
-  # the testrollback ref, then lock it again before the VM boots.
-  # The direct property-set on the subvol mount point works on amd64 but silently
-  # fails on arm64 runners. Fall back to mounting the raw pool (no subvol filter)
-  # and setting the property on the 'root' subvolume path, which is reliable on
-  # both architectures.
-  if ! btrfs property set "${T}" ro false 2>/dev/null; then
-    mount "${dev}p3" /pool
-    btrfs property set /pool/root ro false 2>/dev/null || true
-    umount /pool
-  fi
+  # Unlock the btrfs root subvolume so ostree can stage the testrollback
+  # deployment. bootc install to-filesystem finalizes the subvolume with ro=true.
+  # Always use the raw pool mount (no subvol= filter): setting the property via
+  # the subvol= mount point exits 0 but does not flush the kernel's read-only
+  # enforcement, whereas setting it on the subvolume path within the pool mount
+  # is reliable on both amd64 and arm64.
+  mount "${dev}p3" /pool
+  btrfs property set /pool/root ro false || true
+  umount /pool
   if ostree --repo="${T}/ostree/repo" refs --create="testrollback/0" "${deployed_rev}" \
      && ostree admin --sysroot="${T}" deploy --os="${stateroot}" "testrollback/0"; then
     echo "=== rollback slot staged: ${deployed_rev} (stateroot: ${stateroot}) ==="
@@ -193,7 +190,9 @@ if [ -n "${deployed_dir}" ]; then
   else
     echo "::warning::testrollback slot not staged (sysroot locked after bootc install) — rollback tests will fail"
   fi
-  btrfs property set "${T}" ro true 2>/dev/null || true
+  mount "${dev}p3" /pool
+  btrfs property set /pool/root ro true || true
+  umount /pool
 else
   echo "::warning::could not find deployed commit — rollback slot not staged; rollback tests will fail"
 fi
