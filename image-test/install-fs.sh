@@ -172,10 +172,18 @@ deployed_dir=$(ls -d "${T}/ostree/deploy/${stateroot}/deploy/"*.0 2>/dev/null | 
 if [ -n "${deployed_dir}" ]; then
   deployed_rev="${deployed_dir##*/}"
   deployed_rev="${deployed_rev%.0}"
-  ostree --repo="${T}/ostree/repo" refs --create="testrollback/0" "${deployed_rev}"
-  ostree admin --sysroot="${T}" deploy --os="${stateroot}" "testrollback/0"
-  echo "=== rollback slot staged: ${deployed_rev} (stateroot: ${stateroot}) ==="
-  ostree admin --sysroot="${T}" status
+  # bootc install to-filesystem finalizes the btrfs root subvolume as read-only
+  # (btrfs property set ro=true). Temporarily unlock it so ostree can create
+  # the testrollback ref, then lock it again before the VM boots.
+  btrfs property set "${T}" ro false 2>/dev/null || true
+  if ostree --repo="${T}/ostree/repo" refs --create="testrollback/0" "${deployed_rev}" \
+     && ostree admin --sysroot="${T}" deploy --os="${stateroot}" "testrollback/0"; then
+    echo "=== rollback slot staged: ${deployed_rev} (stateroot: ${stateroot}) ==="
+    ostree admin --sysroot="${T}" status || true
+  else
+    echo "::warning::testrollback slot not staged (sysroot locked after bootc install) — rollback tests will fail"
+  fi
+  btrfs property set "${T}" ro true 2>/dev/null || true
 else
   echo "::warning::could not find deployed commit — rollback slot not staged; rollback tests will fail"
 fi
