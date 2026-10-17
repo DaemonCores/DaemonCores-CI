@@ -130,29 +130,23 @@ if [ "${ARCH:-amd64}" = "arm64" ]; then
 else
   CONSOLE_KARGS=(--karg console=tty0 --karg console=ttyS0,115200)
 fi
+
+# GitHub Actions runners expose no EFI NVRAM filesystem.  bootupd's NVRAM
+# step opens /sys/firmware/efi/efivars to enumerate and clear old boot entries;
+# ENOENT on that path causes `bootc install` to exit non-zero even though the
+# ESP is fully written.  Mount a tmpfs there so bootupd sees an empty
+# variable store, clears nothing, and succeeds cleanly.  The writes it makes
+# (new boot entries) go to the tmpfs and are discarded on unmount, which is
+# harmless: QEMU uses the removable path \EFI\BOOT\BOOT*.EFI anyway.
+mkdir -p /sys/firmware/efi/efivars
+if ! mount -t efivarfs none /sys/firmware/efi/efivars 2>/dev/null; then
+  mount -t tmpfs tmpfs /sys/firmware/efi/efivars
+fi
+
 bootc install to-filesystem --skip-fetch-check \
   "${CONSOLE_KARGS[@]}" \
   --root-ssh-authorized-keys "${KEY}" \
-  "${T}" || {
-  _ec=$?
-  # CI runners often have stale "Debian GNU/Linux" EFI NVRAM entries from
-  # prior runs that bootupd cannot remove cleanly (ENOENT). The ESP and
-  # bootloader binaries are written before the NVRAM update step, so QEMU
-  # (which uses the removable path \EFI\BOOT\BOOT*.EFI) still boots fine.
-  # Fail hard only if the ESP is missing its required boot binary.
-  _efi_ok=0
-  for _p in "${T}/boot/efi/EFI/BOOT/BOOTX64.EFI" \
-             "${T}/boot/efi/EFI/BOOT/BOOTAA64.EFI" \
-             "${T}/boot/efi/EFI/BOOT/bootx64.efi" \
-             "${T}/boot/efi/EFI/BOOT/bootaa64.efi"; do
-    [ -f "${_p}" ] && { _efi_ok=1; break; }
-  done
-  if [ "${_efi_ok}" = "0" ]; then
-    echo "::error::bootc install failed and ESP is missing the required BOOT*.EFI file"
-    exit "${_ec}"
-  fi
-  echo "::warning::bootc install failed (likely EFI NVRAM update) but ESP has the boot binary — continuing"
-}
+  "${T}"
 
 # Diagnostic: exactly what got laid on the ESP. Firmware boots the removable
 # path \EFI\BOOT\BOOTX64.EFI, so it (and grubx64.efi) must be here. Printed
