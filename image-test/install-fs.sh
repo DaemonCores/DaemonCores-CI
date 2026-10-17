@@ -131,19 +131,25 @@ else
   CONSOLE_KARGS=(--karg console=tty0 --karg console=ttyS0,115200)
 fi
 
-# Sandbox EFI NVRAM so bootupd does not write or read host firmware variables.
-# bootupd's update_firmware() checks three things in order:
-#   1. is_efi_booted(): Path::new("/sys/firmware/efi").try_exists()
-#   2. fstatvfs on /sys/firmware/efi/efivars (RDONLY flag check)
-#   3. read_dir("/sys/firmware/efi/efivars").next().is_none() (empty check)
-# If (1) is false OR (3) is true OR (2) is RDONLY it returns Ok(()) immediately.
-# We exploit the empty check: mkdir the efivars path so (1) becomes true (the
-# directory exists), then mount an empty tmpfs over it.  The empty tmpfs makes
-# (3) true and update_firmware() short-circuits before ever calling efibootmgr.
-# All this runs inside the privileged podman container whose mount namespace is
-# separate from the host, so the host's efivarfs is unaffected.
+# Sandbox EFI NVRAM so bootupd does not write to or read from the host firmware vars.
+#
+# bootc install to-filesystem does two things that defeat a naive "mount empty tmpfs" trick:
+#   1. It unshares its mount namespace (CLONE_NEWNS), copying our mounts into the new ns.
+#   2. setup_sys_mount("efivarfs", EFIVARFS) in install.rs then checks:
+#      a. /proc/1/root/sys/firmware/efi/efivars (host efivars via PID-1 root) — if populated
+#         on the host the function continues; if our copy is also populated it returns early.
+#      b. If our /sys/firmware/efi/efivars is EMPTY (not populated), it mounts the REAL host
+#         efivarfs over it, defeating our empty-tmpfs sandbox.
+#   3. bootupd's update_firmware() then sees RDONLY OR empty efivars and returns Ok(()).
+#
+# Fix: mount tmpfs → seed one dummy EFI var file so setup_sys_mount sees our path as
+# "already populated" and skips remounting the real host efivarfs → remount read-only so
+# update_firmware()'s RDONLY check fires and it returns without ever calling efibootmgr.
 mkdir -p /sys/firmware/efi/efivars
 mount -t tmpfs tmpfs /sys/firmware/efi/efivars
+# Dummy EFI Global Variable (BootOrder GUID) — content irrelevant, presence is what matters
+touch /sys/firmware/efi/efivars/BootOrder-8be4df61-93ca-11d2-aa0d-00e098032b8c
+mount -o remount,ro /sys/firmware/efi/efivars
 
 bootc install to-filesystem --skip-fetch-check \
   "${CONSOLE_KARGS[@]}" \
