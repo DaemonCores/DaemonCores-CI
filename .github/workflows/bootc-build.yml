@@ -341,6 +341,30 @@ jobs:
           image: ${{ env.IMAGE }}:${{ steps.tags.outputs.primary }}
           arch: ${{ matrix.entry.arch }}
 
+      # Report-only vulnerability scan (exit-code 0: never fails the build).
+      # Output goes to the job summary only, no artifact. Switch exit-code to 1
+      # with severity CRITICAL once the baseline is known to be clean.
+      - name: Save image for vulnerability scan
+        env:
+          PRIMARY: ${{ steps.tags.outputs.primary }}
+        run: |
+          set -euo pipefail
+          sudo podman save --format docker-archive -o /tmp/scan-image.tar "${IMAGE}:${PRIMARY}"
+          sudo chmod 644 /tmp/scan-image.tar
+
+      - name: Scan image for vulnerabilities (report only)
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          input: /tmp/scan-image.tar
+          format: table
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: '0'
+
+      - name: Remove scan archive
+        if: always()
+        run: sudo rm -f /tmp/scan-image.tar
+
       - name: Push
         if: github.ref == 'refs/heads/main'
         id: push
