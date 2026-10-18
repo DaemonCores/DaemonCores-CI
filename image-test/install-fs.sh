@@ -175,14 +175,27 @@ if [ -n "${deployed_dir}" ]; then
   deployed_rev="${deployed_dir##*/}"
   deployed_rev="${deployed_rev%.0}"
   # Unlock the btrfs root subvolume so ostree can stage the testrollback
-  # deployment. bootc install to-filesystem finalizes the subvolume with ro=true.
-  # Always use the raw pool mount (no subvol= filter): setting the property via
-  # the subvol= mount point exits 0 but does not flush the kernel's read-only
-  # enforcement, whereas setting it on the subvolume path within the pool mount
-  # is reliable on both amd64 and arm64.
+  # deployment. bootc install to-filesystem sets the subvolume ro=true AND
+  # remounts the active mount with SB_RDONLY. Both layers must be cleared:
+  #  1. btrfs property set via the raw pool (no subvol= filter) clears the
+  #     per-subvolume BTRFS_ROOT_READONLY flag.
+  #  2. mount -o remount,rw clears the VFS-level SB_RDONLY that bootc added.
+  echo "=== btrfs ro state before unlock ==="
+  btrfs property get "${T}" ro 2>&1 || true
   mount "${dev}p3" /pool
-  btrfs property set /pool/root ro false || true
+  btrfs property set /pool/root ro false 2>&1; echo "  btrfs property set exit=$?"
   umount /pool
+  # Re-examine via the active mount after property set.
+  btrfs property get "${T}" ro 2>&1 || true
+  # Clear mount-level SB_RDONLY if bootc also remounted the active mount ro.
+  mount -o remount,rw "${T}" 2>&1 || true
+  # Verify write access before handing off to ostree.
+  if ! touch "${T}/.rw-probe" 2>/dev/null; then
+    echo "::warning::${T} is still read-only after btrfs unlock + remount — testrollback will fail"
+  else
+    rm -f "${T}/.rw-probe"
+    echo "=== ${T} is writable — proceeding with ostree deploy ==="
+  fi
   if ostree --repo="${T}/ostree/repo" refs --create="testrollback/0" "${deployed_rev}" \
      && ostree admin --sysroot="${T}" deploy --os="${stateroot}" "testrollback/0"; then
     echo "=== rollback slot staged: ${deployed_rev} (stateroot: ${stateroot}) ==="
