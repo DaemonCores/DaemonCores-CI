@@ -1,0 +1,65 @@
+name: Lint
+
+# Reusable lint gate for DaemonCores distribution repositories.
+#
+# The caller keeps its own Makefile and tool configuration (.hadolint.yaml,
+# pyproject.toml, ...); this workflow only provisions the toolchain and runs the
+# caller's make targets, so CI and local runs share one entry point.
+#
+# Caller contract: a Makefile exposing the targets listed in `make-targets`
+# (default: admission, check, docs-check).
+
+on:
+  workflow_call:
+    inputs:
+      make-targets:
+        description: 'Space-separated make targets to run, in order'
+        type: string
+        default: 'admission check docs-check'
+      python-version:
+        description: 'Python version for the admission toolchain'
+        type: string
+        default: '3.12'
+      hadolint-version:
+        description: 'hadolint release tag'
+        type: string
+        default: 'v2.15.1'
+      hadolint-sha256:
+        description: 'SHA-256 of the hadolint-linux-x86_64 asset for that tag'
+        type: string
+        default: 'c7187db94eeeeca956519a6af171adc31453941a1e777961f6e680f697c8c507'
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ inputs.python-version }}
+      - name: Install shell/Containerfile/YAML linters
+        env:
+          HADOLINT_VERSION: ${{ inputs.hadolint-version }}
+          HADOLINT_SHA256: ${{ inputs.hadolint-sha256 }}
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y shellcheck shfmt yamllint
+          curl -fsSL -o hadolint \
+            "https://github.com/hadolint/hadolint/releases/download/${HADOLINT_VERSION}/hadolint-linux-x86_64"
+          echo "${HADOLINT_SHA256}  hadolint" | sha256sum -c -
+          sudo install -m 0755 hadolint /usr/local/bin/hadolint
+          rm hadolint
+      - name: Run make targets
+        env:
+          TARGETS: ${{ inputs.make-targets }}
+        run: |
+          set -euo pipefail
+          for target in ${TARGETS}; do
+            echo "::group::make ${target}"
+            make "${target}"
+            echo "::endgroup::"
+          done
