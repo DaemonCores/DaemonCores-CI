@@ -1,0 +1,125 @@
+name: Rotate APT signing key
+
+# Reusable APT signing-key rotation for DaemonCores distribution repositories.
+#
+# Generates a fresh signing key in CI, stores it as the caller's APT_GPG_KEY
+# secret, republishes the APT repository with it, then pins the SHA-256 of the
+# newly published gpg.key in the caller's Containerfiles (BOOTC_GPG_SHA256) and
+# rebuilds the images.  The private key never leaves scripts/rotate-apt-key.sh
+# other than through a pipe into `gh secret set`: it is not logged, not exported
+# as an output and not uploaded as an artifact.
+#
+# Triggers (schedule, workflow_dispatch) and the concurrency group belong in the
+# caller.  The caller must provide PAT_SECRETS (secrets:write on its repository),
+# the same token module signing already uses, and grant contents: write and
+# actions: write.  Installed hosts are not affected: they update through the
+# bootc image, not through APT.
+
+on:
+  workflow_call:
+    inputs:
+      pipeline-workflow:
+        description: 'Caller workflow file that runs the full pipeline'
+        type: string
+        default: 'pipeline.yml'
+      containerfiles:
+        description: 'Space-separated globs of files carrying ARG BOOTC_GPG_SHA256'
+        type: string
+        default: 'Containerfile*'
+      key-url:
+        description: 'Published public key URL (default: the repository GitHub Pages gpg.key)'
+        type: string
+        default: ''
+      branch:
+        description: 'Branch to rotate on'
+        type: string
+        default: 'main'
+    secrets:
+      PAT_SECRETS:
+        required: true
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  rotate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.branch }}
+
+      - name: Fetch rotation tooling
+        uses: actions/checkout@v4
+        with:
+          repository: DaemonCores/DaemonCores-CI
+          ref: main
+          path: .ci-tooling
+          persist-credentials: false
+
+      - name: Generate key and update the APT_GPG_KEY secret
+        id: rotate
+        env:
+          GH_TOKEN: ${{ secrets.PAT_SECRETS }}
+          UID_NAME: ${{ github.event.repository.name || github.repository }} APT repository
+        run: |
+          set -euo pipefail
+          [ -n "${GH_TOKEN}" ] || { echo "::error::PAT_SECRETS is not set"; exit 1; }
+          fpr=$(.ci-tooling/scripts/rotate-apt-key.sh rotate)
+          echo "fingerprint=${fpr}" >>"$GITHUB_OUTPUT"
+          echo "New signing key fingerprint: ${fpr}"
+
+      - name: Republish the APT repository with the new key
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PIPELINE: ${{ inputs.pipeline-workflow }}
+          BRANCH: ${{ inputs.branch }}
+        run: |
+          set -euo pipefail
+          start=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          gh workflow run "${PIPELINE}" --ref "${BRANCH}" \
+            -f rebuild_env=false -f run_debs=true \
+            -f run_image=false -f run_iso=false
+          run_id=""
+          for _ in $(seq 1 30); do
+            run_id=$(gh run list --workflow "${PIPELINE}" --branch "${BRANCH}" \
+              --event workflow_dispatch --created ">=${start}" \
+              --json databaseId --jq '.[0].databaseId // empty')
+            [ -n "${run_id}" ] && break
+            sleep 10
+          done
+          [ -n "${run_id}" ] || { echo "::error::dispatched run not found"; exit 1; }
+          gh run watch "${run_id}" --exit-status
+
+      - name: Pin the published key hash
+        env:
+          FINGERPRINT: ${{ steps.rotate.outputs.fingerprint }}
+          CONTAINERFILES: ${{ inputs.containerfiles }}
+          KEY_URL_INPUT: ${{ inputs.key-url }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          owner=${REPO%%/*}
+          name=${REPO#*/}
+          KEY_URL=${KEY_URL_INPUT:-https://${owner,,}.github.io/${name}/gpg.key}
+          export KEY_URL
+          .ci-tooling/scripts/rotate-apt-key.sh publish-hash "${FINGERPRINT}"
+
+      - name: Commit and push the new hash
+        env:
+          BRANCH: ${{ inputs.branch }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -a -m "chore(apt): rotate signing key and update BOOTC_GPG_SHA256"
+          git push origin "HEAD:${BRANCH}"
+
+      - name: Rebuild images and ISO with the new pin
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PIPELINE: ${{ inputs.pipeline-workflow }}
+          BRANCH: ${{ inputs.branch }}
+        run: gh workflow run "${PIPELINE}" --ref "${BRANCH}"

@@ -45,6 +45,8 @@ The reusable `full-pipeline.yml` workflow coordinates the following stages:
 | `iso-builder.yml` | Produces online and offline installer ISOs from a Fedora Anaconda environment. |
 | `img-builder.yml` | Produces opt-in raw disk images for supported targets. |
 | `docs-wiki-sync.yml` | Copies `docs/*.md` into a repository wiki. |
+| `lint.yml` | Provisions the lint toolchain (checksum-pinned hadolint) and runs the caller's `make admission check docs-check`. |
+| `rotate-apt-key.yml` | Rotates the APT signing key (`APT_GPG_KEY`) from CI, republishes the repository and pins the new `BOOTC_GPG_SHA256` in the caller's Containerfiles. Needs `PAT_SECRETS`. |
 
 ## Composite actions
 
