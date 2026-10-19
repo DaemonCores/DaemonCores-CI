@@ -13,7 +13,8 @@
 # Environment:
 #   APT_GPG_KEY    armored private key (required)
 #   KEY_URL        URL of the published public key (required)
-#   WAIT_ATTEMPTS  polling attempts while the published key is stale (default 30)
+#   WAIT_ATTEMPTS  polling attempts while the published key is stale
+#                  (default 30)
 #   WAIT_SECONDS   delay between attempts (default 20)
 #
 # Output: the SHA-256 on stdout.  The private key is never printed.
@@ -69,7 +70,7 @@ main() {
     ((i == attempts)) || sleep "${delay}"
   done
   [[ "${got}" == "${want}" ]] \
-    || die "the key published at ${KEY_URL} does not match the APT_GPG_KEY secret"
+    || die "key published at ${KEY_URL} does not match the APT_GPG_KEY secret"
   sha256sum "${tmp}" | awk '{print $1}'
 }
 
