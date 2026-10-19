@@ -240,3 +240,111 @@ def test_resolve_follows_branch_head(api: Path) -> None:
     result = _run(api, 'resolve', PKG='rolling', BASE_ENV='A=1')
     assert result.returncode == 0, result.stderr
     assert _env_output(api) == ['A=1', f'ROLL_COMMIT={"c" * 40}']
+
+
+KERNEL_MANIFEST = """packages:
+  - name: tool
+    track:
+      TOOL_VER:
+        repo: acme/tool
+        digests:
+          TOOL_SHA256: "tool-{version}.tar.xz"
+  - name: lib
+    track:
+      LIB_VER:
+        repo: acme/lib
+        strip-v: true
+  - name: kernel
+    track:
+      KERNEL_VER:
+        kernel-org: stable
+        digests:
+          KERNEL_SHA256: "linux-{version}.tar.xz"
+"""
+
+
+def _kernel_org(api: Path, version: str, sums: str) -> None:
+    """Write a kernel.org ``releases.json`` and the ``sha256sums.asc``.
+
+    Args:
+        api: API tree root.
+        version: Version of the stable release.
+        sums: Content of ``sha256sums.asc``.
+    """
+    (api / 'packages.yml').write_text(KERNEL_MANIFEST)
+    cdn = api / 'cdn'
+    cdn.mkdir(exist_ok=True)
+    (cdn / 'sha256sums.asc').write_text(sums)
+    releases = [{
+        'moniker': 'mainline',
+        'version': '9.9-rc1',
+        'source': f'file://{cdn}/linux-9.9-rc1.tar.xz'
+    }, {
+        'moniker': 'stable',
+        'version': version,
+        'source': f'file://{cdn}/linux-{version}.tar.xz'
+    }]
+    (api / 'releases.json').write_text(json.dumps({'releases': releases}))
+
+
+def test_resolve_follows_kernel_org_stream(api: Path) -> None:
+    """The kernel.org moniker gives the version and the tarball digest.
+
+    Args:
+        api: API tree fixture.
+    """
+    _kernel_org(api, '7.2.11', f'{DIGEST}  linux-7.2.11.tar.xz\n')
+    result = _run(
+        api,
+        'resolve',
+        PKG='kernel',
+        BASE_ENV='A=1',
+        KERNEL_ORG_URL=f'file://{api}'
+    )
+    assert result.returncode == 0, result.stderr
+    assert _env_output(api) == [
+        'A=1', 'KERNEL_VER=7.2.11', f'KERNEL_SHA256={DIGEST}'
+    ]
+
+
+def test_resolve_kernel_without_digest_stays_unset(api: Path) -> None:
+    """A release with no line in ``sha256sums.asc`` is left unresolved.
+
+    Args:
+        api: API tree fixture.
+    """
+    _kernel_org(api, '7.2.11', f'{DIGEST}  linux-7.2.10.tar.xz\n')
+    result = _run(
+        api,
+        'resolve',
+        PKG='kernel',
+        BASE_ENV='A=1',
+        KERNEL_ORG_URL=f'file://{api}'
+    )
+    assert result.returncode == 0
+    assert _env_output(api) == ['A=1']
+    assert '::warning::' in result.stderr
+
+
+def test_check_matches_kernel_deb_revision(api: Path) -> None:
+    """A kernel deb ``<version>-<revision>`` counts as the published release.
+
+    Args:
+        api: API tree fixture.
+    """
+    _kernel_org(api, '7.2.11', f'{DIGEST}  linux-7.2.11.tar.xz\n')
+    url = _published(
+        api, {
+            'tool-amd64': ['tool_2.0_amd64.deb'],
+            'lib-amd64': ['lib_2026.4_amd64.deb'],
+            'kernel-amd64': ['linux-image-common_7.2.11-1_amd64.deb']
+        }
+    )
+    result = _run(
+        api,
+        'check',
+        PAGES_URL=url,
+        STRICT='true',
+        KERNEL_ORG_URL=f'file://{api}'
+    )
+    assert result.returncode == 0, result.stdout
