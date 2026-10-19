@@ -129,6 +129,26 @@ jobs:
 
 Product repositories normally add scheduled builds, concurrency control, path filters, and manual stage-selection inputs.
 
+## Shared checks and tooling
+
+Everything generic that the repositories used to copy lives in `scripts/` and
+runs against any checkout with `--root DIR` (default: the current directory).
+The `lint.yml` workflow checks DaemonCores-CI out into `.ci` and exports
+`CI_REPO`; locally, `CI_REPO` defaults to the sibling checkout.
+
+| Script | What it enforces |
+|--------|------------------|
+| `check_docstrings.py` | Every module, class and function (private and test ones too) has a Google docstring with the `Args`/`Returns`/`Yields`/`Raises` sections its signature needs |
+| `check_tests_manifest.py` | `workflows/tests.yml`: `name`/`run`/`diag` present, known `arch`/`variant`, unique names, positive timeouts |
+| `check_build_context.py` | Containerfile `COPY` sources exist and are not `.dockerignore`d; `packages.yml` names, deps, sources, build/upstream and hashed `lib/*.sh` helpers are coherent |
+| `gen_docs.py` | Generates `docs/reference/` from the Python docstrings and shell headers listed in the caller's Makefile (`--check` fails when stale) |
+| `check_docs.py` | Documentation sync: every `[src: file: path:LINE]` citation resolves to a non-blank line and every relative Markdown link exists |
+| `e2e-local.sh` | Runs the boot tests of the calling repository against a local image with the CI harness |
+
+A caller Makefile only wires them (`$(CI_REPO)/scripts/...`); it carries no
+copy. `make check` and `make test` in this repository hold the scripts and
+their tests to the same strict rules.
+
 ## Credentials and repository settings
 
 The complete pipeline currently uses the following Actions secrets when the corresponding stage or package requires them:

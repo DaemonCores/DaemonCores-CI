@@ -6,6 +6,11 @@ name: Lint
 # pyproject.toml, ...); this workflow only provisions the toolchain and runs the
 # caller's make targets, so CI and local runs share one entry point.
 #
+# DaemonCores-CI is checked out next to the sources and exported as CI_REPO, so
+# the caller's targets run the shared checks from scripts/ (docstring gate,
+# tests manifest, build context, documentation sync, reference generation)
+# instead of carrying their own copies.
+#
 # Caller contract: a Makefile exposing the targets listed in `make-targets`
 # (default: admission, check, docs-check).
 
@@ -37,6 +42,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Check out the shared checks
+        uses: actions/checkout@v4
+        with:
+          repository: DaemonCores/DaemonCores-CI
+          path: .ci
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ inputs.python-version }}
@@ -58,6 +68,7 @@ jobs:
           TARGETS: ${{ inputs.make-targets }}
         run: |
           set -euo pipefail
+          export CI_REPO="${GITHUB_WORKSPACE}/.ci"
           for target in ${TARGETS}; do
             echo "::group::make ${target}"
             make "${target}"
