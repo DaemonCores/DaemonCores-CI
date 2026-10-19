@@ -56,6 +56,16 @@ patch) next="${major}.${minor}.$((patch + 1))" ;;
 esac
 edge="${next}-edge.${count}"
 
+#######################################
+# Print a result as name=value, to GITHUB_OUTPUT when it is set.
+# Globals:
+#   GITHUB_OUTPUT
+# Arguments:
+#   $1: output name
+#   $2: output value
+# Outputs:
+#   Appends to GITHUB_OUTPUT, or writes to stdout.
+#######################################
 emit() {
 	if [ -n "${GITHUB_OUTPUT:-}" ]; then
 		printf '%s=%s\n' "$1" "$2" >>"$GITHUB_OUTPUT"
