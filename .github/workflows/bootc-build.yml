@@ -28,18 +28,19 @@ jobs:
   # `LABEL org.daemoncores.autoupdate-variants` BOTH the autoupdate (1) and
   # lock (0) variants are emitted; when the LABEL is absent only the autoupdate
   # (1) variant is emitted. Both arches (amd64, arm64) are always included.
-  # A Containerfile that carries `LABEL org.daemoncores.arm64-16k` also gets a
-  # second arm64 build for the 16 KB kernel: a separate image tagged
-  # `<tag>-16k` (kernel_suffix `-16k`), arm64 only, because the page size is a
-  # compile-time choice and one image holds one kernel. The 4 KB image keeps the
-  # plain tag and serves the older devices that have no 16 KB granule.
+  # A Containerfile that carries `LABEL org.daemoncores.arm64-4k-image` ships two
+  # arm64 kernels because the page size is a compile-time choice and one image
+  # holds one kernel. The plain tag is the 16 KB kernel (kernel_suffix `-16k`)
+  # for recent hardware; a second, arm64-only image tagged `<tag>-4k`
+  # (kernel_suffix empty) serves the older devices (Raspberry Pi 3 and 4) whose
+  # cores have no 16 KB granule. Without the LABEL, arm64 builds the 4 KB kernel.
   # Also computes a global hash over all Containerfiles so any variant change
   # invalidates every variant's "identical to previous" cache.
   #
   # A second output, manifest_matrix, lists the unique variant tags with a
   # `lock` boolean telling the manifest job whether a _lock manifest list
   # should be produced for that tag, and the `arches` the list covers (both for
-  # a regular tag, arm64 only for a `-16k` tag).
+  # a regular tag, arm64 only for a `-4k` tag).
   discover:
     name: Discover Containerfiles
     runs-on: ubuntu-latest
@@ -84,25 +85,37 @@ jobs:
               has_lock=false
               autoupdates=(1)
             fi
+            # A Containerfile with the 4 KB image LABEL builds the 16 KB kernel on the
+            # plain arm64 tag; otherwise arm64 stays on the 4 KB kernel.
+            has_4k=false
+            if grep -qE '^[[:space:]]*LABEL[[:space:]]+org\.daemoncores\.arm64-4k-image' "$name"; then
+              has_4k=true
+            fi
             for arch in amd64 arm64; do
+              suffix=""
+              if [[ "$arch" == "arm64" && "$has_4k" == "true" ]]; then
+                suffix="-16k"
+              fi
               for au in "${autoupdates[@]}"; do
                 matrix=$(printf '%s' "$matrix" | jq -c \
                   --arg file "$name" --arg tag "$tag" --arg arch "$arch" --argjson au "$au" \
-                  '. += [{file: $file, tag: $tag, arch: $arch, autoupdate: $au, kernel_suffix: ""}]')
+                  --arg ks "$suffix" \
+                  '. += [{file: $file, tag: $tag, arch: $arch, autoupdate: $au, kernel_suffix: $ks}]')
               done
             done
             manifest_matrix=$(printf '%s' "$manifest_matrix" | jq -c \
               --arg tag "$tag" --argjson lock "$has_lock" \
               '. += [{tag: $tag, lock: $lock, arches: ["amd64", "arm64"]}]')
-            # The 16 KB arm64 kernel image, when the Containerfile asks for it.
-            if grep -qE '^[[:space:]]*LABEL[[:space:]]+org\.daemoncores\.arm64-16k' "$name"; then
+            # The 4 KB arm64 kernel image for the older devices, when the
+            # Containerfile asks for it.
+            if [[ "$has_4k" == "true" ]]; then
               for au in "${autoupdates[@]}"; do
                 matrix=$(printf '%s' "$matrix" | jq -c \
-                  --arg file "$name" --arg tag "${tag}-16k" --argjson au "$au" \
-                  '. += [{file: $file, tag: $tag, arch: "arm64", autoupdate: $au, kernel_suffix: "-16k"}]')
+                  --arg file "$name" --arg tag "${tag}-4k" --argjson au "$au" \
+                  '. += [{file: $file, tag: $tag, arch: "arm64", autoupdate: $au, kernel_suffix: ""}]')
               done
               manifest_matrix=$(printf '%s' "$manifest_matrix" | jq -c \
-                --arg tag "${tag}-16k" --argjson lock "$has_lock" \
+                --arg tag "${tag}-4k" --argjson lock "$has_lock" \
                 '. += [{tag: $tag, lock: $lock, arches: ["arm64"]}]')
             fi
             global_inputs+="${name} $(sha256sum "$name" | cut -d' ' -f1)"$'\n'
@@ -362,8 +375,9 @@ jobs:
             apt_hold_pkg="grub-efi-amd64-signed"
           fi
           # arm64 ships two kernels (docs/decisions.md, "Two arm64 kernels"): the
-          # 4 KB one for the older devices (Raspberry Pi 3 and 4), the 16 KB one
-          # (`-16k` image) for recent hardware (Raspberry Pi 5, RK3588). The
+          # 16 KB one on the plain tag for recent hardware (Raspberry Pi 5,
+          # RK3588), the 4 KB one (`-4k` image) for the older devices (Raspberry
+          # Pi 3 and 4). The
           # suffix completes the kernel package name; ARM_DEVICES lists the
           # device module packages built against that kernel. Both mirror the
           # variants of linux-modules-arm-device in the package manifest.
@@ -619,7 +633,7 @@ jobs:
 
   # Promote per-arch images into multi-arch manifest lists. Runs once all
   # build-test-push combos (variant x arch x autoupdate) are green.
-  # For each variant tag V (a `-16k` tag covers arm64 only), the manifest job
+  # For each variant tag V (a `-4k` tag covers arm64 only), the manifest job
   # creates:
   #   :V            -> :V_amd64_autoupdate + :V_arm64_autoupdate  (always)
   #   :V_autoupdate -> :V_amd64_autoupdate + :V_arm64_autoupdate  (always)
@@ -664,7 +678,7 @@ jobs:
           set -euo pipefail
           IMAGE="${IMAGE,,}"
           # The architectures this tag was built for: both for a regular tag,
-          # arm64 only for a `-16k` tag (a 16 KB kernel image has no amd64 twin).
+          # arm64 only for a `-4k` tag (a 4 KB arm64 kernel image has no amd64 twin).
           read -r -a arches <<<"${ARCHES}"
 
           # Create, annotate and push one manifest list over the per-arch tags
