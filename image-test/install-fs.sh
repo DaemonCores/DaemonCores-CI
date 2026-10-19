@@ -194,7 +194,10 @@ if [ -n "${deployed_dir}" ]; then
   # Re-examine via the active mount after property set.
   btrfs property get "${T}" ro 2>&1 || true
   # Clear mount-level SB_RDONLY if bootc also remounted the active mount ro.
-  mount -o remount,rw,compress=zstd "${T}" 2>&1 || true
+  # Do not repeat compress=: the option is already in effect from the initial
+  # mount and btrfs rejects it on this remount ("Bad value for 'compress'"),
+  # which left the target read-only.
+  mount -o remount,rw "${T}" 2>&1 || true
   # Verify write access before handing off to ostree.
   if ! touch "${T}/.rw-probe" 2>/dev/null; then
     echo "::warning::${T} is still read-only after btrfs unlock + remount — testrollback will fail"

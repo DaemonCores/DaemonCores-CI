@@ -303,6 +303,26 @@ wait_ssh() {
 }
 
 #######################################
+# Print why a guest never became reachable: every failed unit and error line
+# of the serial console, then its tail, with terminal escape sequences removed
+# so the GitHub log stays readable.
+# Globals:
+#   SERIAL
+#######################################
+dump_serial() {
+  local clean
+  clean=$(sudo cat "${SERIAL}" 2>/dev/null \
+    | sed -e 's/\x1b\[[0-9;?]*[A-Za-z]//g' -e 's/\r//g') || true
+  echo "::group::serial console: failed units and errors"
+  printf '%s\n' "${clean}" | grep -aE 'FAILED|Failed|error|Error|panic|Kernel panic|Call Trace' \
+    | sort -u | head -n 80 || true
+  echo "::endgroup::"
+  echo "::group::serial console: last 200 lines"
+  printf '%s\n' "${clean}" | tail -n 200
+  echo "::endgroup::"
+}
+
+#######################################
 # Run every test in TESTS_FILE over SSH. A test passes on exit 0, or when its
 # optional `expect` string is found in the output.
 # Globals:
@@ -471,7 +491,7 @@ main() {
   fi
   if ! wait_ssh "${timeout}"; then
     echo "::error::VM did not become reachable within ${timeout}s"
-    sudo tail -n 50 "${SERIAL}" 2>/dev/null || true
+    dump_serial
     exit 1
   fi
   wait_boot
@@ -494,7 +514,7 @@ main() {
     fi
     if ! wait_ssh "${reboot_timeout}"; then
       echo "::error::VM did not come back after reboot within ${reboot_timeout}s"
-      sudo tail -n 50 "${SERIAL}" 2>/dev/null || true
+      dump_serial
       exit 1
     fi
     wait_boot
