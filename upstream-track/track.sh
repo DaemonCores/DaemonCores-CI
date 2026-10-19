@@ -11,6 +11,13 @@
 #       digests:                  # env variable -> release asset name; the
 #         BOOTC_VENDOR_SHA256: "bootc-{version}-vendor.tar.zstd"
 #
+# A package that follows a branch instead of releases (rolling) sets `head`:
+#
+#   track:
+#     GRUB_COMMIT:                # env variable that receives the head commit
+#       repo: rhboot/grub2
+#       head: true                # follow the head of the default branch
+#
 # {version} is the tag without its leading "v", {tag} is the tag as published.
 # The SHA-256 of each asset comes from the GitHub release API (`digest`), so the
 # build keeps verifying its downloads without a checksum committed per version.
@@ -43,11 +50,45 @@ API="${GITHUB_API_URL:-https://api.github.com}"
 #   $1 - owner/name
 #######################################
 fetch_release() {
+  fetch_api "repos/$1/releases/latest"
+}
+
+#######################################
+# Fetch a GitHub API path as JSON.
+# Arguments:
+#   $1 - path below the API root
+#######################################
+fetch_api() {
   local auth=()
   [[ -n "${GH_TOKEN:-}" ]] && auth=(-H "Authorization: Bearer ${GH_TOKEN}")
   curl --retry 3 -fsSL "${auth[@]}" \
     -H 'Accept: application/vnd.github+json' \
-    "${API}/repos/$1/releases/latest"
+    "${API}/$1"
+}
+
+#######################################
+# Print KEY=<head commit> for a branch-following entry (the default branch).
+# Arguments:
+#   $1 - env variable key
+#   $2 - owner/name
+#######################################
+resolve_head() {
+  local commit
+  commit=$(fetch_api "repos/$2/commits/HEAD" | yq -p=json '.sha // ""') \
+    || return 1
+  [[ -n "${commit}" ]] || return 1
+  printf '%s=%s\n' "$1" "${commit}"
+}
+
+#######################################
+# Succeed when a tracked entry follows a branch head, not releases.
+# Arguments:
+#   $1 - package name
+#   $2 - env variable key
+#######################################
+is_head() {
+  [[ $(yq ".packages[] | select(.name == \"$1\") | .track.\"$2\".head // false" \
+    "${MAN}") == true ]]
 }
 
 #######################################
@@ -89,6 +130,10 @@ resolve_entry() {
   repo=$(yq "${sel} | .repo // \"\"" "${MAN}")
   strip=$(yq "${sel} | .\"strip-v\" // false" "${MAN}")
   [[ -n "${repo}" ]] || return 1
+  if is_head "${pkg}" "${key}"; then
+    resolve_head "${key}" "${repo}"
+    return
+  fi
   release=$(fetch_release "${repo}") || return 1
   tag=$(yq -p=json '.tag_name // ""' <<<"${release}")
   [[ -n "${tag}" ]] || return 1
@@ -193,6 +238,7 @@ check() {
     [[ -n "${pkg}" ]] || continue
     while IFS= read -r key; do
       [[ -n "${key}" ]] || continue
+      is_head "${pkg}" "${key}" && continue
       tag=$(latest_tag "${pkg}" "${key}") || {
         echo "${pkg} ${key}: latest release unknown"
         behind=1
