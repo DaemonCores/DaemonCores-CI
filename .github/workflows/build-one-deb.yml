@@ -197,6 +197,20 @@ jobs:
           # shellcheck disable=SC2086
           apt-get install -y ${debs}
 
+      # Rolling release: a package that lists `track:` in the manifest builds
+      # the latest upstream release (version + asset checksums resolved here),
+      # not a version committed in the repository.  The resolved values feed the
+      # content hash, so a new release rebuilds; if the new release does not
+      # build, build-deb keeps the last-good published deb.
+      - name: Track upstream releases
+        id: track
+        uses: DaemonCores/DaemonCores-CI/upstream-track@main
+        with:
+          package: ${{ inputs.package }}
+          manifest: ${{ steps.expand.outputs.manifest }}
+          env: ${{ steps.def.outputs.env }}
+          token: ${{ github.token }}
+
       - name: Build ${{ inputs.package }}
         id: build
         uses: DaemonCores/DaemonCores-CI/build-deb@main
@@ -205,7 +219,7 @@ jobs:
           upstream: ${{ steps.def.outputs.upstream }}
           sources: ${{ steps.def.outputs.sources }}
           deb-glob: ${{ steps.def.outputs.deb_glob }}
-          env: ${{ steps.def.outputs.env }}
+          env: ${{ steps.track.outputs.env }}
           build: ${{ steps.def.outputs.build }}
           arch: ${{ inputs.arch }}
           extra-env: MODULE_SIGNING_ACTIVE=${{ inputs.signing_active }}

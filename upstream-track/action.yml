@@ -1,0 +1,47 @@
+name: 'Track upstream releases'
+description: >-
+  Resolve the latest upstream release of the entries a package lists under
+  `track:` in the manifest (version plus the SHA-256 of its release assets) and
+  merge them into the package env, so a package follows its upstream without a
+  version or checksum committed in the repository.  An entry that cannot be
+  resolved stays unset and the build fails, which keeps the last-good published
+  deb.
+
+inputs:
+  package:
+    description: 'Package name as it appears in the manifest.'
+    required: true
+  manifest:
+    description: 'Path to the (expanded) package manifest.'
+    required: false
+    default: workflows/bootc-debs-builder/packages.yml
+  env:
+    description: 'The package env as KEY=VALUE lines (from the manifest).'
+    required: false
+    default: ''
+  strict:
+    description: 'true to fail the step when an entry cannot be resolved.'
+    required: false
+    default: 'false'
+  token:
+    description: 'Token for the GitHub API (rate limit only).'
+    required: false
+    default: ''
+
+outputs:
+  env:
+    description: 'The package env with the tracked variables merged in.'
+    value: ${{ steps.track.outputs.env }}
+
+runs:
+  using: composite
+  steps:
+    - id: track
+      shell: bash
+      env:
+        PKG: ${{ inputs.package }}
+        MAN: ${{ inputs.manifest }}
+        BASE_ENV: ${{ inputs.env }}
+        STRICT: ${{ inputs.strict }}
+        GH_TOKEN: ${{ inputs.token }}
+      run: bash "${GITHUB_ACTION_PATH}/track.sh" resolve

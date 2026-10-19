@@ -1,0 +1,45 @@
+name: Check upstream releases
+
+# Reusable check that every package tracking an upstream release (`track:` in
+# its packages.yml entry) ships that release in the published APT repository.
+# A package that stays behind means the latest upstream release failed to build
+# and the last-good deb was kept: the job fails so it surfaces in the Actions
+# tab.  Nothing is bumped or committed.
+#
+# Triggers (schedule, workflow_dispatch) belong in the caller.
+
+on:
+  workflow_call:
+    inputs:
+      manifest:
+        description: 'Path to the package manifest in the caller repo'
+        type: string
+        default: workflows/bootc-debs-builder/packages.yml
+      arch:
+        description: 'Architecture whose published debs are compared'
+        type: string
+        default: amd64
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fetch tooling
+        uses: actions/checkout@v4
+        with:
+          repository: DaemonCores/DaemonCores-CI
+          ref: main
+          path: .ci-tooling
+          persist-credentials: false
+      - name: Compare tracked releases with the published repository
+        env:
+          MAN: ${{ inputs.manifest }}
+          ARCH: ${{ inputs.arch }}
+          STRICT: 'true'
+          GH_TOKEN: ${{ github.token }}
+        run: bash .ci-tooling/upstream-track/track.sh check
