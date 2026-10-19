@@ -46,6 +46,7 @@ The reusable `full-pipeline.yml` workflow coordinates the following stages:
 | `img-builder.yml` | Produces opt-in raw disk images for supported targets. |
 | `docs-wiki-sync.yml` | Copies `docs/*.md` into a repository wiki. |
 | `upstream-check.yml` | Fails when a package tracking an upstream release does not ship that release in the published APT repository (the latest release did not build). |
+| `release.yml` | Publishes a GitHub release from Conventional Commits: `channel: edge` makes a pre-release `vX.Y.Z-edge.N` per releasable push, `channel: stable` makes `vX.Y.Z` and only runs when triggered manually. |
 | `lint.yml` | Provisions the lint toolchain (checksum-pinned hadolint) and runs the caller's `make admission check docs-check`. |
 | `rotate-apt-key.yml` | Rotates the APT signing key (`APT_GPG_KEY`) from CI, republishes the repository and pins the new `BOOTC_GPG_SHA256` in the caller's Containerfiles. Needs `PAT_SECRETS`. |
 
@@ -55,6 +56,7 @@ The reusable `full-pipeline.yml` workflow coordinates the following stages:
 | --- | --- |
 | `build-deb` | Hashes package inputs, reuses the last published artifact when unchanged, runs the package build, and records metadata. |
 | `upstream-track` | Resolves the latest upstream release (version and asset SHA-256) of the entries a package lists under `track:`, so it follows upstream with nothing committed per version. |
+| `next-version` | Script (`next-version.sh`) that derives the next version from Conventional Commits since the last stable tag. |
 | `bootc-debs-start` | Checks out the caller and prepares the package workspace. |
 | `bootc-debs-end` | Creates the signed APT repository, publishes its cache, and deploys it to GitHub Pages. |
 | `image-test` | Installs a local image onto a virtual disk, boots it with QEMU/KVM, and executes manifest-defined tests over SSH. |
@@ -77,6 +79,10 @@ docs/*.md
 Each root-level `Containerfile*` becomes an image variant. `Containerfile` maps to the `latest` family; for example, `Containerfile.minimal` maps to the `minimal` family. A Containerfile carrying the `org.daemoncores.autoupdate-variants` label also produces a lock variant.
 
 Package dependencies declared in `packages.yml` are converted into build waves. Independent packages build in parallel; a package is scheduled after every declared dependency.
+
+### Release channels
+
+`release.yml` derives the version from Conventional Commits since the last stable tag (`vX.Y.Z`): a breaking change (`type!:` or a `BREAKING CHANGE:` footer) bumps the major, `feat` the minor, `fix`, `perf` and `revert` the patch. Other types (`docs`, `chore`, `ci`, `refactor`, ...) release nothing. The `edge` channel tags every releasable commit as a pre-release (`vX.Y.Z-edge.N`, `N` being the commit count since the last stable tag). The `stable` channel refuses any trigger other than `workflow_dispatch`: promoting to stable stays a manual decision, so a long pause never promotes anything on its own. The caller owns the triggers, for example `on: push` on `main` for `edge` and `workflow_dispatch` for `stable`.
 
 ### Rolling upstream releases
 
