@@ -41,10 +41,11 @@ The reusable `full-pipeline.yml` workflow coordinates the following stages:
 | `build-env.yml` | Builds the caller's manifest-defined package build environment for amd64 and arm64. |
 | `bootc-debs-builder.yml` | Reads `packages.yml`, computes dependency waves, and publishes the resulting APT repository. |
 | `build-one-deb.yml` | Builds or reuses one content-addressed Debian package. |
-| `bootc-build.yml` | Discovers image variants, builds them natively, runs QEMU tests, signs images, and publishes manifest lists. |
+| `bootc-build.yml` | Discovers image variants, builds them natively, runs QEMU tests, scans images with Trivy (report only), signs images, and publishes manifest lists. |
 | `iso-builder.yml` | Produces online and offline installer ISOs from a Fedora Anaconda environment. |
 | `img-builder.yml` | Produces opt-in raw disk images for supported targets. |
 | `docs-wiki-sync.yml` | Copies `docs/*.md` into a repository wiki. |
+| `upstream-check.yml` | Fails when a package tracking an upstream release does not ship that release in the published APT repository (the latest release did not build). |
 | `lint.yml` | Provisions the lint toolchain (checksum-pinned hadolint) and runs the caller's `make admission check docs-check`. |
 | `rotate-apt-key.yml` | Rotates the APT signing key (`APT_GPG_KEY`) from CI, republishes the repository and pins the new `BOOTC_GPG_SHA256` in the caller's Containerfiles. Needs `PAT_SECRETS`. |
 
@@ -53,6 +54,7 @@ The reusable `full-pipeline.yml` workflow coordinates the following stages:
 | Action | Responsibility |
 | --- | --- |
 | `build-deb` | Hashes package inputs, reuses the last published artifact when unchanged, runs the package build, and records metadata. |
+| `upstream-track` | Resolves the latest upstream release (version and asset SHA-256) of the entries a package lists under `track:`, so it follows upstream with nothing committed per version. |
 | `bootc-debs-start` | Checks out the caller and prepares the package workspace. |
 | `bootc-debs-end` | Creates the signed APT repository, publishes its cache, and deploys it to GitHub Pages. |
 | `image-test` | Installs a local image onto a virtual disk, boots it with QEMU/KVM, and executes manifest-defined tests over SSH. |
@@ -75,6 +77,22 @@ docs/*.md
 Each root-level `Containerfile*` becomes an image variant. `Containerfile` maps to the `latest` family; for example, `Containerfile.minimal` maps to the `minimal` family. A Containerfile carrying the `org.daemoncores.autoupdate-variants` label also produces a lock variant.
 
 Package dependencies declared in `packages.yml` are converted into build waves. Independent packages build in parallel; a package is scheduled after every declared dependency.
+
+### Rolling upstream releases
+
+A package that builds an upstream project can follow its latest GitHub release instead of pinning a version and checksum in the repository:
+
+```yaml
+- name: bootc
+  track:
+    BOOTC_VER:                       # env variable that receives the tag
+      repo: bootc-dev/bootc
+      strip-v: false                 # true drops the leading "v"
+      digests:                       # env variable -> release asset name
+        BOOTC_VENDOR_SHA256: "bootc-{version}-vendor.tar.zstd"
+```
+
+`build-one-deb.yml` resolves `track:` before the build; the resolved values feed the content hash, so a new release rebuilds the package. The asset checksums come from the release API, so downloads stay verified. When the new release does not build, `build-deb` keeps the last-good published deb, opens a broken-build issue and retries on the next run: a bad upstream release never reaches the image. `upstream-check.yml` reports, from a scheduled caller, the packages stuck on an older release.
 
 Every runtime test in `workflows/tests.yml` must include a diagnostic command. The harness rejects incomplete test definitions so a failed boot test always provides actionable state.
 
