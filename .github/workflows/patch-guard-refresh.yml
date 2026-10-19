@@ -47,7 +47,7 @@ jobs:
           export CI_SCRIPTS="${PWD}/.ci-tooling/scripts"
           export PATCH_GUARD_UPDATE=1
           version=$(curl -fsSL https://www.kernel.org/releases.json |
-            jq -r '.latest_stable.version')
+            jq -r 'first(.releases[] | select(.moniker == "stable")) | .version')
           . "${LDIR}/kernel-source.sh"
           . "${LDIR}/kernel-patches.sh"
           rm -f "${KDIR}/patches.lock.json"
