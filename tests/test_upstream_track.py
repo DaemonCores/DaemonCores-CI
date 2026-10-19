@@ -25,6 +25,11 @@ MANIFEST = """packages:
       LIB_VER:
         repo: acme/lib
         strip-v: true
+  - name: rolling
+    track:
+      ROLL_COMMIT:
+        repo: acme/rolling
+        head: true
   - name: plain
 """
 
@@ -221,3 +226,17 @@ def test_check_passes_when_current(api: Path) -> None:
         }
     )
     assert _run(api, 'check', PAGES_URL=url, STRICT='true').returncode == 0
+
+
+def test_resolve_follows_branch_head(api: Path) -> None:
+    """A ``head`` entry receives the head commit of the default branch.
+
+    Args:
+        api: API tree fixture.
+    """
+    path = api / 'repos' / 'acme' / 'rolling' / 'commits'
+    path.mkdir(parents=True)
+    (path / 'HEAD').write_text(json.dumps({'sha': 'c' * 40}))
+    result = _run(api, 'resolve', PKG='rolling', BASE_ENV='A=1')
+    assert result.returncode == 0, result.stderr
+    assert _env_output(api) == ['A=1', f'ROLL_COMMIT={"c" * 40}']
