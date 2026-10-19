@@ -101,7 +101,7 @@ jobs:
 
       - name: Log in to GHCR
         env:
-          PAT_PKG: ${{ secrets.PAT_PKG }}
+          PAT_PKG: ${{ secrets.PAT_PKG || github.token }}
         run: |
           sudo podman login ghcr.io \
             --username "${{ github.actor }}" \

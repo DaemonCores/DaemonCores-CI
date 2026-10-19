@@ -8,25 +8,17 @@
 #                    through a pipe into `gh secret set`: it is never kept in a
 #                    variable, a file outside the throw-away GNUPGHOME, a log
 #                    or an artifact.  Prints the public fingerprint on stdout.
-#   publish-hash FPR Wait until the published gpg.key carries the fingerprint
-#                    FPR, then rewrite BOOTC_GPG_SHA256 in the caller's
-#                    Containerfiles with the SHA-256 of the file as served.
+#
+# The image build derives the pinned hash of the published key at build time
+# (apt-key-hash.sh), so nothing has to be committed after a rotation.
 #
 # Environment:
-#   GH_TOKEN          token with secrets:write (PAT_SECRETS); for `rotate`
-#   KEY_URL           published public key (required for publish-hash)
+#   GH_TOKEN          token with secrets:write (PAT_SECRETS)
+#   GITHUB_REPOSITORY owner/name, passed to gh when set
 #   UID_NAME          user id of the generated key (default: "APT repository")
-#   ROOT_DIR          caller repository root (default: current directory)
-#   CONTAINERFILES    space-separated globs, relative to ROOT_DIR, of the files
-#                     carrying `ARG BOOTC_GPG_SHA256=` (default: Containerfile*)
-#   WAIT_ATTEMPTS     polling attempts for publish-hash (default 60)
-#   WAIT_SECONDS      delay between attempts (default 20)
 set -euo pipefail
 
-ROOT_DIR="${ROOT_DIR:-$PWD}"
-KEY_URL="${KEY_URL:-}"
 UID_NAME="${UID_NAME:-APT repository}"
-CONTAINERFILES="${CONTAINERFILES:-Containerfile*}"
 
 #######################################
 # Print an error to stderr and exit 1.
@@ -48,6 +40,8 @@ die() {
 #######################################
 rotate() {
   local home fpr
+  local -a repo=()
+  [[ -z "${GITHUB_REPOSITORY:-}" ]] || repo=(--repo "${GITHUB_REPOSITORY}")
   home=$(mktemp -d)
   # shellcheck disable=SC2064  # expand $home now, it is fixed for this call
   trap "rm -rf '${home}'" RETURN
@@ -60,67 +54,20 @@ rotate() {
   [[ -n "${fpr}" ]] || die "key generation produced no fingerprint"
   gpg --batch --quiet --pinentry-mode loopback --passphrase '' \
     --armor --export-secret-keys "${fpr}" 2>/dev/null \
-    | gh secret set APT_GPG_KEY >/dev/null
+    | gh secret set APT_GPG_KEY "${repo[@]}" >/dev/null
   printf '%s\n' "${fpr}"
 }
 
 #######################################
-# Print the fingerprint of the first key in a public key file.
+# Main.
 # Arguments:
-#   $1: path to an armored or binary public key
+#   $1: subcommand
 #######################################
-fingerprint_of() {
-  local home
-  home=$(mktemp -d)
-  GNUPGHOME="${home}" gpg --batch --with-colons --show-keys "$1" 2>/dev/null \
-    | awk -F: '/^fpr:/ {print $10; exit}'
-  rm -rf "${home}"
-}
-
-#######################################
-# Wait for the published key to match FPR, then update the pinned hash.
-# Globals:
-#   ROOT_DIR, KEY_URL, WAIT_ATTEMPTS, WAIT_SECONDS
-# Arguments:
-#   $1: expected fingerprint
-#######################################
-publish_hash() {
-  local want="$1" tmp i got digest file pattern updated=0
-  local attempts="${WAIT_ATTEMPTS:-60}" delay="${WAIT_SECONDS:-20}"
-  [[ "${want}" =~ ^[0-9A-F]{40}$ ]] || die "expected a 40-hex fingerprint"
-  [[ -n "${KEY_URL}" ]] || die "KEY_URL is required"
-  tmp=$(mktemp)
-  # shellcheck disable=SC2064
-  trap "rm -f '${tmp}'" RETURN
-  for ((i = 1; i <= attempts; i++)); do
-    if curl -fsSL "${KEY_URL}" -o "${tmp}" 2>/dev/null; then
-      got=$(fingerprint_of "${tmp}")
-      [[ "${got}" == "${want}" ]] && break
-    fi
-    got=""
-    sleep "${delay}"
-  done
-  [[ "${got:-}" == "${want}" ]] \
-    || die "published key never matched ${want} after ${attempts} attempts"
-  digest=$(sha256sum "${tmp}" | awk '{print $1}')
-  for pattern in ${CONTAINERFILES}; do
-    for file in "${ROOT_DIR}"/${pattern}; do
-      [[ -f "${file}" ]] || continue
-      grep -q '^ARG BOOTC_GPG_SHA256=' "${file}" || continue
-      sed -i "s/^ARG BOOTC_GPG_SHA256=.*/ARG BOOTC_GPG_SHA256=${digest}/" "${file}"
-      updated=$((updated + 1))
-    done
-  done
-  ((updated > 0)) || die "no file with BOOTC_GPG_SHA256 matched ${CONTAINERFILES}"
-  echo "BOOTC_GPG_SHA256=${digest}"
-}
-
 main() {
   set +x
   case "${1:-}" in
     rotate) rotate ;;
-    publish-hash) publish_hash "${2:-}" ;;
-    *) die "usage: $0 rotate | publish-hash FINGERPRINT" ;;
+    *) die "usage: $0 rotate" ;;
   esac
 }
 
