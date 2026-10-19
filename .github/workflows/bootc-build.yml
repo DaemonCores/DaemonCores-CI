@@ -23,17 +23,23 @@ on:
 
 jobs:
   # Discover every Containerfile* at the repo root and emit a FLAT build
-  # matrix where each entry is { file, tag, arch, autoupdate }. The autoupdate
+  # matrix where each entry is { file, tag, arch, autoupdate, kernel_suffix }. The autoupdate
   # dimension is driven by the Containerfile itself: when the file carries
   # `LABEL org.daemoncores.autoupdate-variants` BOTH the autoupdate (1) and
   # lock (0) variants are emitted; when the LABEL is absent only the autoupdate
   # (1) variant is emitted. Both arches (amd64, arm64) are always included.
+  # A Containerfile that carries `LABEL org.daemoncores.arm64-16k` also gets a
+  # second arm64 build for the 16 KB kernel: a separate image tagged
+  # `<tag>-16k` (kernel_suffix `-16k`), arm64 only, because the page size is a
+  # compile-time choice and one image holds one kernel. The 4 KB image keeps the
+  # plain tag and serves the older devices that have no 16 KB granule.
   # Also computes a global hash over all Containerfiles so any variant change
   # invalidates every variant's "identical to previous" cache.
   #
   # A second output, manifest_matrix, lists the unique variant tags with a
   # `lock` boolean telling the manifest job whether a _lock manifest list
-  # should be produced for that tag.
+  # should be produced for that tag, and the `arches` the list covers (both for
+  # a regular tag, arm64 only for a `-16k` tag).
   discover:
     name: Discover Containerfiles
     runs-on: ubuntu-latest
@@ -82,12 +88,23 @@ jobs:
               for au in "${autoupdates[@]}"; do
                 matrix=$(printf '%s' "$matrix" | jq -c \
                   --arg file "$name" --arg tag "$tag" --arg arch "$arch" --argjson au "$au" \
-                  '. += [{file: $file, tag: $tag, arch: $arch, autoupdate: $au}]')
+                  '. += [{file: $file, tag: $tag, arch: $arch, autoupdate: $au, kernel_suffix: ""}]')
               done
             done
             manifest_matrix=$(printf '%s' "$manifest_matrix" | jq -c \
               --arg tag "$tag" --argjson lock "$has_lock" \
-              '. += [{tag: $tag, lock: $lock}]')
+              '. += [{tag: $tag, lock: $lock, arches: ["amd64", "arm64"]}]')
+            # The 16 KB arm64 kernel image, when the Containerfile asks for it.
+            if grep -qE '^[[:space:]]*LABEL[[:space:]]+org\.daemoncores\.arm64-16k' "$name"; then
+              for au in "${autoupdates[@]}"; do
+                matrix=$(printf '%s' "$matrix" | jq -c \
+                  --arg file "$name" --arg tag "${tag}-16k" --argjson au "$au" \
+                  '. += [{file: $file, tag: $tag, arch: "arm64", autoupdate: $au, kernel_suffix: "-16k"}]')
+              done
+              manifest_matrix=$(printf '%s' "$manifest_matrix" | jq -c \
+                --arg tag "${tag}-16k" --argjson lock "$has_lock" \
+                '. += [{tag: $tag, lock: $lock, arches: ["arm64"]}]')
+            fi
             global_inputs+="${name} $(sha256sum "$name" | cut -d' ' -f1)"$'\n'
           done
           global_hash=$(printf '%s' "$global_inputs" | sha256sum | cut -d' ' -f1)
@@ -257,6 +274,7 @@ jobs:
           CF_TAG: ${{ matrix.entry.tag }}
           ARCH: ${{ matrix.entry.arch }}
           AUTOUPDATE: ${{ matrix.entry.autoupdate }}
+          KERNEL_SUFFIX: ${{ matrix.entry.kernel_suffix }}
           PRIMARY: ${{ steps.tags.outputs.primary }}
           CANONICAL: ${{ steps.tags.outputs.canonical }}
           COSIGN_PUBLIC_KEY: ${{ secrets.COSIGN_PUBLIC_KEY }}
@@ -343,9 +361,21 @@ jobs:
             firmware_pkgs="intel-microcode amd64-microcode firmware-linux-free firmware-linux firmware-misc-nonfree"
             apt_hold_pkg="grub-efi-amd64-signed"
           fi
+          # arm64 ships two kernels (docs/decisions.md, "Two arm64 kernels"): the
+          # 4 KB one for the older devices (Raspberry Pi 3 and 4), the 16 KB one
+          # (`-16k` image) for recent hardware (Raspberry Pi 5, RK3588). The
+          # suffix completes the kernel package name; ARM_DEVICES lists the
+          # device module packages built against that kernel. Both mirror the
+          # variants of linux-modules-arm-device in the package manifest.
+          arm_devices="rpi3 rpi4"
+          if [[ "${KERNEL_SUFFIX}" == "-16k" ]]; then
+            arm_devices="rpi5 rk3588"
+          fi
           sudo podman build \
             "${flags[@]}" \
             --build-arg "ARCH=${ARCH}" \
+            --build-arg "KERNEL_SUFFIX=${KERNEL_SUFFIX}" \
+            --build-arg "ARM_DEVICES=${arm_devices}" \
             --build-arg "BOOT_PKG=${boot_pkg}" \
             --build-arg "BOOT_PROFILE=${profile}" \
             --build-arg "FIRMWARE_PKGS=${firmware_pkgs}" \
@@ -589,7 +619,8 @@ jobs:
 
   # Promote per-arch images into multi-arch manifest lists. Runs once all
   # build-test-push combos (variant x arch x autoupdate) are green.
-  # For each variant tag V, the manifest job creates:
+  # For each variant tag V (a `-16k` tag covers arm64 only), the manifest job
+  # creates:
   #   :V            -> :V_amd64_autoupdate + :V_arm64_autoupdate  (always)
   #   :V_autoupdate -> :V_amd64_autoupdate + :V_arm64_autoupdate  (always)
   #   :V_lock       -> :V_amd64_lock     + :V_arm64_lock         (only when the
@@ -627,35 +658,41 @@ jobs:
         env:
           CF_TAG: ${{ matrix.entry.tag }}
           HAS_LOCK: ${{ matrix.entry.lock }}
+          ARCHES: ${{ join(matrix.entry.arches, ' ') }}
           IMAGE: ghcr.io/${{ github.repository }}
         run: |
           set -euo pipefail
           IMAGE="${IMAGE,,}"
-          # Per-arch per-autoupdate tags pushed by build-test-push.
-          amd64_auto="${IMAGE}:${CF_TAG}_amd64_autoupdate"
-          arm64_auto="${IMAGE}:${CF_TAG}_arm64_autoupdate"
-          amd64_lock="${IMAGE}:${CF_TAG}_amd64_lock"
-          arm64_lock="${IMAGE}:${CF_TAG}_arm64_lock"
+          # The architectures this tag was built for: both for a regular tag,
+          # arm64 only for a `-16k` tag (a 16 KB kernel image has no amd64 twin).
+          read -r -a arches <<<"${ARCHES}"
 
-          # :<tag> and :<tag>_autoupdate always present (multi-arch over the
-          # autoupdate variant).
-          docker manifest create "${IMAGE}:${CF_TAG}" \
-            "${amd64_auto}" "${arm64_auto}"
-          docker manifest annotate --arch arm64 "${IMAGE}:${CF_TAG}" "${arm64_auto}"
-          docker manifest push "${IMAGE}:${CF_TAG}"
+          # Create, annotate and push one manifest list over the per-arch tags
+          # <CF_TAG>_<arch>_<variant> pushed by build-test-push.
+          push_list() {
+            local list="$1" variant="$2" refs=() arch
+            for arch in "${arches[@]}"; do
+              refs+=("${IMAGE}:${CF_TAG}_${arch}_${variant}")
+            done
+            docker manifest create "${list}" "${refs[@]}"
+            for arch in "${arches[@]}"; do
+              if [ "${arch}" = "arm64" ]; then
+                docker manifest annotate --arch arm64 "${list}" \
+                  "${IMAGE}:${CF_TAG}_arm64_${variant}"
+              fi
+            done
+            docker manifest push "${list}"
+          }
 
-          docker manifest create "${IMAGE}:${CF_TAG}_autoupdate" \
-            "${amd64_auto}" "${arm64_auto}"
-          docker manifest annotate --arch arm64 "${IMAGE}:${CF_TAG}_autoupdate" "${arm64_auto}"
-          docker manifest push "${IMAGE}:${CF_TAG}_autoupdate"
+          # :<tag> and :<tag>_autoupdate always present (over the autoupdate
+          # variant).
+          push_list "${IMAGE}:${CF_TAG}" autoupdate
+          push_list "${IMAGE}:${CF_TAG}_autoupdate" autoupdate
 
           # :<tag>_lock only when the Containerfile declared the autoupdate-
           # variants LABEL (i.e. it produces both lock and autoupdate builds).
           if [ "$HAS_LOCK" = "true" ]; then
-            docker manifest create "${IMAGE}:${CF_TAG}_lock" \
-              "${amd64_lock}" "${arm64_lock}"
-            docker manifest annotate --arch arm64 "${IMAGE}:${CF_TAG}_lock" "${arm64_lock}"
-            docker manifest push "${IMAGE}:${CF_TAG}_lock"
+            push_list "${IMAGE}:${CF_TAG}_lock" lock
           fi
 
       # Sign the manifest list itself: its digest is the SHA-256 of the raw
