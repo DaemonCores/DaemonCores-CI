@@ -1,7 +1,7 @@
 name: 'Sign image'
 description: >-
   Installs cosign and signs the given image references with the repository's
-  own key (COSIGN_PRIVATE_KEY, see ensure-cosign-key). Falls back to keyless
+  own key (COSIGN_PRIVATE_KEY, see ensure-secrets.sh). Falls back to keyless
   GitHub OIDC signing when the repository has no key yet. The calling job
   needs `id-token: write` for the keyless fallback.
 
