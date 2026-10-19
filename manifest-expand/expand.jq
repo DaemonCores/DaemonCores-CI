@@ -13,8 +13,10 @@
 #   variant-deps:        [string] deps appended to deps,      {variant} substituted
 #
 # A variant override carries any normal package field (env, deps, sources,
-# when, deb-glob, ...) and wins over the template's own value. `{variant}` in
-# any path or dep is substituted with the variant key.
+# when, deb-glob, ...) and wins over the template's own value; env, sources and
+# deps are appended to the template's, every other field replaces it.
+# `{variant}` in any path or dep is substituted with the variant key. A key may
+# be empty (name = prefix) so one variant keeps the template's plain name.
 #
 # Set ARCH (empty = keep every arch) to also drop the other arch's packages in
 # the same pass: a package is kept when its when.arch is absent or equal.
@@ -40,7 +42,8 @@ def expand:
          then [] else [($t["variant-source"] | subst($v.key))] end))
   | .deps = ($deps
       + (($v.value.deps // []) | map(subst($v.key)))
-      + (($t["variant-deps"] // []) | map(subst($v.key))));
+      + (($t["variant-deps"] // []) | map(subst($v.key))))
+  | . + ($v.value | del(.env, .sources, .deps));
 
 [
   .packages[]
