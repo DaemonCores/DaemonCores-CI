@@ -440,6 +440,17 @@ cleanup() {
   fi
 }
 
+#######################################
+# Boot the image in QEMU and run the manifest tests, then the reboot tests.
+# Globals:
+#   TESTS_FILE
+#   SECURE_BOOT
+#   KVM
+#   SERIAL
+#   SSH_OPTS
+# Returns:
+#   Exits 1 when the VM is unreachable or a test fails.
+#######################################
 main() {
   trap cleanup EXIT
   install_deps

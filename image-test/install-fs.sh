@@ -19,6 +19,12 @@ KEY=/key.pub
 T=/target
 
 dev=$(losetup -f --show -P "${DISK}")
+#######################################
+# Release the mounts and the loop device on exit.
+# Globals:
+#   T
+#   dev
+#######################################
 cleanup() {
   umount -R "${T}" 2>/dev/null || true
   umount /varseed 2>/dev/null || true

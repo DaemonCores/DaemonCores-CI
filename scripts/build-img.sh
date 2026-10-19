@@ -81,6 +81,11 @@ truncate -s "${SIZE_MB}M" "${IMG_PATH}"
 DEV=$(losetup -f --show -P "${IMG_PATH}")
 echo ">>> Loop device: ${DEV}"
 
+#######################################
+# Release the mounts and the loop device on exit.
+# Globals:
+#   DEV
+#######################################
 cleanup() {
   umount -R /target 2>/dev/null || true
   umount /mnt-boot 2>/dev/null || true

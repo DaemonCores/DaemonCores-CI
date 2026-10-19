@@ -241,6 +241,19 @@ run_build() {
   ) | jq -R . | jq -s .
 }
 
+#######################################
+# Build one package, or reuse its cached deb when its inputs are unchanged.
+# Globals:
+#   PACKAGE
+#   ARCH
+#   EXTRA_ENV
+#   EXTRA_ENV_CI
+#   DEBS_DIR
+# Outputs:
+#   Step outputs hash, skipped and build_failed; the package metadata file.
+# Returns:
+#   0 when the package was built or reused, or the last-good deb was restored.
+#######################################
 main() {
   ensure_tools
   # Merge CI-injected extra env (not from the manifest) into EXTRA_ENV before

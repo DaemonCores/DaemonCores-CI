@@ -134,6 +134,18 @@ merge_env() {
   [[ -z "$2" ]] || printf '%s\n' "$2"
 }
 
+#######################################
+# Resolve the tracked upstream versions of one package.
+# Globals:
+#   PKG
+#   BASE_ENV
+#   STRICT
+#   GITHUB_OUTPUT
+# Outputs:
+#   Step output env: the package env with the resolved variables merged in.
+# Returns:
+#   Exits 1 when an entry is unresolved and STRICT is true.
+#######################################
 resolve() {
   local key lines overrides="" failed=0
   while IFS= read -r key; do
@@ -155,6 +167,19 @@ resolve() {
   } >>"${GITHUB_OUTPUT:-/dev/stdout}"
 }
 
+#######################################
+# Report tracked entries whose latest release is not published.
+# Globals:
+#   ARCH
+#   PAGES_URL
+#   GITHUB_REPOSITORY
+#   MAN
+#   STRICT
+# Outputs:
+#   One line per tracked entry on stdout.
+# Returns:
+#   Exits 1 when an entry is behind and STRICT is true.
+#######################################
 check() {
   local arch="${ARCH:-amd64}" base published pkg key tag version behind=0
   if [[ -n "${PAGES_URL:-}" ]]; then
