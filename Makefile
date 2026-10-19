@@ -7,7 +7,7 @@ VENV = .venv
 VBIN = $(VENV)/bin
 PYTHON_SRCS := scripts/gen_docs.py scripts/check_docstrings.py \
 	scripts/check_docs.py scripts/check_tests_manifest.py \
-	scripts/check_build_context.py
+	scripts/check_build_context.py scripts/check_kconfig.py
 PYTHON_TESTS := tests
 SHELL_SRCS := $(filter-out scripts/build-img.sh,$(wildcard scripts/*.sh))
 
