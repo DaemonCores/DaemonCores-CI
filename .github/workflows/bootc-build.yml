@@ -317,12 +317,13 @@ jobs:
           # Pass ARCH so the Containerfile selects the right kernel metapackage
           # (linux-image-${ARCH}), boot stack, firmware set, and module path.
           # The other ARGs are arch-specific too: BOOT_PKG differs between
-          # amd64 (grub-efi-amd64-signed) and arm64 (u-boot-tools), and the
+          # amd64 (grub-efi-amd64-signed) and arm64 (u-boot-tools plus the
+          # Fedora-built grub-efi-arm64-signed that bootupd installs), and the
           # FIRMWARE_PKGS for arm64 drops the x86 microcode blobs.
           if [[ "${ARCH}" == "arm64" ]]; then
-            boot_pkg="u-boot-tools"
+            boot_pkg="u-boot-tools grub-efi-arm64-signed"
             firmware_pkgs="firmware-linux-free firmware-linux firmware-misc-nonfree"
-            apt_hold_pkg=""
+            apt_hold_pkg="grub-efi-arm64-signed"
           else
             boot_pkg="grub-efi-amd64-signed"
             firmware_pkgs="intel-microcode amd64-microcode firmware-linux-free firmware-linux firmware-misc-nonfree"
