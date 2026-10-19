@@ -241,6 +241,7 @@ jobs:
           AUTOUPDATE: ${{ matrix.entry.autoupdate }}
           PRIMARY: ${{ steps.tags.outputs.primary }}
           CANONICAL: ${{ steps.tags.outputs.canonical }}
+          COSIGN_PUBLIC_KEY: ${{ secrets.COSIGN_PUBLIC_KEY }}
         run: |
           set -euo pipefail
           flags=()
@@ -308,6 +309,7 @@ jobs:
             --build-arg "APT_HOLD_PKG=${apt_hold_pkg}" \
             --build-arg "PRODUCT_NAME=${product_name}" \
             --build-arg "AUTOUPDATE=${AUTOUPDATE}" \
+            --build-arg "COSIGN_PUBKEY_B64=$(printf '%s' "${COSIGN_PUBLIC_KEY}" | base64 -w0)" \
             --label "org.daemoncores.content-hash=${{ steps.chash.outputs.hash }}" \
             --tag "${IMAGE}:${PRIMARY}" \
             -f "$CF_FILE" \
@@ -395,18 +397,13 @@ jobs:
             fi
           fi
 
-      - name: Install cosign
-        if: github.ref == 'refs/heads/main'
-        uses: sigstore/cosign-installer@v3
-        with:
-          install-dir: /usr/local/bin
-          use-sudo: true
-
       - name: Sign image
         if: github.ref == 'refs/heads/main'
-        run: |
-          set -euo pipefail
-          cosign sign --yes "${IMAGE}@${{ steps.push.outputs.digest }}"
+        uses: DaemonCores/DaemonCores-CI/sign-image@main
+        with:
+          refs: ghcr.io/${{ github.repository }}@${{ steps.push.outputs.digest }}
+          private-key: ${{ secrets.COSIGN_PRIVATE_KEY }}
+          password: ${{ secrets.COSIGN_PASSWORD }}
 
       # The image was built, pushed and signed but its content is byte-identical
       # to what was already published (same debs + base + Containerfiles + arch
@@ -507,6 +504,7 @@ jobs:
           AUTOUPDATE: ${{ matrix.entry.autoupdate }}
           PRIMARY: ${{ steps.tags.outputs.primary }}
           CANONICAL: ${{ steps.tags.outputs.canonical }}
+          COSIGN_PUBLIC_KEY: ${{ secrets.COSIGN_PUBLIC_KEY }}
         run: |
           set -euo pipefail
           flags=()
@@ -520,6 +518,7 @@ jobs:
             --arch "${ARCH}" \
             --build-arg ARCH="${ARCH}" \
             --build-arg AUTOUPDATE="${AUTOUPDATE}" \
+            --build-arg COSIGN_PUBKEY_B64="$(printf '%s' "${COSIGN_PUBLIC_KEY}" | base64 -w0)" \
             --build-arg PRODUCT_NAME="${product_name}" \
             --label "org.daemoncores.content-hash=wave2-${PRIMARY}" \
             --tag "${IMAGE}:${PRIMARY}" \
@@ -534,17 +533,13 @@ jobs:
           set -euo pipefail
           sudo podman push --digestfile /tmp/digest_primary.txt "${IMAGE}:${PRIMARY}"
           echo "digest=$(cat /tmp/digest_primary.txt)" >> "$GITHUB_OUTPUT"
-      - name: Install cosign
-        if: github.ref == 'refs/heads/main'
-        uses: sigstore/cosign-installer@v3
-        with:
-          install-dir: /usr/local/bin
-          use-sudo: true
       - name: Sign image
         if: github.ref == 'refs/heads/main'
-        run: |
-          set -euo pipefail
-          cosign sign --yes "${IMAGE}@${{ steps.push.outputs.digest }}"
+        uses: DaemonCores/DaemonCores-CI/sign-image@main
+        with:
+          refs: ghcr.io/${{ github.repository }}@${{ steps.push.outputs.digest }}
+          private-key: ${{ secrets.COSIGN_PRIVATE_KEY }}
+          password: ${{ secrets.COSIGN_PASSWORD }}
 
   # Promote per-arch images into multi-arch manifest lists. Runs once all
   # build-test-push combos (variant x arch x autoupdate) are green.
@@ -617,13 +612,10 @@ jobs:
             docker manifest push "${IMAGE}:${CF_TAG}_lock"
           fi
 
-      - name: Install cosign
-        uses: sigstore/cosign-installer@v3
-        with:
-          install-dir: /usr/local/bin
-          use-sudo: true
-
-      - name: Sign manifest lists
+      # Sign the manifest list itself: its digest is the SHA-256 of the raw
+      # manifest bytes (not that of a per-arch entry).
+      - name: Resolve manifest list digests
+        id: lists
         env:
           CF_TAG: ${{ matrix.entry.tag }}
           HAS_LOCK: ${{ matrix.entry.lock }}
@@ -635,18 +627,19 @@ jobs:
           if [ "$HAS_LOCK" = "true" ]; then
             tags+=("${CF_TAG}_lock")
           fi
-          for t in "${tags[@]}"; do
-            digest=$(docker manifest inspect "${IMAGE}:${t}" \
-              | jq -r '.manifests[0].digest // .config.digest // empty' \
-              || true)
-            # Fallback: skopeo inspect returns the manifest list digest.
-            if [ -z "${digest}" ]; then
+          {
+            echo "refs<<EOF"
+            for t in "${tags[@]}"; do
               digest=$(skopeo inspect --raw "docker://${IMAGE}:${t}" \
-                | jq -r '.manifests[0].digest // empty' || true)
-            fi
-            if [ -n "${digest}" ]; then
-              cosign sign --yes "${IMAGE}@${digest}"
-            else
-              echo "::warning::no digest found for ${IMAGE}:${t}, skipping sign"
-            fi
-          done
+                | sha256sum | cut -d' ' -f1)
+              echo "${IMAGE}@sha256:${digest}"
+            done
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Sign manifest lists
+        uses: DaemonCores/DaemonCores-CI/sign-image@main
+        with:
+          refs: ${{ steps.lists.outputs.refs }}
+          private-key: ${{ secrets.COSIGN_PRIVATE_KEY }}
+          password: ${{ secrets.COSIGN_PASSWORD }}

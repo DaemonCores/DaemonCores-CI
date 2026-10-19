@@ -1,0 +1,49 @@
+name: 'Sign image'
+description: >-
+  Installs cosign and signs the given image references with the repository's
+  own key (COSIGN_PRIVATE_KEY, see ensure-cosign-key). Falls back to keyless
+  GitHub OIDC signing when the repository has no key yet. The calling job
+  needs `id-token: write` for the keyless fallback.
+
+inputs:
+  refs:
+    description: 'Newline-separated image references pinned by digest (registry/name@sha256:...).'
+    required: true
+  private-key:
+    description: 'secrets.COSIGN_PRIVATE_KEY (empty: keyless).'
+    required: false
+    default: ''
+  password:
+    description: 'secrets.COSIGN_PASSWORD.'
+    required: false
+    default: ''
+
+runs:
+  using: composite
+  steps:
+    # Key-based signatures are stored as `.sig` tags, the format read by
+    # containers-image (`sigstoreSigned`); pinned to cosign 2.x which writes it.
+    - uses: sigstore/cosign-installer@v3
+      with:
+        cosign-release: v2.6.5
+        install-dir: /usr/local/bin
+        use-sudo: true
+    - shell: bash
+      env:
+        REFS: ${{ inputs.refs }}
+        COSIGN_PRIVATE_KEY: ${{ inputs.private-key }}
+        COSIGN_PASSWORD: ${{ inputs.password }}
+      run: |
+        set -euo pipefail
+        args=(--yes)
+        if [ -n "${COSIGN_PRIVATE_KEY}" ]; then
+          args+=(--key env://COSIGN_PRIVATE_KEY)
+        else
+          echo "::warning::no COSIGN_PRIVATE_KEY secret: signing keyless." \
+            "Hosts cannot enforce a keyless signature with containers-image."
+        fi
+        while IFS= read -r ref; do
+          [ -n "${ref}" ] || continue
+          # Registry references are lowercase; repository names may not be.
+          cosign sign "${args[@]}" "${ref,,}"
+        done <<< "${REFS}"

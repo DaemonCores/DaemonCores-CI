@@ -245,6 +245,20 @@ jobs:
           mode: ${{ steps.mode.outputs.mode }}
           gh-token: ${{ secrets.PAT_SECRETS }}
 
+  # Every repository signs its own images with its own cosign key, stored as
+  # repository secrets and generated here on first use (needs PAT_SECRETS;
+  # without it the images are signed keyless).
+  setup_cosign:
+    name: Setup image signing key
+    needs: [changes]
+    if: ${{ !cancelled() && needs.changes.outputs.image == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: DaemonCores/DaemonCores-CI/ensure-cosign-key@main
+        with:
+          gh-token: ${{ secrets.PAT_SECRETS }}
+
   build_env:
     name: Rebuild the deb-builder env image
     needs: [changes]
@@ -368,10 +382,11 @@ jobs:
   # double the work and create manifest-list race conditions on GHCR.
   image:
     name: Build container images (amd64 + arm64)
-    needs: [changes, debs_aggregate, base]
+    needs: [changes, debs_aggregate, base, setup_cosign]
     if: |
       !cancelled() &&
       needs.changes.outputs.image == 'true' &&
+      (needs.setup_cosign.result == 'success' || needs.setup_cosign.result == 'skipped') &&
       (needs.base.result == 'success' || needs.base.result == 'skipped') &&
       (needs.debs_aggregate.result == 'success' || needs.debs_aggregate.result == 'skipped')
     uses: DaemonCores/DaemonCores-CI/.github/workflows/bootc-build.yml@main
