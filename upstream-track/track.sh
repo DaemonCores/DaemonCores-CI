@@ -27,6 +27,12 @@
 #       digests:                # env variable -> tarball name; the SHA-256
 #         KERNEL_SHA256: "linux-{version}.tar.xz"   # is read from sha256sums.asc
 #
+# `require-patches: kernel/patches.yml` on the entry (path relative to the
+# package manifest) restricts the choice to the newest stable or longterm
+# release whose series has every patch URL of that manifest upstream, so a
+# kernel that a patch source (CachyOS, ROCKNIX) has not caught up with is
+# skipped instead of built and failed.
+#
 # {version} is the tag without its leading "v", {tag} is the tag as published.
 # The SHA-256 of each asset comes from the GitHub release API (`digest`), so the
 # build keeps verifying its downloads without a checksum committed per version.
@@ -75,6 +81,62 @@ fetch_kernel_release() {
 }
 
 #######################################
+# Succeed when every patch URL of a manifest exists for one kernel series.
+# Arguments:
+#   $1 - patch manifest path
+#   $2 - kernel version, e.g. 7.2.11
+#######################################
+patches_available() {
+  local url series="${2%.*}"
+  [[ "$2" == *.*.* ]] || series="$2"
+  while IFS= read -r url; do
+    [[ -n "${url}" ]] || continue
+    url="${url//\{series\}/${series}}"
+    url="${url//\{version\}/$2}"
+    curl --retry 3 -fsSL -o /dev/null "${url}" || {
+      echo "patch not available for ${2}: ${url}" >&2
+      return 1
+    }
+  done < <(yq '.patches[].url' "$1")
+}
+
+#######################################
+# Print the releases.json entry to build, as JSON.  Without `require-patches`
+# on the entry it is the first release of the moniker.  With it (a patch
+# manifest path relative to the package manifest), it is the newest stable or
+# longterm release whose series has every patch of the manifest upstream, so a
+# mainline release that CachyOS or another patch source has not caught up with
+# yet is skipped instead of failing the build.
+# Arguments:
+#   $1 - package name
+#   $2 - env variable key
+#   $3 - moniker
+#######################################
+select_kernel_release() {
+  local req manifest version
+  req=$(yq ".packages[] | select(.name == \"$1\") | .track.\"$2\".\"require-patches\" // \"\"" \
+    "${MAN}")
+  if [[ -z "${req}" ]]; then
+    fetch_kernel_release "$3"
+    return
+  fi
+  manifest="$(dirname "${MAN}")/${req}"
+  while IFS= read -r version; do
+    [[ -n "${version}" ]] || continue
+    if patches_available "${manifest}" "${version}"; then
+      curl --retry 3 -fsSL "${KERNEL_ORG_URL:-https://www.kernel.org}/releases.json" \
+        | V="${version}" yq -p=json -o=json \
+          '[.releases[] | select(.version == strenv(V))] | .[0]'
+      return
+    fi
+  done < <(curl --retry 3 -fsSL "${KERNEL_ORG_URL:-https://www.kernel.org}/releases.json" \
+    | yq -p=json '.releases[] | select(.moniker == "stable" or .moniker == "longterm")
+      | .version' | sort -rV)
+  echo "no kernel release has every patch of ${manifest}" >&2
+  return 1
+}
+
+#######################################
 # Print KEY=<version> plus the tarball digests for a kernel.org entry.
 # The SHA-256 comes from the sha256sums.asc next to the tarball.  A version
 # without a digest line (a release candidate) is not resolved.
@@ -87,7 +149,7 @@ resolve_kernel() {
   local pkg="$1" key="$2" moniker="$3" sel release version source out sums
   local pair denv name digest
   sel=".packages[] | select(.name == \"${pkg}\") | .track.\"${key}\""
-  release=$(fetch_kernel_release "${moniker}") || return 1
+  release=$(select_kernel_release "${pkg}" "${key}" "${moniker}") || return 1
   version=$(yq -p=json '.version // ""' <<<"${release}")
   source=$(yq -p=json '.source // ""' <<<"${release}")
   [[ -n "${version}" && -n "${source}" ]] || return 1
@@ -180,7 +242,7 @@ latest_tag() {
   local repo release moniker
   moniker=$(kernel_moniker "$1" "$2")
   if [[ -n "${moniker}" ]]; then
-    fetch_kernel_release "${moniker}" | yq -p=json '.version // ""'
+    select_kernel_release "$1" "$2" "${moniker}" | yq -p=json '.version // ""'
     return
   fi
   repo=$(yq ".packages[] | select(.name == \"$1\") | .track.\"$2\".repo // \"\"" \
