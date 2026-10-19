@@ -152,7 +152,6 @@ jobs:
                 match() { printf '%s\n' "$changed" | grep -qE "$1"; }
                 match '^workflows/build-env/'                            && env=true   || true
                 match '^workflows/bootc-debs-builder/'                   && debs=true  || true
-                match '^(kernel/|modules-kernel/)'                        && debs=true  || true
                 match '^(Containerfile|src/|assets/|workflows/image-tests/)' && image=true || true
                 match '^(Containerfile\.iso|workflows/build-iso/)'       && { image=true; iso=true; } || true
                 # Any change to the caller pipeline itself -> full rebuild (safe).
@@ -168,14 +167,14 @@ jobs:
                 # A format is auto-rebuilt when its dependencies change.
                 #   Containerfile  -> base of every img format (both rebuilt)
                 #   packages.yml   -> debs feed every img format (both rebuilt)
-                #   kernel/config-rpi*   -> rpi boot layout (rpi only)
-                #   kernel/config-rk3588 -> rpi-adjacent SBC (rpi only)
-                #   kernel/config-x86_64  -> ISO, NOT any img format (no img)
+                #   kernel/modules/rpi*   -> rpi boot layout (rpi only)
+                #   kernel/modules/rk3588 -> rpi-adjacent SBC (rpi only)
+                #   kernel/modules/x86_64 -> ISO, NOT any img format (no img)
                 # Only trigger a format whose deps actually changed; never
                 # cascade between img formats.
                 match '^Containerfile(\.minimal)?$' && { img_rpi=true; img_gallium=true; } || true
                 match '^workflows/bootc-debs-builder/packages\.yml$' && { img_rpi=true; img_gallium=true; } || true
-                match '^kernel/config-(rpi|rk3588)' && img_rpi=true || true
+                match '^workflows/bootc-debs-builder/kernel/modules/(rpi|rk3588)' && img_rpi=true || true
               fi ;;
           esac
           # img cascade (manual dispatch + push): when a format was opted in OR
