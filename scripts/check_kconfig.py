@@ -20,6 +20,7 @@ import argparse
 import re
 import sys
 from pathlib import Path
+from typing import cast
 
 SET = re.compile(r"^(CONFIG_\w+)=(.*)$")
 UNSET = re.compile(r"^# (CONFIG_\w+) is not set$")
@@ -118,11 +119,14 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--config", type=Path)
     parser.add_argument("fragments", nargs="+", type=Path)
     args = parser.parse_args(argv)
+    tree = cast(Path, args.tree)
+    config = cast(Path | None, args.config)
+    fragments = cast(list[Path], args.fragments)
     wanted: dict[str, str] = {}
-    for fragment in args.fragments:
+    for fragment in fragments:
         wanted.update(parse_fragment(fragment))
-    final = config_values(args.config) if args.config else None
-    defects = check(wanted, declared_symbols(args.tree), final)
+    final = config_values(config) if config else None
+    defects = check(wanted, declared_symbols(tree), final)
     for line in defects:
         print(line)
     return 1 if defects else 0
