@@ -19,6 +19,7 @@
 #   EXTRA_ENV   - KEY=VALUE lines exported for the build (e.g. a package
 #                 version, GH_TOKEN). Non-secret keys also feed the hash so a
 #                 version bump rebuilds; secret-looking keys are excluded.
+#   CI_SCRIPTS  - (exported) directory of the shared DaemonCores-CI scripts.
 #   PAGES_URL   - APT repo base URL; derived from GITHUB_REPOSITORY if empty.
 #   GITHUB_REPOSITORY, GITHUB_WORKSPACE, GITHUB_OUTPUT - provided by Actions.
 set -euo pipefail
@@ -222,6 +223,9 @@ restore_cached() {
 #######################################
 run_build() {
   export_env
+  # Shared check scripts of DaemonCores-CI, for the build scripts to call.
+  CI_SCRIPTS="$(cd "$(dirname "${BASH_SOURCE[0]}")/../scripts" && pwd)"
+  export CI_SCRIPTS
   # Explicit failure propagation: when this function is evaluated in a context
   # where errexit is suppressed (a command substitution in an `if`/`||`), a
   # failing build must still return non-zero rather than falling through to the
