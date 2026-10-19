@@ -1,0 +1,73 @@
+name: Refresh kernel patch references
+
+# Reusable job that keeps the sha256 references of the kernel files touched by
+# the patches (kernel/patches.lock.json) in step with the latest stable kernel.
+# It downloads the kernel.org tarball, applies every patch of the manifest for
+# each class and architecture with PATCH_GUARD_UPDATE=1, and opens a pull
+# request when the lock changed.  A patch that no longer applies fails the job
+# and no pull request is opened.
+#
+# Triggers (schedule, workflow_dispatch) belong in the caller.
+
+on:
+  workflow_call:
+    inputs:
+      kernel-dir:
+        description: 'Directory of the kernel manifest and lock in the caller repo'
+        type: string
+        default: workflows/bootc-debs-builder/kernel
+      lib-dir:
+        description: 'Directory holding kernel-source.sh and kernel-patches.sh'
+        type: string
+        default: workflows/bootc-debs-builder/lib
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fetch tooling
+        uses: actions/checkout@v4
+        with:
+          repository: DaemonCores/DaemonCores-CI
+          ref: main
+          path: .ci-tooling
+          persist-credentials: false
+      - name: Recompute the references on the latest stable kernel
+        env:
+          KDIR: ${{ inputs.kernel-dir }}
+          LDIR: ${{ inputs.lib-dir }}
+        run: |
+          set -euo pipefail
+          export CI_SCRIPTS="${PWD}/.ci-tooling/scripts"
+          export PATCH_GUARD_UPDATE=1
+          version=$(curl -fsSL https://www.kernel.org/releases.json |
+            jq -r '.latest_stable.version')
+          . "${LDIR}/kernel-source.sh"
+          . "${LDIR}/kernel-patches.sh"
+          rm -f "${KDIR}/patches.lock.json"
+          for arch in amd64 arm64; do
+            for class in kernel module; do
+              kernel_fetch_source "${version}"
+              kernel_apply_patches "${KDIR}/patches.yml" "${class}" "${arch}" \
+                "${version}" "${SRCDIR}"
+              rm -rf "${SRCDIR}"
+            done
+          done
+          [ -f "${KDIR}/patches.lock.json" ] || echo '{}' >"${KDIR}/patches.lock.json"
+      - name: Propose the new references
+        uses: peter-evans/create-pull-request@v7
+        with:
+          branch: ci/kernel-patch-references
+          commit-message: 'chore(kernel): refresh the patch file references'
+          title: 'chore(kernel): refresh the patch file references'
+          body: >-
+            A file touched by the kernel patches changed in the latest stable
+            kernel, which refuses the kernel build until the references are
+            updated. Every patch of the manifest still applies to it.
+          add-paths: ${{ inputs.kernel-dir }}/patches.lock.json

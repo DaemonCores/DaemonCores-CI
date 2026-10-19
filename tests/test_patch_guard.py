@@ -89,3 +89,19 @@ def test_file_without_reference_is_refused(
     lock.write_text("{}\n")
     args = ["--tree", str(tree), "--lock", str(lock), str(patch)]
     assert patch_guard.main(args) == 1
+
+
+def test_update_merges_with_the_existing_lock(
+    env: tuple[Path, Path, Path],
+) -> None:
+    """``--update`` keeps the references of files other runs recorded.
+
+    Args:
+        env: Tree, patch and lock path.
+    """
+    tree, patch, lock = env
+    lock.write_text('{"other.c": "abc"}\n')
+    args = ["--tree", str(tree), "--lock", str(lock), str(patch), "--update"]
+    assert patch_guard.main(args) == 0
+    assert set(json.loads(lock.read_text())
+               ) == {"other.c", "kernel/sched/core.c"}
