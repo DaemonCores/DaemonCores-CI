@@ -348,3 +348,79 @@ def test_check_matches_kernel_deb_revision(api: Path) -> None:
         KERNEL_ORG_URL=f'file://{api}'
     )
     assert result.returncode == 0, result.stdout
+
+
+def _kernel_with_patches(api: Path, available: set[str]) -> None:
+    """Write two stable series and a patch manifest served for some of them.
+
+    Args:
+        api: API tree root.
+        available: Series (e.g. ``7.2``) whose patch file exists.
+    """
+    (api / 'packages.yml').write_text(
+        KERNEL_MANIFEST.replace(
+            'kernel-org: stable',
+            'kernel-org: stable\n        require-patches: patches.yml'
+        )
+    )
+    cdn = api / 'cdn'
+    cdn.mkdir(exist_ok=True)
+    (cdn / 'sha256sums.asc').write_text(
+        f'{DIGEST}  linux-7.2.11.tar.xz\n{DIGEST}  linux-7.1.20.tar.xz\n'
+    )
+    for series in ('7.2', '7.1'):
+        (api / series).mkdir(exist_ok=True)
+        if series in available:
+            (api / series / 'bore.patch').write_text('x')
+    (api / 'patches.yml'
+     ).write_text(f'patches:\n  - url: file://{api}/{{series}}/bore.patch\n')
+    releases = [{
+        'moniker': 'stable',
+        'version': '7.2.11',
+        'source': f'file://{cdn}/linux-7.2.11.tar.xz'
+    }, {
+        'moniker': 'stable',
+        'version': '7.1.20',
+        'source': f'file://{cdn}/linux-7.1.20.tar.xz'
+    }]
+    (api / 'releases.json').write_text(json.dumps({'releases': releases}))
+
+
+def test_resolve_skips_a_kernel_the_patches_do_not_cover(api: Path) -> None:
+    """The newest release with every patch upstream wins.
+
+    Args:
+        api: API tree fixture.
+    """
+    _kernel_with_patches(api, {'7.1'})
+    result = _run(
+        api,
+        'resolve',
+        PKG='kernel',
+        BASE_ENV='A=1',
+        KERNEL_ORG_URL=f'file://{api}'
+    )
+    assert result.returncode == 0, result.stderr
+    assert _env_output(api) == [
+        'A=1', 'KERNEL_VER=7.1.20', f'KERNEL_SHA256={DIGEST}'
+    ]
+
+
+def test_resolve_takes_the_newest_kernel_when_patches_cover_it(
+    api: Path
+) -> None:
+    """With every patch available the newest release is kept.
+
+    Args:
+        api: API tree fixture.
+    """
+    _kernel_with_patches(api, {'7.2', '7.1'})
+    result = _run(
+        api,
+        'resolve',
+        PKG='kernel',
+        BASE_ENV='A=1',
+        KERNEL_ORG_URL=f'file://{api}'
+    )
+    assert result.returncode == 0, result.stderr
+    assert 'KERNEL_VER=7.2.11' in _env_output(api)
