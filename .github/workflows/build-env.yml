@@ -41,7 +41,7 @@ jobs:
         env:
           MAN: ${{ inputs.manifest }}
           GH_ACTOR: ${{ github.actor }}
-          PAT_PKG: ${{ secrets.PAT_PKG }}
+          PAT_PKG: ${{ secrets.PAT_PKG || github.token }}
           ARCH: ${{ matrix.arch }}
         run: |
           set -euo pipefail

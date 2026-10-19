@@ -8,6 +8,18 @@ on:
         type: boolean
         required: false
         default: false
+      bootc_gpg_sha256:
+        description: >-
+          SHA-256 of the published APT public key, derived by the pipeline from
+          the APT_GPG_KEY secret. Empty keeps the Containerfile default.
+        type: string
+        required: false
+        default: ''
+      apt_url:
+        description: 'Base URL of the published APT repository (empty keeps the Containerfile default).'
+        type: string
+        required: false
+        default: ''
 
 jobs:
   # Discover every Containerfile* at the repo root and emit a FLAT build
@@ -173,7 +185,7 @@ jobs:
 
       - name: Log in to GHCR
         env:
-          PAT_PKG: ${{ secrets.PAT_PKG }}
+          PAT_PKG: ${{ secrets.PAT_PKG || github.token }}
         run: |
           set -euo pipefail
           # Login Podman for build and push with podman fonctionality and for bootc standard
@@ -201,6 +213,8 @@ jobs:
           ARCH: ${{ matrix.entry.arch }}
           AUTOUPDATE: ${{ matrix.entry.autoupdate }}
           PRIMARY: ${{ steps.tags.outputs.primary }}
+          BOOTC_GPG_SHA256: ${{ inputs.bootc_gpg_sha256 }}
+          COSIGN_PUBLIC_KEY: ${{ secrets.COSIGN_PUBLIC_KEY }}
         run: |
           set -euo pipefail
           command -v skopeo >/dev/null 2>&1 \
@@ -217,9 +231,13 @@ jobs:
           base_digest=$(sudo skopeo inspect --override-arch "${ARCH}" \
             --format '{{.Digest}}' "docker://${base}" 2>/dev/null || echo none)
           cf=$(sha256sum "$CF_FILE" | cut -d' ' -f1)
-          hash=$(printf '%s\n%s\n%s\n%s\n%s\n%s\n%s\n' \
+          # The APT key hash and the signing public key are build inputs too:
+          # a rotation must not be mistaken for an identical image.
+          signing=$(printf '%s\n%s' "${BOOTC_GPG_SHA256}" "${COSIGN_PUBLIC_KEY}" \
+            | sha256sum | cut -d' ' -f1)
+          hash=$(printf '%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n' \
             "${debs}" "${base_digest}" "${cf}" "${GLOBAL_HASH}" "${CF_TAG}" \
-            "${ARCH}" "${AUTOUPDATE}" \
+            "${ARCH}" "${AUTOUPDATE}" "${signing}" \
             | sha256sum | cut -d' ' -f1)
           echo "hash=${hash}" >>"$GITHUB_OUTPUT"
           # Content-hash label of the currently published per-arch image.
@@ -242,6 +260,8 @@ jobs:
           PRIMARY: ${{ steps.tags.outputs.primary }}
           CANONICAL: ${{ steps.tags.outputs.canonical }}
           COSIGN_PUBLIC_KEY: ${{ secrets.COSIGN_PUBLIC_KEY }}
+          BOOTC_GPG_SHA256: ${{ inputs.bootc_gpg_sha256 }}
+          APT_URL: ${{ inputs.apt_url }}
         run: |
           set -euo pipefail
           flags=()
@@ -249,6 +269,13 @@ jobs:
             || "${{ inputs.force_no_cache }}" == "true" ]]; then
             flags+=(--no-cache)
           fi
+          # APT repository trust: the key hash is derived by the pipeline from
+          # the APT_GPG_KEY secret; when absent the Containerfile defaults apply.
+          apt_args=()
+          [[ -z "${BOOTC_GPG_SHA256}" ]] \
+            || apt_args+=(--build-arg "BOOTC_GPG_SHA256=${BOOTC_GPG_SHA256}")
+          [[ -z "${APT_URL}" ]] \
+            || apt_args+=(--build-arg "BOOTC_APT_URL=${APT_URL}")
           # Monthly tag: 'monthly-YYYYMMDD' for the canonical latest combo only
           # (preserves the historical amd64-only monthly tag).
           if [[ "${{ github.event_name }}" == "schedule" && "$CANONICAL" == "true" ]]; then
@@ -310,6 +337,8 @@ jobs:
             --build-arg "PRODUCT_NAME=${product_name}" \
             --build-arg "AUTOUPDATE=${AUTOUPDATE}" \
             --build-arg "COSIGN_PUBKEY_B64=$(printf '%s' "${COSIGN_PUBLIC_KEY}" | base64 -w0)" \
+            --build-arg "IMAGE_REF=${IMAGE,,}" \
+            "${apt_args[@]}" \
             --label "org.daemoncores.content-hash=${{ steps.chash.outputs.hash }}" \
             --tag "${IMAGE}:${PRIMARY}" \
             -f "$CF_FILE" \
@@ -487,7 +516,7 @@ jobs:
           echo "AUTOSUFFIX=${autosuffix}" >>"$GITHUB_ENV"
       - name: Log in to GHCR
         env:
-          PAT_PKG: ${{ secrets.PAT_PKG }}
+          PAT_PKG: ${{ secrets.PAT_PKG || github.token }}
         run: |
           set -euo pipefail
           sudo podman login ghcr.io \
@@ -519,6 +548,7 @@ jobs:
             --build-arg ARCH="${ARCH}" \
             --build-arg AUTOUPDATE="${AUTOUPDATE}" \
             --build-arg COSIGN_PUBKEY_B64="$(printf '%s' "${COSIGN_PUBLIC_KEY}" | base64 -w0)" \
+            --build-arg IMAGE_REF="${IMAGE,,}" \
             --build-arg PRODUCT_NAME="${product_name}" \
             --label "org.daemoncores.content-hash=wave2-${PRIMARY}" \
             --tag "${IMAGE}:${PRIMARY}" \
@@ -570,7 +600,7 @@ jobs:
     steps:
       - name: Log in to GHCR
         env:
-          PAT_PKG: ${{ secrets.PAT_PKG }}
+          PAT_PKG: ${{ secrets.PAT_PKG || github.token }}
         run: |
           set -euo pipefail
           docker login ghcr.io \

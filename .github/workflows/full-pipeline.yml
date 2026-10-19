@@ -58,6 +58,12 @@ on:
         description: 'Override signing mode: nosign | sign | both | "" (use config.yml default).'
         type: string
         default: ''
+      pipeline_workflow:
+        description: >-
+          Caller workflow file to start again once the signing secrets were
+          generated. Empty: the calling workflow itself.
+        type: string
+        default: ''
 
 permissions:
   contents: write
@@ -191,7 +197,8 @@ jobs:
     # (enable_base). A push/schedule never rebuilds the base (nothing in the
     # product repo changes it). If it fails, the downstream jobs gate on base
     # success/skipped, so the run goes red instead of shipping on a stale base.
-    if: ${{ inputs.enable_base && inputs.update_base == 'true' }}
+    needs: [prepare]
+    if: ${{ !cancelled() && needs.prepare.outputs.restart != 'yes' && inputs.enable_base && inputs.update_base == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - name: Trigger debian-bootc pipeline and wait
@@ -204,74 +211,215 @@ jobs:
           # dispatch cross-repo). Provided by the caller via `secrets: inherit`.
           token: ${{ secrets.PAT_DISPATCH }}
 
-  setup_signing:
-    name: Setup module signing
+  # Prepare the signing secrets. A fork must run the pipeline without hunting
+  # for keys: every secret that can be generated is generated here, once
+  # (scripts/ensure-secrets.sh). Secrets present at the start of the run skip
+  # all of this. A secret created during a run is only visible to the NEXT run,
+  # so when something was created this run stops and starts a fresh one with the
+  # same plan: the build then runs with the keys in place.
+  # Needs PAT_SECRETS (GITHUB_TOKEN cannot write secrets); without it nothing is
+  # generated and the pipeline degrades (keyless images, unsigned modules).
+  # The caller must grant `actions: write` so this job can start the new run.
+  prepare:
+    name: Prepare signing secrets
     needs: [changes]
-    if: ${{ !cancelled() && needs.changes.outputs.debs == 'true' }}
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: write
+    env:
+      HAS_COSIGN: ${{ secrets.COSIGN_PRIVATE_KEY != '' }}
+      HAS_APT: ${{ secrets.APT_GPG_KEY != '' }}
+      HAS_SB: ${{ secrets.SB_SIGNING_KEY != '' && secrets.SB_SIGNING_CERT != '' }}
+      HAS_MODULES: ${{ secrets.MODULE_SIGNING_KEY != '' && secrets.MODULE_SIGNING_CERT != '' }}
     outputs:
-      active: ${{ steps.setup.outputs.active }}
+      restart: ${{ steps.dispatch.outputs.restart }}
+      signing_active: ${{ steps.need.outputs.signing_active }}
+      # The plan, forced to "nothing" when this run hands over to a new one.
+      env: ${{ steps.dispatch.outputs.restart == 'yes' && 'false' || needs.changes.outputs.env }}
+      debs: ${{ steps.dispatch.outputs.restart == 'yes' && 'false' || needs.changes.outputs.debs }}
+      image: ${{ steps.dispatch.outputs.restart == 'yes' && 'false' || needs.changes.outputs.image }}
+      iso: ${{ steps.dispatch.outputs.restart == 'yes' && 'false' || needs.changes.outputs.iso }}
+      img_rpi: ${{ steps.dispatch.outputs.restart == 'yes' && 'false' || needs.changes.outputs.img_rpi }}
+      img_gallium: ${{ steps.dispatch.outputs.restart == 'yes' && 'false' || needs.changes.outputs.img_gallium }}
     steps:
       - uses: actions/checkout@v7
-      - id: mode
+      - id: need
         shell: bash
         env:
           OVERRIDE: ${{ inputs.sign_modules }}
+          PLAN_DEBS: ${{ needs.changes.outputs.debs }}
+          PLAN_IMAGE: ${{ needs.changes.outputs.image }}
+          PLAN_ISO: ${{ needs.changes.outputs.iso }}
         run: |
           set -euo pipefail
-          # Dispatch override takes precedence over config.yml default.
+          # Module signing mode: the dispatch override beats config.yml.
+          mode=nosign
           if [ -n "${OVERRIDE}" ]; then
-            echo "mode=${OVERRIDE}" >> "$GITHUB_OUTPUT"
+            mode="${OVERRIDE}"
           elif [ -f config.yml ]; then
-            # yq is not pre-installed on ubuntu-latest; use python3 via
-            # stdin heredoc so indentation stays within the YAML block.
-            mode=$(python3 - <<'PY'
-          import yaml, sys
+            mode=$(python3 -c "
+          import yaml
           try:
-              d = yaml.safe_load(open('config.yml'))
+              d = yaml.safe_load(open('config.yml')) or {}
               print(d.get('signing', {}).get('modules', {}).get('default', 'nosign'))
-          except Exception as e:
-              sys.stderr.write(str(e) + '\n')
+          except Exception:
               print('nosign')
-          PY
-            )
-            echo "mode=${mode}" >> "$GITHUB_OUTPUT"
-          else
-            echo "mode=nosign" >> "$GITHUB_OUTPUT"
+          ")
           fi
-      - id: setup
-        uses: DaemonCores/DaemonCores-CI/module-signing-setup@main
+          active=no
+          groups=()
+          if [ "${PLAN_IMAGE}" = true ] && [ "${HAS_COSIGN}" != true ]; then
+            groups+=(cosign)
+          fi
+          if { [ "${PLAN_DEBS}" = true ] || [ "${PLAN_IMAGE}" = true ] \
+              || [ "${PLAN_ISO}" = true ]; } && [ "${HAS_APT}" != true ]; then
+            groups+=(apt)
+          fi
+          if [ "${PLAN_DEBS}" = true ] && [ "${HAS_SB}" != true ]; then
+            groups+=(sb)
+          fi
+          case "${mode}" in
+            sign|both)
+              if [ "${HAS_MODULES}" = true ]; then
+                active=yes
+              elif [ "${PLAN_DEBS}" = true ]; then
+                groups+=(modules)
+              fi
+              ;;
+          esac
+          echo "signing_active=${active}" >>"$GITHUB_OUTPUT"
+          echo "groups=${groups[*]:-}" >>"$GITHUB_OUTPUT"
+          echo "module signing mode=${mode} active=${active}; missing: ${groups[*]:-none}"
+      - name: Fetch the shared tooling
+        if: ${{ steps.need.outputs.groups != '' }}
+        uses: actions/checkout@v7
         with:
-          mode: ${{ steps.mode.outputs.mode }}
-          gh-token: ${{ secrets.PAT_SECRETS }}
+          repository: DaemonCores/DaemonCores-CI
+          ref: main
+          path: .ci-tooling
+          persist-credentials: false
+      - name: Install cosign
+        if: ${{ contains(steps.need.outputs.groups, 'cosign') }}
+        uses: sigstore/cosign-installer@v3
+        with:
+          cosign-release: v2.6.5
+      - name: Generate the missing secrets
+        id: ensure
+        if: ${{ steps.need.outputs.groups != '' }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.PAT_SECRETS }}
+          GROUPS_MISSING: ${{ steps.need.outputs.groups }}
+        run: |
+          set -euo pipefail
+          # shellcheck disable=SC2086  # one argument per missing group
+          .ci-tooling/scripts/ensure-secrets.sh ${GROUPS_MISSING}
+      - name: Start a new run now that the secrets exist
+        id: dispatch
+        if: ${{ steps.ensure.outputs.created != '' }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CREATED: ${{ steps.ensure.outputs.created }}
+          WORKFLOW_REF: ${{ github.workflow_ref }}
+          PIPELINE_OVERRIDE: ${{ inputs.pipeline_workflow }}
+          REF_NAME: ${{ github.ref_name }}
+          P_ENV: ${{ needs.changes.outputs.env }}
+          P_DEBS: ${{ needs.changes.outputs.debs }}
+          P_IMAGE: ${{ needs.changes.outputs.image }}
+          P_ISO: ${{ needs.changes.outputs.iso }}
+          P_RPI: ${{ needs.changes.outputs.img_rpi }}
+          P_GALLIUM: ${{ needs.changes.outputs.img_gallium }}
+          UPDATE_BASE: ${{ inputs.update_base }}
+          SIGN_MODULES: ${{ inputs.sign_modules }}
+        run: |
+          set -euo pipefail
+          # Caller workflow file: owner/repo/.github/workflows/<file>@<ref>.
+          file="${PIPELINE_OVERRIDE}"
+          if [ -z "${file}" ]; then
+            file="${WORKFLOW_REF#*/.github/workflows/}"
+            file="${file%%@*}"
+          fi
+          args=(-f "rebuild_env=${P_ENV}" -f "run_debs=${P_DEBS}"
+                -f "run_image=${P_IMAGE}" -f "run_iso=${P_ISO}"
+                -f "run_img_rpi=${P_RPI}" -f "run_img_gallium=${P_GALLIUM}")
+          [ "${UPDATE_BASE}" != true ] || args+=(-f update_base=true)
+          [ -z "${SIGN_MODULES}" ] || args+=(-f "sign_modules=${SIGN_MODULES}")
+          gh workflow run "${file}" --ref "${REF_NAME}" "${args[@]}" || {
+            echo "::error::Secrets were created (${CREATED}) but the new run could not be started." \
+              "Grant 'actions: write' to the calling workflow, or run it again by hand."
+            exit 1
+          }
+          echo "restart=yes" >>"$GITHUB_OUTPUT"
+          {
+            echo "### Signing secrets created"
+            echo "Created: \`${CREATED}\`."
+            echo "GitHub only exposes new secrets to the next run, so this run stops here"
+            echo "and \`${file}\` was started again with the same plan."
+          } >>"$GITHUB_STEP_SUMMARY"
 
-  # Every repository signs its own images with its own cosign key, stored as
-  # repository secrets and generated here on first use (needs PAT_SECRETS;
-  # without it the images are signed keyless).
-  setup_cosign:
-    name: Setup image signing key
-    needs: [changes]
-    if: ${{ !cancelled() && needs.changes.outputs.image == 'true' }}
+  # The image build pins the checksum of the APT repository public key. It is
+  # derived here from the APT_GPG_KEY secret (the published key must carry the
+  # secret's fingerprint), so nothing is committed after a key rotation.
+  apt_key:
+    name: Derive the APT key pin
+    needs: [prepare, debs_publish]
+    if: |
+      !cancelled() &&
+      needs.prepare.outputs.image == 'true' &&
+      (needs.debs_publish.result == 'success' || needs.debs_publish.result == 'skipped')
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      # The secrets context is not available to step conditions: go through env.
+      HAS_APT: ${{ secrets.APT_GPG_KEY != '' }}
+    outputs:
+      sha256: ${{ steps.hash.outputs.sha256 }}
+      url: ${{ steps.url.outputs.url }}
     steps:
-      - uses: actions/checkout@v7
-      - uses: DaemonCores/DaemonCores-CI/ensure-cosign-key@main
+      - id: url
+        shell: bash
+        run: |
+          set -euo pipefail
+          owner="${GITHUB_REPOSITORY%%/*}"
+          repo="${GITHUB_REPOSITORY#*/}"
+          echo "url=https://${owner,,}.github.io/${repo,,}" >>"$GITHUB_OUTPUT"
+      - name: Fetch the shared tooling
+        if: ${{ env.HAS_APT == 'true' }}
+        uses: actions/checkout@v7
         with:
-          gh-token: ${{ secrets.PAT_SECRETS }}
+          repository: DaemonCores/DaemonCores-CI
+          ref: main
+          path: .ci-tooling
+          persist-credentials: false
+      - id: hash
+        if: ${{ env.HAS_APT == 'true' }}
+        shell: bash
+        env:
+          APT_GPG_KEY: ${{ secrets.APT_GPG_KEY }}
+          KEY_URL: ${{ steps.url.outputs.url }}/gpg.key
+        run: |
+          set -euo pipefail
+          sha=$(.ci-tooling/scripts/apt-key-hash.sh)
+          echo "sha256=${sha}" >>"$GITHUB_OUTPUT"
+          echo "Pinned APT key checksum: ${sha}"
 
   build_env:
     name: Rebuild the deb-builder env image
-    needs: [changes]
+    needs: [prepare]
     # Monthly schedule, checkbox, or a push touching workflows/build-env/.
     # Single-arch: the build-env image is the host toolchain (buildah on amd64);
     # it builds both amd64 and arm64 debs via the arch-aware waves below.
-    if: ${{ !cancelled() && needs.changes.outputs.env == 'true' }}
+    if: ${{ !cancelled() && needs.prepare.outputs.env == 'true' }}
     uses: DaemonCores/DaemonCores-CI/.github/workflows/build-env.yml@main
     secrets: inherit
 
   debs_amd64:
     name: Build .deb packages (amd64)
-    needs: [changes, base, build_env, setup_signing]
+    needs: [prepare, base, build_env]
     # The nested waveN jobs in bootc-debs-builder.yml (and build-one-deb.yml's
     # build job) request 'actions: write' to delete stale CI artifacts via the
     # gh api DELETE endpoint. GitHub intersects the caller's top-level/job-level
@@ -290,20 +438,19 @@ jobs:
       issues: write
     if: |
       !cancelled() &&
-      needs.changes.outputs.debs == 'true' &&
+      needs.prepare.outputs.debs == 'true' &&
       (needs.base.result == 'success' || needs.base.result == 'skipped') &&
-      (needs.build_env.result == 'success' || needs.build_env.result == 'skipped') &&
-      (needs.setup_signing.result == 'success' || needs.setup_signing.result == 'skipped')
+      (needs.build_env.result == 'success' || needs.build_env.result == 'skipped')
     uses: DaemonCores/DaemonCores-CI/.github/workflows/bootc-debs-builder.yml@main
     with:
       arch: amd64
-      signing_active: ${{ needs.setup_signing.outputs.active }}
+      signing_active: ${{ needs.prepare.outputs.signing_active }}
       deploy_pages: false
     secrets: inherit
 
   debs_arm64:
     name: Build .deb packages (arm64)
-    needs: [changes, base, build_env, setup_signing]
+    needs: [prepare, base, build_env]
     # Same actions: write grant as debs_amd64 — see that job's comment for the
     # rationale (nested waveN jobs need to delete stale artifacts via gh api).
     permissions:
@@ -315,14 +462,13 @@ jobs:
       issues: write
     if: |
       !cancelled() &&
-      needs.changes.outputs.debs == 'true' &&
+      needs.prepare.outputs.debs == 'true' &&
       (needs.base.result == 'success' || needs.base.result == 'skipped') &&
-      (needs.build_env.result == 'success' || needs.build_env.result == 'skipped') &&
-      (needs.setup_signing.result == 'success' || needs.setup_signing.result == 'skipped')
+      (needs.build_env.result == 'success' || needs.build_env.result == 'skipped')
     uses: DaemonCores/DaemonCores-CI/.github/workflows/bootc-debs-builder.yml@main
     with:
       arch: arm64
-      signing_active: ${{ needs.setup_signing.outputs.active }}
+      signing_active: ${{ needs.prepare.outputs.signing_active }}
       deploy_pages: false
     secrets: inherit
 
@@ -333,10 +479,10 @@ jobs:
   # named "github-pages"; two parallel uploads conflict at deploy time).
   debs_publish:
     name: Publish .deb packages (APT repo → GitHub Pages)
-    needs: [changes, debs_amd64, debs_arm64]
+    needs: [prepare, debs_amd64, debs_arm64]
     if: |
       always() && !cancelled() &&
-      needs.changes.outputs.debs == 'true' &&
+      needs.prepare.outputs.debs == 'true' &&
       (needs.debs_amd64.result == 'success' || needs.debs_amd64.result == 'failure') &&
       (needs.debs_arm64.result == 'success' || needs.debs_arm64.result == 'failure')
     runs-on: ubuntu-latest
@@ -382,11 +528,11 @@ jobs:
   # double the work and create manifest-list race conditions on GHCR.
   image:
     name: Build container images (amd64 + arm64)
-    needs: [changes, debs_aggregate, base, setup_cosign]
+    needs: [prepare, debs_aggregate, base, apt_key]
     if: |
       !cancelled() &&
-      needs.changes.outputs.image == 'true' &&
-      (needs.setup_cosign.result == 'success' || needs.setup_cosign.result == 'skipped') &&
+      needs.prepare.outputs.image == 'true' &&
+      (needs.apt_key.result == 'success' || needs.apt_key.result == 'skipped') &&
       (needs.base.result == 'success' || needs.base.result == 'skipped') &&
       (needs.debs_aggregate.result == 'success' || needs.debs_aggregate.result == 'skipped')
     uses: DaemonCores/DaemonCores-CI/.github/workflows/bootc-build.yml@main
@@ -394,11 +540,15 @@ jobs:
       # Force a no-cache image rebuild when at least one .deb was rebuilt on
       # either arch (schedule already forces no-cache inside bootc-build.yml).
       force_no_cache: ${{ needs.debs_aggregate.outputs.any_rebuilt == 'true' }}
+      # APT repository trust, derived from the APT_GPG_KEY secret (no hash is
+      # committed to the Containerfiles).
+      bootc_gpg_sha256: ${{ needs.apt_key.outputs.sha256 }}
+      apt_url: ${{ needs.apt_key.outputs.url }}
     secrets: inherit
 
   iso:
     name: Build ISO
-    needs: [changes, debs_publish, image, meta, base]
+    needs: [prepare, debs_publish, image, meta, base]
     # !cancelled() runs the job (but stops on cancel) even when debs, image or base were skipped.
     # The ISO is amd64-only today (Fedora netinstall + bootc), so it depends on
     # the amd64 image; arm64 image is awaited via the shared `image` job to keep
@@ -406,7 +556,7 @@ jobs:
     # netinstall source and a kickstart variant.
     if: |
       !cancelled() &&
-      needs.changes.outputs.iso == 'true' &&
+      needs.prepare.outputs.iso == 'true' &&
       (needs.base.result == 'success' || needs.base.result == 'skipped') &&
       (needs.debs_publish.result == 'success' || needs.debs_publish.result == 'skipped') &&
       (needs.image.result == 'success' || needs.image.result == 'skipped') &&
@@ -442,10 +592,10 @@ jobs:
   # `arch` selects the container image arch to pull.
   img_rpi:
     name: Build rpi .img (arm64)
-    needs: [changes, image, meta, base]
+    needs: [prepare, image, meta, base]
     if: |
       !cancelled() &&
-      needs.changes.outputs.img_rpi == 'true' &&
+      needs.prepare.outputs.img_rpi == 'true' &&
       (needs.base.result == 'success' || needs.base.result == 'skipped') &&
       (needs.image.result == 'success' || needs.image.result == 'skipped') &&
       needs.meta.result == 'success'
@@ -458,10 +608,10 @@ jobs:
 
   img_gallium:
     name: Build gallium .img (arm64)
-    needs: [changes, image, meta, base]
+    needs: [prepare, image, meta, base]
     if: |
       !cancelled() &&
-      needs.changes.outputs.img_gallium == 'true' &&
+      needs.prepare.outputs.img_gallium == 'true' &&
       (needs.base.result == 'success' || needs.base.result == 'skipped') &&
       (needs.image.result == 'success' || needs.image.result == 'skipped') &&
       needs.meta.result == 'success'
