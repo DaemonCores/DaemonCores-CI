@@ -18,6 +18,15 @@
 #       repo: rhboot/grub2
 #       head: true                # follow the head of the default branch
 #
+# A package that follows a kernel.org release stream sets `kernel-org` to the
+# moniker of releases.json (mainline, stable or longterm):
+#
+#   track:
+#     KERNEL_VER:               # env variable that receives the version
+#       kernel-org: stable
+#       digests:                # env variable -> tarball name; the SHA-256
+#         KERNEL_SHA256: "linux-{version}.tar.xz"   # is read from sha256sums.asc
+#
 # {version} is the tag without its leading "v", {tag} is the tag as published.
 # The SHA-256 of each asset comes from the GitHub release API (`digest`), so the
 # build keeps verifying its downloads without a checksum committed per version.
@@ -38,6 +47,7 @@
 #   ARCH      architecture whose published debs are compared (check)
 #   STRICT    true to turn unresolved / behind into a failure
 #   GH_TOKEN  optional token, only to lift the API rate limit
+#   KERNEL_ORG_URL  root of kernel.org (default https://www.kernel.org)
 #   GITHUB_API_URL, PAGES_URL, GITHUB_REPOSITORY, GITHUB_OUTPUT as in Actions.
 set -euo pipefail
 
@@ -51,6 +61,65 @@ API="${GITHUB_API_URL:-https://api.github.com}"
 #######################################
 fetch_release() {
   fetch_api "repos/$1/releases/latest"
+}
+
+#######################################
+# Print the releases.json entry of a kernel.org moniker as JSON.
+# Arguments:
+#   $1 - moniker (mainline, stable or longterm)
+#######################################
+fetch_kernel_release() {
+  curl --retry 3 -fsSL "${KERNEL_ORG_URL:-https://www.kernel.org}/releases.json" \
+    | MONIKER="$1" yq -p=json -o=json \
+      '[.releases[] | select(.moniker == strenv(MONIKER))] | .[0] // ""'
+}
+
+#######################################
+# Print KEY=<version> plus the tarball digests for a kernel.org entry.
+# The SHA-256 comes from the sha256sums.asc next to the tarball.  A version
+# without a digest line (a release candidate) is not resolved.
+# Arguments:
+#   $1 - package name
+#   $2 - env variable key
+#   $3 - moniker
+#######################################
+resolve_kernel() {
+  local pkg="$1" key="$2" moniker="$3" sel release version source out sums
+  local pair denv name digest
+  sel=".packages[] | select(.name == \"${pkg}\") | .track.\"${key}\""
+  release=$(fetch_kernel_release "${moniker}") || return 1
+  version=$(yq -p=json '.version // ""' <<<"${release}")
+  source=$(yq -p=json '.source // ""' <<<"${release}")
+  [[ -n "${version}" && -n "${source}" ]] || return 1
+  out="${key}=${version}"
+  sums=""
+  while IFS= read -r pair; do
+    [[ -n "${pair}" ]] || continue
+    denv="${pair%%=*}"
+    name="${pair#*=}"
+    name="${name//\{version\}/${version}}"
+    [[ -n "${sums}" ]] \
+      || sums=$(curl --retry 3 -fsSL "${source%/*}/sha256sums.asc") || return 1
+    digest=$(awk -v n="${name}" '$2 == n { print $1 }' <<<"${sums}")
+    [[ "${digest}" =~ ^[0-9a-f]{64}$ ]] || {
+      echo "no sha256 for ${name} in ${source%/*}/sha256sums.asc" >&2
+      return 1
+    }
+    out+=$'\n'"${denv}=${digest}"
+  done < <(yq "${sel} | (.digests // {}) | to_entries | .[] \
+    | .key + \"=\" + .value" "${MAN}")
+  printf '%s\n' "${out}"
+}
+
+#######################################
+# Print the kernel.org moniker of a tracked entry, empty when it has none.
+# Arguments:
+#   $1 - package name
+#   $2 - env variable key
+#######################################
+kernel_moniker() {
+  yq ".packages[] | select(.name == \"$1\") | .track.\"$2\".\"kernel-org\" // \"\"" \
+    "${MAN}"
 }
 
 #######################################
@@ -108,7 +177,12 @@ track_keys() {
 #   $2 - env variable key
 #######################################
 latest_tag() {
-  local repo release
+  local repo release moniker
+  moniker=$(kernel_moniker "$1" "$2")
+  if [[ -n "${moniker}" ]]; then
+    fetch_kernel_release "${moniker}" | yq -p=json '.version // ""'
+    return
+  fi
   repo=$(yq ".packages[] | select(.name == \"$1\") | .track.\"$2\".repo // \"\"" \
     "${MAN}")
   [[ -n "${repo}" ]] || return 1
@@ -125,7 +199,12 @@ latest_tag() {
 #######################################
 resolve_entry() {
   local pkg="$1" key="$2" sel repo strip release tag version value out
-  local pair denv name digest
+  local pair denv name digest moniker
+  moniker=$(kernel_moniker "${pkg}" "${key}")
+  if [[ -n "${moniker}" ]]; then
+    resolve_kernel "${pkg}" "${key}" "${moniker}"
+    return
+  fi
   sel=".packages[] | select(.name == \"${pkg}\") | .track.\"${key}\""
   repo=$(yq "${sel} | .repo // \"\"" "${MAN}")
   strip=$(yq "${sel} | .\"strip-v\" // false" "${MAN}")
@@ -245,7 +324,10 @@ check() {
         continue
       }
       version="${tag#v}"
-      if PK="${pkg}-${arch}" V="_${version}_" yq -p=json -e \
+      # A kernel deb is versioned <kernel>-<revision>, any other <version>.
+      sep='_'
+      [[ -z "$(kernel_moniker "${pkg}" "${key}")" ]] || sep='-'
+      if PK="${pkg}-${arch}" V="_${version}${sep}" yq -p=json -e \
         '.[strenv(PK)].debs[] | select(contains(strenv(V)))' \
         <<<"${published}" >/dev/null 2>&1; then
         echo "${pkg} ${key}: ${tag} is published"
