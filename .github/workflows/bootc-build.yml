@@ -25,14 +25,17 @@ on:
           Also build the unsigned-kernel twin (tag `<tag>-nosign`) of every
           Containerfile carrying `LABEL org.daemoncores.unsigned-kernel-image`.
           Used by the both signing mode; the twin installs the -nosign kernel
-          from the same APT suite as the primary image.
+          from the same APT suite as the primary image. The twin is built in the
+          same job as its primary image, on the same layers: only the kernel
+          layer and the ones after it are rebuilt. Without this input the twin
+          is neither built nor pushed.
         type: boolean
         required: false
         default: false
 
 jobs:
   # Discover every Containerfile* at the repo root and emit a FLAT build
-  # matrix where each entry is { file, tag, arch, kernel_suffix }. Both arches
+  # matrix where each entry is { file, tag, arch, kernel_suffix, twin_suffix }. Both arches
   # (amd64, arm64) are always included. There is one image per tag: automatic
   # updates are a run-time choice (the bootc-fetch-apply-updates.timer, masked
   # through a symlink in /etc), not an image variant.
@@ -42,6 +45,10 @@ jobs:
   # for recent hardware; a second, arm64-only image tagged `<tag>-4k`
   # (kernel_suffix empty) serves the older devices (Raspberry Pi 3 and 4) whose
   # cores have no 16 KB granule. Without the LABEL, arm64 builds the 4 KB kernel.
+  # Containerfile.base is the shared base every other Containerfile builds on: it is
+  # not an image of its own (no matrix entry, never pushed) but it takes part in the
+  # global hash. Each build job builds it once, then the image and its -nosign twin
+  # (`twin_suffix`, the kernel suffix of the twin, empty when none is requested).
   # Also computes a global hash over all Containerfiles so any variant change
   # invalidates every variant's "identical to previous" cache.
   #
@@ -79,6 +86,67 @@ jobs:
           manifest_matrix='[]'
           global_inputs=""
           for name in "${files[@]}"; do
+            if [[ "$name" == "Containerfile.base" ]]; then
+              global_inputs+="${name} $(sha256sum "$name" | cut -d' ' -f1)"$'\n'
+              continue
+            fi
+            if [[ "$name" == "Containerfile" ]]; then
+              tag="latest"
+            else
+              tag="${name#Containerfile.}"
+            fi
+            # A Containerfile with the 4 KB image LABEL builds the 16 KB kernel on the
+            # plain arm64 tag; otherwise arm64 stays on the 4 KB kernel.
+            has_4k=false
+            if grep -qE '^[[:space:]]*LABEL[[:space:]]+org\.daemoncores\.arm64-4k-image' "$name"; then
+              has_4k=true
+            fi
+            # The unsigned-kernel twin (both signing mode): the same image on
+            # the -nosign kernel package, for the generic images only. It is built
+            # by the job of its primary image, on shared layers. The 4 KB arm64
+            # image serves U-Boot devices without secure boot and has no twin;
+            # neither does an arm64 image that builds the 4 KB kernel.
+            has_twin=false
+            if [[ "${NOSIGN_IMAGES}" == "true" ]] && grep -qE '^[[:space:]]*LABEL[[:space:]]+org\.daemoncores\.unsigned-kernel-image' "$name"; then
+              has_twin=true
+            fi
+            twin_arches='[]'
+            for arch in amd64 arm64; do
+              suffix=""
+              twin_suffix=""
+              if [[ "$arch" == "arm64" && "$has_4k" == "true" ]]; then
+                suffix="-16k"
+              fi
+              if [[ "$has_twin" == "true" && ( "$arch" == "amd64" || "$has_4k" == "true" ) ]]; then
+                twin_suffix="${suffix}-nosign"
+                twin_arches=$(printf '%s' "$twin_arches" | jq -c --arg a "$arch" '. += [$a]')
+              fi
+              matrix=$(printf '%s' "$matrix" | jq -c \
+                --arg file "$name" --arg tag "$tag" --arg arch "$arch" \
+                --arg ks "$suffix" --arg ts "$twin_suffix" \
+                '. += [{file: $file, tag: $tag, arch: $arch, kernel_suffix: $ks, twin_suffix: $ts}]')
+            done
+            manifest_matrix=$(printf '%s' "$manifest_matrix" | jq -c \
+              --arg tag "$tag" \
+              '. += [{tag: $tag, arches: ["amd64", "arm64"]}]')
+            # The 4 KB arm64 kernel image for the older devices, when the
+            # Containerfile asks for it.
+            if [[ "$has_4k" == "true" ]]; then
+              matrix=$(printf '%s' "$matrix" | jq -c \
+                --arg file "$name" --arg tag "${tag}-4k" \
+                '. += [{file: $file, tag: $tag, arch: "arm64", kernel_suffix: "", twin_suffix: ""}]')
+              manifest_matrix=$(printf '%s' "$manifest_matrix" | jq -c \
+                --arg tag "${tag}-4k" \
+                '. += [{tag: $tag, arches: ["arm64"]}]')
+            fi
+            if [[ "$twin_arches" != '[]' ]]; then
+              manifest_matrix=$(printf '%s' "$manifest_matrix" | jq -c \
+                --arg tag "${tag}-nosign" --argjson arches "$twin_arches" \
+                '. += [{tag: $tag, arches: $arches}]')
+            fi
+            global_inputs+="${name} $(sha256sum "$name" | cut -d' ' -f1)"$'\n'
+              continue
+            fi
             if [[ "$name" == "Containerfile" ]]; then
               tag="latest"
             else
@@ -180,7 +248,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Flat matrix: each entry is { file, tag, arch, kernel_suffix }. The
+        # Flat matrix: each entry is { file, tag, arch, kernel_suffix, twin_suffix }. The
         # arch dimension (amd64/arm64) is folded in by the discover job. Both
         # arches always build natively on their matching runner (no QEMU
         # cross-build).
@@ -202,6 +270,7 @@ jobs:
           CF_FILE: ${{ matrix.entry.file }}
           CF_TAG: ${{ matrix.entry.tag }}
           ARCH: ${{ matrix.entry.arch }}
+          TWIN_SUFFIX: ${{ matrix.entry.twin_suffix }}
         run: |
           set -euo pipefail
           echo "IMAGE=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_ENV"
@@ -210,6 +279,11 @@ jobs:
           # build dimension).
           primary="${CF_TAG}_${ARCH}"
           echo "primary=${primary}" >>"$GITHUB_OUTPUT"
+          # The unsigned-kernel twin of this image, when one is requested.
+          if [[ -n "${TWIN_SUFFIX}" ]]; then
+            echo "twin_tag=${CF_TAG}-nosign" >>"$GITHUB_OUTPUT"
+            echo "twin_primary=${CF_TAG}-nosign_${ARCH}" >>"$GITHUB_OUTPUT"
+          fi
           # Canonical combo = amd64. Only this one keeps the
           # historical tags (:latest / :<sha> / :monthly-*) for retrocompat
           # with the single-arch era, so existing amd64 pulls/tags keep
@@ -259,7 +333,8 @@ jobs:
           pages="https://${owner,,}.github.io/${repo}"
           debs=$(curl -fsSL "${pages}/debs-cache/hashes.json" 2>/dev/null \
             | jq -cS . 2>/dev/null || echo '{}')
-          base=$(grep -m1 -iE '^FROM ' "$CF_FILE" | awk '{ print $2 }')
+          # The external base image is the one Containerfile.base starts from.
+          base=$(grep -m1 -iE '^FROM ' Containerfile.base | awk '{ print $2 }')
           # Resolve the base image's per-arch digest (--override-arch) so amd64
           # and arm64 get distinct, correct digests even when the base is a
           # multi-arch manifest list.
@@ -275,6 +350,9 @@ jobs:
             "${ARCH}" "${signing}" \
             | sha256sum | cut -d' ' -f1)
           echo "hash=${hash}" >>"$GITHUB_OUTPUT"
+          # The twin differs from its primary image by the kernel only.
+          twin_hash=$(printf '%s\nnosign\n' "${hash}" | sha256sum | cut -d' ' -f1)
+          echo "twin_hash=${twin_hash}" >>"$GITHUB_OUTPUT"
           # Content-hash label of the currently published per-arch image.
           prior=$(sudo skopeo inspect --override-arch "${ARCH}" \
             --format '{{ index .Labels "org.daemoncores.content-hash" }}' \
@@ -286,15 +364,12 @@ jobs:
           fi
           echo "content-hash=${hash} prior=${prior:-none} tag=${PRIMARY}"
 
-      - name: Build
+      # The shared base (SSL prerequisites, trusted bootc APT repository) is built
+      # once per job. It stays local to the runner: it is never pushed. The image and
+      # its -nosign twin are built on it, so they share every layer before the kernel.
+      - name: Build base
         env:
-          CF_FILE: ${{ matrix.entry.file }}
-          CF_TAG: ${{ matrix.entry.tag }}
           ARCH: ${{ matrix.entry.arch }}
-          KERNEL_SUFFIX: ${{ matrix.entry.kernel_suffix }}
-          PRIMARY: ${{ steps.tags.outputs.primary }}
-          CANONICAL: ${{ steps.tags.outputs.canonical }}
-          COSIGN_PUBLIC_KEY: ${{ secrets.COSIGN_PUBLIC_KEY }}
           BOOTC_GPG_SHA256: ${{ inputs.bootc_gpg_sha256 }}
           APT_URL: ${{ inputs.apt_url }}
         run: |
@@ -311,102 +386,141 @@ jobs:
             || apt_args+=(--build-arg "BOOTC_GPG_SHA256=${BOOTC_GPG_SHA256}")
           [[ -z "${APT_URL}" ]] \
             || apt_args+=(--build-arg "BOOTC_APT_URL=${APT_URL}")
-          # Monthly tag: 'monthly-YYYYMMDD' for the canonical latest combo only
-          # (preserves the historical amd64-only monthly tag).
-          if [[ "${{ github.event_name }}" == "schedule" && "$CANONICAL" == "true" ]]; then
-            if [[ "$CF_TAG" == "latest" ]]; then
-              flags+=(--tag "${IMAGE}:monthly-$(date -u +%Y%m%d)")
-            else
-              flags+=(--tag "${IMAGE}:${CF_TAG}-monthly-$(date -u +%Y%m%d)")
-            fi
-          fi
-
           # Product display name, derived automatically from the repo name (same
-          # rule as the ISO branding: repo tail, dashes -> spaces). Passed into
-          # the build so the image brands its UEFI boot-entry label with it
-          # instead of a hardcoded distro name.
+          # rule as the ISO branding: repo tail, dashes -> spaces). The image
+          # brands its UEFI boot-entry label with it instead of a hardcoded
+          # distro name.
           product_name="${GITHUB_REPOSITORY##*/}"
           product_name="${product_name//-/ }"
-
-          # SHA tag (retrocompat with the single-Containerfile era): bare '<sha>'
-          # for latest canonical, '<tag>-<sha>' for non-latest canonical. Only the
-          # canonical combo (amd64) produces a SHA tag to preserve
-          # the historical amd64 sha tag as a single-arch artifact.
-          if [[ "$CANONICAL" == "true" ]]; then
-            sha=$(git rev-parse --short HEAD)
-            if [[ "$CF_TAG" == "latest" ]]; then
-              flags+=(--tag "${IMAGE}:${sha}")
-            else
-              flags+=(--tag "${IMAGE}:${CF_TAG}-${sha}")
-            fi
-          fi
-
-          # Canonical combo also keeps the bare :latest / :<variant> tag pointing
-          # at the amd64 image (retrocompat: an amd64 pull of :latest
-          # gets the amd64 image directly, before the manifest list job promotes
-          # it to a multi-arch manifest).
-          if [[ "$CANONICAL" == "true" ]]; then
-            flags+=(--tag "${IMAGE}:${CF_TAG}")
-          fi
-
-          # Pass ARCH so the Containerfile selects the right kernel metapackage
-          # (linux-image-${ARCH}), boot stack, firmware set, and module path.
-          # The boot stack follows the architecture AND the boot profile, which
-          # a Containerfile declares with `LABEL org.daemoncores.boot-profile`
-          # (generic when absent):
-          #   amd64            grub-efi-amd64-signed (Fedora GRUB)
-          #   arm64 generic    grub-efi-arm64-signed (Fedora GRUB): PCs, servers
-          #                    and VMs booting through UEFI
-          #   arm64 embedded   u-boot-tools, no GRUB: boards and phones whose
-          #                    firmware loads U-Boot (Raspberry Pi, SBCs)
-          # FIRMWARE_PKGS for arm64 drops the x86 microcode blobs.
-          profile=generic
-          if grep -qE '^[[:space:]]*LABEL[[:space:]]+org\.daemoncores\.boot-profile=.?embedded' "$CF_FILE"; then
-            profile=embedded
-          fi
-          if [[ "${ARCH}" == "arm64" ]]; then
-            firmware_pkgs="firmware-linux-free firmware-linux firmware-misc-nonfree"
-            if [[ "${profile}" == "embedded" ]]; then
-              boot_pkg="u-boot-tools"
-              apt_hold_pkg=""
-            else
-              boot_pkg="grub-efi-arm64-signed"
-              apt_hold_pkg="grub-efi-arm64-signed"
-            fi
-          else
-            boot_pkg="grub-efi-amd64-signed"
-            firmware_pkgs="intel-microcode amd64-microcode firmware-linux-free firmware-linux firmware-misc-nonfree"
-            apt_hold_pkg="grub-efi-amd64-signed"
-          fi
-          # arm64 ships two kernels (docs/decisions.md, "Two arm64 kernels"): the
-          # 16 KB one on the plain tag for recent hardware (Raspberry Pi 5,
-          # RK3588), the 4 KB one (`-4k` image) for the older devices (Raspberry
-          # Pi 3 and 4). The
-          # suffix completes the kernel package name; ARM_DEVICES lists the
-          # device module packages built against that kernel. Both mirror the
-          # variants of linux-modules-arm-device in the package manifest.
-          arm_devices="rpi3 rpi4"
-          if [[ "${KERNEL_SUFFIX}" == -16k* ]]; then
-            arm_devices="rpi5 rk3588"
-          fi
           sudo podman build \
             "${flags[@]}" \
             --build-arg "ARCH=${ARCH}" \
-            --build-arg "KERNEL_SUFFIX=${KERNEL_SUFFIX}" \
-            --build-arg "ARM_DEVICES=${arm_devices}" \
-            --build-arg "BOOT_PKG=${boot_pkg}" \
-            --build-arg "BOOT_PROFILE=${profile}" \
-            --build-arg "FIRMWARE_PKGS=${firmware_pkgs}" \
-            --build-arg "APT_HOLD_PKG=${apt_hold_pkg}" \
             --build-arg "PRODUCT_NAME=${product_name}" \
-            --build-arg "COSIGN_PUBKEY_B64=$(printf '%s' "${COSIGN_PUBLIC_KEY}" | base64 -w0)" \
-            --build-arg "IMAGE_REF=${IMAGE,,}" \
             "${apt_args[@]}" \
-            --label "org.daemoncores.content-hash=${{ steps.chash.outputs.hash }}" \
-            --tag "${IMAGE}:${PRIMARY}" \
-            -f "$CF_FILE" \
+            --tag localhost/debian-bootc-base \
+            -f Containerfile.base \
             --format docker \
             .
+
+      - name: Build
+        env:
+          CF_FILE: ${{ matrix.entry.file }}
+          CF_TAG: ${{ matrix.entry.tag }}
+          ARCH: ${{ matrix.entry.arch }}
+          KERNEL_SUFFIX: ${{ matrix.entry.kernel_suffix }}
+          TWIN_SUFFIX: ${{ matrix.entry.twin_suffix }}
+          CANONICAL: ${{ steps.tags.outputs.canonical }}
+          COSIGN_PUBLIC_KEY: ${{ secrets.COSIGN_PUBLIC_KEY }}
+          HASH: ${{ steps.chash.outputs.hash }}
+          TWIN_HASH: ${{ steps.chash.outputs.twin_hash }}
+        run: |
+          set -euo pipefail
+          nocache=()
+          if [[ "${{ github.event_name }}" == "schedule" \
+            || "${{ inputs.force_no_cache }}" == "true" ]]; then
+            nocache+=(--no-cache)
+          fi
+
+          # Build one image: $1 = tag (the Containerfile tag, or `<tag>-nosign` for the
+          # twin), $2 = kernel suffix, $3 = content hash, then the build flags.
+          build_one() {
+            local tag="$1" kernel_suffix="$2" hash="$3"
+            shift 3
+            local flags=("$@")
+            # Monthly tag: 'monthly-YYYYMMDD' for the canonical latest combo only
+            # (preserves the historical amd64-only monthly tag).
+            if [[ "${{ github.event_name }}" == "schedule" && "$CANONICAL" == "true" ]]; then
+              if [[ "$tag" == "latest" ]]; then
+                flags+=(--tag "${IMAGE}:monthly-$(date -u +%Y%m%d)")
+              else
+                flags+=(--tag "${IMAGE}:${tag}-monthly-$(date -u +%Y%m%d)")
+              fi
+            fi
+
+            # SHA tag (retrocompat with the single-Containerfile era): bare '<sha>'
+            # for latest canonical, '<tag>-<sha>' for non-latest canonical. Only the
+            # canonical combo (amd64) produces a SHA tag to preserve
+            # the historical amd64 sha tag as a single-arch artifact.
+            if [[ "$CANONICAL" == "true" ]]; then
+              local sha
+              sha=$(git rev-parse --short HEAD)
+              if [[ "$tag" == "latest" ]]; then
+                flags+=(--tag "${IMAGE}:${sha}")
+              else
+                flags+=(--tag "${IMAGE}:${tag}-${sha}")
+              fi
+              # Canonical combo also keeps the bare :latest / :<variant> tag pointing
+              # at the amd64 image (retrocompat: an amd64 pull of :latest
+              # gets the amd64 image directly, before the manifest list job promotes
+              # it to a multi-arch manifest).
+              flags+=(--tag "${IMAGE}:${tag}")
+            fi
+
+            # Pass ARCH so the Containerfile selects the right kernel metapackage
+            # (linux-image-${ARCH}), boot stack, firmware set, and module path.
+            # The boot stack follows the architecture AND the boot profile, which
+            # a Containerfile declares with `LABEL org.daemoncores.boot-profile`
+            # (generic when absent):
+            #   amd64            grub-efi-amd64-signed (Fedora GRUB)
+            #   arm64 generic    grub-efi-arm64-signed (Fedora GRUB): PCs, servers
+            #                    and VMs booting through UEFI
+            #   arm64 embedded   u-boot-tools, no GRUB: boards and phones whose
+            #                    firmware loads U-Boot (Raspberry Pi, SBCs)
+            # FIRMWARE_PKGS for arm64 drops the x86 microcode blobs.
+            local profile=generic boot_pkg apt_hold_pkg firmware_pkgs
+            if grep -qE '^[[:space:]]*LABEL[[:space:]]+org\.daemoncores\.boot-profile=.?embedded' "$CF_FILE"; then
+              profile=embedded
+            fi
+            if [[ "${ARCH}" == "arm64" ]]; then
+              firmware_pkgs="firmware-linux-free firmware-linux firmware-misc-nonfree"
+              if [[ "${profile}" == "embedded" ]]; then
+                boot_pkg="u-boot-tools"
+                apt_hold_pkg=""
+              else
+                boot_pkg="grub-efi-arm64-signed"
+                apt_hold_pkg="grub-efi-arm64-signed"
+              fi
+            else
+              boot_pkg="grub-efi-amd64-signed"
+              firmware_pkgs="intel-microcode amd64-microcode firmware-linux-free firmware-linux firmware-misc-nonfree"
+              apt_hold_pkg="grub-efi-amd64-signed"
+            fi
+            # arm64 ships two kernels (docs/decisions.md, "Two arm64 kernels"): the
+            # 16 KB one on the plain tag for recent hardware (Raspberry Pi 5,
+            # RK3588), the 4 KB one (`-4k` image) for the older devices (Raspberry
+            # Pi 3 and 4). The
+            # suffix completes the kernel package name; ARM_DEVICES lists the
+            # device module packages built against that kernel. Both mirror the
+            # variants of linux-modules-arm-device in the package manifest.
+            local arm_devices="rpi3 rpi4"
+            if [[ "${kernel_suffix}" == -16k* ]]; then
+              arm_devices="rpi5 rk3588"
+            fi
+            sudo podman build \
+              "${flags[@]}" \
+              --build-arg "BASE_IMAGE=localhost/debian-bootc-base" \
+              --build-arg "ARCH=${ARCH}" \
+              --build-arg "KERNEL_SUFFIX=${kernel_suffix}" \
+              --build-arg "ARM_DEVICES=${arm_devices}" \
+              --build-arg "BOOT_PKG=${boot_pkg}" \
+              --build-arg "BOOT_PROFILE=${profile}" \
+              --build-arg "FIRMWARE_PKGS=${firmware_pkgs}" \
+              --build-arg "APT_HOLD_PKG=${apt_hold_pkg}" \
+              --build-arg "COSIGN_PUBKEY_B64=$(printf '%s' "${COSIGN_PUBLIC_KEY}" | base64 -w0)" \
+              --build-arg "IMAGE_REF=${IMAGE,,}" \
+              --label "org.daemoncores.content-hash=${hash}" \
+              --tag "${IMAGE}:${tag}_${ARCH}" \
+              -f "$CF_FILE" \
+              --format docker \
+              .
+          }
+
+          build_one "${CF_TAG}" "${KERNEL_SUFFIX}" "${HASH}" "${nocache[@]}"
+          # The twin reuses the layers the image just built, up to the kernel: no
+          # --no-cache here, or the sharing would be thrown away.
+          if [[ -n "${TWIN_SUFFIX}" ]]; then
+            build_one "${CF_TAG}-nosign" "${TWIN_SUFFIX}" "${TWIN_HASH}"
+          fi
 
       - name: Check runtime deps
         env:
@@ -423,6 +537,14 @@ jobs:
           set -euo pipefail
           sudo podman run --rm "${IMAGE}:${PRIMARY}" bootc container lint
 
+      - name: Smoke test the unsigned-kernel twin
+        if: steps.tags.outputs.twin_primary != ''
+        env:
+          TWIN: ${{ steps.tags.outputs.twin_primary }}
+        run: |
+          set -euo pipefail
+          sudo podman run --rm "${IMAGE}:${TWIN}" bootc container lint
+
       # Real boot test: install to a disk, boot under QEMU/KVM, run the repo's
       # image-tests over SSH. A failure fails this job, so Push never runs.
       # Skipped for the installer image (tag=iso): it is a live graphical
@@ -433,6 +555,13 @@ jobs:
         uses: DaemonCores/DaemonCores-CI/image-test@main
         with:
           image: ${{ env.IMAGE }}:${{ steps.tags.outputs.primary }}
+          arch: ${{ matrix.entry.arch }}
+
+      - name: Boot-test the unsigned-kernel twin
+        if: steps.tags.outputs.twin_primary != ''
+        uses: DaemonCores/DaemonCores-CI/image-test@main
+        with:
+          image: ${{ env.IMAGE }}:${{ steps.tags.outputs.twin_primary }}
           arch: ${{ matrix.entry.arch }}
 
       # Report-only vulnerability scan (exit-code 0: never fails the build).
@@ -459,41 +588,55 @@ jobs:
         if: always()
         run: sudo rm -f /tmp/scan-image.tar
 
+      # Only the images this run asked for are pushed: the image and, when requested,
+      # its unsigned-kernel twin. The shared base is never pushed.
       - name: Push
         if: github.ref == 'refs/heads/main'
         id: push
         env:
           CF_TAG: ${{ matrix.entry.tag }}
-          PRIMARY: ${{ steps.tags.outputs.primary }}
+          TWIN_TAG: ${{ steps.tags.outputs.twin_tag }}
+          ARCH: ${{ matrix.entry.arch }}
           CANONICAL: ${{ steps.tags.outputs.canonical }}
         run: |
           set -euo pipefail
-          # Per-arch tag (always).
-          sudo podman push --digestfile /tmp/digest_primary.txt "${IMAGE}:${PRIMARY}"
-          echo "digest=$(cat /tmp/digest_primary.txt)" >> "$GITHUB_OUTPUT"
-          # Canonical combo preserves the historical tags.
-          if [[ "$CANONICAL" == "true" ]]; then
-            sudo podman push "${IMAGE}:${CF_TAG}"
-            sha=$(git rev-parse --short HEAD)
-            if [[ "$CF_TAG" == "latest" ]]; then
-              sudo podman push "${IMAGE}:${sha}"
-            else
-              sudo podman push "${IMAGE}:${CF_TAG}-${sha}"
-            fi
-            if [[ "${{ github.event_name }}" == "schedule" ]]; then
-              if [[ "$CF_TAG" == "latest" ]]; then
-                sudo podman push "${IMAGE}:monthly-$(date -u +%Y%m%d)"
+          push_one() {
+            local tag="$1" primary="${1}_${ARCH}" sha
+            # Per-arch tag (always).
+            sudo podman push --digestfile /tmp/digest_primary.txt "${IMAGE}:${primary}"
+            echo "${IMAGE,,}@$(cat /tmp/digest_primary.txt)" >> /tmp/push_refs.txt
+            # Canonical combo preserves the historical tags.
+            if [[ "$CANONICAL" == "true" ]]; then
+              sudo podman push "${IMAGE}:${tag}"
+              sha=$(git rev-parse --short HEAD)
+              if [[ "$tag" == "latest" ]]; then
+                sudo podman push "${IMAGE}:${sha}"
               else
-                sudo podman push "${IMAGE}:${CF_TAG}-monthly-$(date -u +%Y%m%d)"
+                sudo podman push "${IMAGE}:${tag}-${sha}"
+              fi
+              if [[ "${{ github.event_name }}" == "schedule" ]]; then
+                if [[ "$tag" == "latest" ]]; then
+                  sudo podman push "${IMAGE}:monthly-$(date -u +%Y%m%d)"
+                else
+                  sudo podman push "${IMAGE}:${tag}-monthly-$(date -u +%Y%m%d)"
+                fi
               fi
             fi
-          fi
+          }
+          : > /tmp/push_refs.txt
+          push_one "${CF_TAG}"
+          [[ -z "${TWIN_TAG}" ]] || push_one "${TWIN_TAG}"
+          {
+            echo "refs<<EOF"
+            cat /tmp/push_refs.txt
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Sign image
         if: github.ref == 'refs/heads/main'
         uses: DaemonCores/DaemonCores-CI/sign-image@main
         with:
-          refs: ghcr.io/${{ github.repository }}@${{ steps.push.outputs.digest }}
+          refs: ${{ steps.push.outputs.refs }}
           private-key: ${{ secrets.COSIGN_PRIVATE_KEY }}
           password: ${{ secrets.COSIGN_PASSWORD }}
 
