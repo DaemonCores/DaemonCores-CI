@@ -127,7 +127,7 @@ jobs:
 
   wave1:
     needs: [setup, wave0]
-    if: ${{ needs.setup.outputs.wave1 != '[]' }}
+    if: ${{ always() && !cancelled() && needs.setup.outputs.wave1 != '[]' }}
     permissions:
       actions: write
       issues: write

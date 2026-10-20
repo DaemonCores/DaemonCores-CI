@@ -35,6 +35,9 @@ on:
 
 jobs:
   build:
+    # The package name, so a wave matrix lists its jobs by package instead of
+    # as a column of identical "build" entries.
+    name: ${{ inputs.package }}
     runs-on: ${{ inputs.arch == 'arm64' && 'ubuntu-24.04-arm' || 'ubuntu-latest' }}
     container:
       image: ${{ inputs.container_image }}
@@ -301,3 +304,15 @@ jobs:
           name: debs-${{ inputs.package }}-${{ inputs.arch }}
           path: /debs
           include-hidden-files: true
+
+      # The build failed and the last-good deb was reused (and uploaded above)
+      # so the later waves and the publication still have an input. The job
+      # itself must still end red: a green check on a broken build hides it.
+      - name: Fail the job on a broken build
+        if: steps.build.outputs.build_failed == 'true'
+        shell: bash
+        env:
+          PKG: ${{ inputs.package }}
+        run: |
+          echo "::error::${PKG} build failed; the last valid .deb was reused, see the build step log"
+          exit 1
