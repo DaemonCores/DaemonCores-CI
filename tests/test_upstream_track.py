@@ -424,3 +424,27 @@ def test_resolve_takes_the_newest_kernel_when_patches_cover_it(
     )
     assert result.returncode == 0, result.stderr
     assert 'KERNEL_VER=7.2.11' in _env_output(api)
+
+
+def test_resolve_refuses_a_kernel_older_than_the_published_one(
+    api: Path
+) -> None:
+    """A release below the published kernel is never resolved.
+
+    Args:
+        api: API tree fixture.
+    """
+    _kernel_with_patches(api, {'7.1'})
+    url = _published(
+        api, {'kernel-amd64': ['linux-image-common_7.2.10-1_amd64.deb']}
+    )
+    result = _run(
+        api,
+        'resolve',
+        PKG='kernel',
+        BASE_ENV='A=1',
+        PAGES_URL=url,
+        KERNEL_ORG_URL=f'file://{api}'
+    )
+    assert 'older than the published 7.2.10' in result.stderr
+    assert not any(line.startswith('KERNEL_VER') for line in _env_output(api))
