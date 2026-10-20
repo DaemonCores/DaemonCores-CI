@@ -86,7 +86,7 @@ def test_there_is_one_image_per_tag_and_arch(tmp_path: Path) -> None:
     """
     result = _discover(tmp_path, nosign=False)
     keys = {key for entry in result['wave1'] for key in entry}
-    assert keys == {'file', 'tag', 'arch', 'kernel_suffix'}
+    assert keys == {'file', 'tag', 'arch', 'kernel_suffix', 'twin_suffix'}
     assert all('lock' not in entry for entry in result['manifest'])
     pairs = [(e['tag'], e['arch']) for e in result['wave1']]
     assert len(pairs) == len(set(pairs))
@@ -96,14 +96,22 @@ def test_there_is_one_image_per_tag_and_arch(tmp_path: Path) -> None:
 def test_twin_only_for_the_generic_images(tmp_path: Path) -> None:
     """The twin exists for amd64 and the 16 KB arm64 kernel, nothing else.
 
+    The twin is not a matrix entry of its own: it is built by the job of its
+    primary image, which learns the twin kernel from ``twin_suffix``.
+
     Args:
         tmp_path: Scratch repository root.
     """
     result = _discover(tmp_path, nosign=True)
-    twins = {(e['tag'], e['arch']): e['kernel_suffix']
-             for e in result['wave1'] if e['tag'].endswith('-nosign')}
-    assert twins == {('latest-nosign', 'amd64'): '-nosign',
-                     ('latest-nosign', 'arm64'): '-16k-nosign'}
+    assert not [e for e in result['wave1'] if e['tag'].endswith('-nosign')]
+    twin = {(e['tag'], e['arch']): e['twin_suffix'] for e in result['wave1']}
+    assert twin == {
+        ('latest', 'amd64'): '-nosign',
+        ('latest', 'arm64'): '-16k-nosign',
+        ('latest-4k', 'arm64'): '',
+        ('board', 'amd64'): '',
+        ('board', 'arm64'): '',
+    }
     manifest = {e['tag']: e['arches'] for e in result['manifest']}
     assert manifest['latest-nosign'] == ['amd64', 'arm64']
     assert 'latest-4k-nosign' not in manifest
@@ -123,7 +131,8 @@ def test_no_twin_without_the_input(tmp_path: Path) -> None:
         tmp_path: Scratch repository root.
     """
     result = _discover(tmp_path, nosign=False)
-    assert not [e for e in result['wave1'] if 'nosign' in e['tag']]
+    assert not [e for e in result['wave1'] if e['twin_suffix']]
+    assert not [e for e in result['manifest'] if 'nosign' in e['tag']]
 
 
 def _expand(unsigned: str) -> list[str]:
