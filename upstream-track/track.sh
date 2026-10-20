@@ -31,7 +31,9 @@
 # package manifest) restricts the choice to the newest stable or longterm
 # release whose series has every patch URL of that manifest upstream, so a
 # kernel that a patch source (CachyOS, ROCKNIX) has not caught up with is
-# skipped instead of built and failed.
+# skipped instead of built and failed. It never resolves a kernel older than the
+# highest one already published (debs-cache/hashes.json): the build then fails
+# and the last-good deb is kept, instead of a downgrade.
 #
 # {version} is the tag without its leading "v", {tag} is the tag as published.
 # The SHA-256 of each asset comes from the GitHub release API (`digest`), so the
@@ -101,6 +103,32 @@ patches_available() {
 }
 
 #######################################
+# Print the highest kernel version already published for a package, empty
+# when nothing is published or the publication cannot be read.
+# Globals:
+#   ARCH
+#   PAGES_URL
+#   GITHUB_REPOSITORY
+# Arguments:
+#   $1 - package name
+#######################################
+published_kernel_floor() {
+  local arch="${ARCH:-amd64}" base published
+  if [[ -n "${PAGES_URL:-}" ]]; then
+    base="${PAGES_URL%/}"
+  elif [[ -n "${GITHUB_REPOSITORY:-}" ]]; then
+    base="https://${GITHUB_REPOSITORY%%/*}.github.io/${GITHUB_REPOSITORY#*/}"
+    base="${base,,}"
+  else
+    return 0
+  fi
+  published=$(curl --retry 3 -fsSL "${base}/debs-cache/hashes.json") || return 0
+  PK="$1-${arch}" yq -p=json '.[strenv(PK)].debs[]' <<<"${published}" 2>/dev/null \
+    | grep -oE '_[0-9]+\.[0-9]+(\.[0-9]+)?-' | tr -d '_-' | sort -rV | head -n1 \
+    || true
+}
+
+#######################################
 # Print the releases.json entry to build, as JSON.  Without `require-patches`
 # on the entry it is the first release of the moniker.  With it (a patch
 # manifest path relative to the package manifest), it is the newest stable or
@@ -113,7 +141,7 @@ patches_available() {
 #   $3 - moniker
 #######################################
 select_kernel_release() {
-  local req manifest version
+  local req manifest version floor
   req=$(yq ".packages[] | select(.name == \"$1\") | .track.\"$2\".\"require-patches\" // \"\"" \
     "${MAN}")
   if [[ -z "${req}" ]]; then
@@ -121,8 +149,16 @@ select_kernel_release() {
     return
   fi
   manifest="$(dirname "${MAN}")/${req}"
+  floor=$(published_kernel_floor "$1")
   while IFS= read -r version; do
     [[ -n "${version}" ]] || continue
+    # Never publish an older kernel than the one already out: when the newest
+    # releases lack a patch, keep the published deb instead of downgrading.
+    if [[ -n "${floor}" && "$(printf '%s\n%s\n' "${floor}" "${version}" \
+      | sort -V | head -n1)" != "${floor}" ]]; then
+      echo "kernel ${version} is older than the published ${floor}" >&2
+      return 1
+    fi
     if patches_available "${manifest}" "${version}"; then
       curl --retry 3 -fsSL "${KERNEL_ORG_URL:-https://www.kernel.org}/releases.json" \
         | V="${version}" yq -p=json -o=json \
