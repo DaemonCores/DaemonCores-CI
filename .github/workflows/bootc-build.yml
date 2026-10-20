@@ -145,62 +145,6 @@ jobs:
                 '. += [{tag: $tag, arches: $arches}]')
             fi
             global_inputs+="${name} $(sha256sum "$name" | cut -d' ' -f1)"$'\n'
-              continue
-            fi
-            if [[ "$name" == "Containerfile" ]]; then
-              tag="latest"
-            else
-              tag="${name#Containerfile.}"
-            fi
-            # A Containerfile with the 4 KB image LABEL builds the 16 KB kernel on the
-            # plain arm64 tag; otherwise arm64 stays on the 4 KB kernel.
-            has_4k=false
-            if grep -qE '^[[:space:]]*LABEL[[:space:]]+org\.daemoncores\.arm64-4k-image' "$name"; then
-              has_4k=true
-            fi
-            for arch in amd64 arm64; do
-              suffix=""
-              if [[ "$arch" == "arm64" && "$has_4k" == "true" ]]; then
-                suffix="-16k"
-              fi
-              matrix=$(printf '%s' "$matrix" | jq -c \
-                --arg file "$name" --arg tag "$tag" --arg arch "$arch" \
-                --arg ks "$suffix" \
-                '. += [{file: $file, tag: $tag, arch: $arch, kernel_suffix: $ks}]')
-            done
-            manifest_matrix=$(printf '%s' "$manifest_matrix" | jq -c \
-              --arg tag "$tag" \
-              '. += [{tag: $tag, arches: ["amd64", "arm64"]}]')
-            # The 4 KB arm64 kernel image for the older devices, when the
-            # Containerfile asks for it.
-            if [[ "$has_4k" == "true" ]]; then
-              matrix=$(printf '%s' "$matrix" | jq -c \
-                --arg file "$name" --arg tag "${tag}-4k" \
-                '. += [{file: $file, tag: $tag, arch: "arm64", kernel_suffix: ""}]')
-              manifest_matrix=$(printf '%s' "$manifest_matrix" | jq -c \
-                --arg tag "${tag}-4k" \
-                '. += [{tag: $tag, arches: ["arm64"]}]')
-            fi
-            # The unsigned-kernel twin (both signing mode): the same image on
-            # the -nosign kernel package, for the generic images only. The
-            # 4 KB arm64 image serves U-Boot devices without secure boot and has
-            # no twin; neither does an arm64 image that builds the 4 KB kernel.
-            if [[ "${NOSIGN_IMAGES}" == "true" ]] && grep -qE '^[[:space:]]*LABEL[[:space:]]+org\.daemoncores\.unsigned-kernel-image' "$name"; then
-              twin_arches='["amd64"]'
-              [[ "$has_4k" == "true" ]] && twin_arches='["amd64", "arm64"]'
-              for arch in $(printf '%s' "$twin_arches" | jq -r '.[]'); do
-                suffix="-nosign"
-                [[ "$arch" == "arm64" ]] && suffix="-16k-nosign"
-                matrix=$(printf '%s' "$matrix" | jq -c \
-                  --arg file "$name" --arg tag "${tag}-nosign" --arg arch "$arch" \
-                  --arg ks "$suffix" \
-                  '. += [{file: $file, tag: $tag, arch: $arch, kernel_suffix: $ks}]')
-              done
-              manifest_matrix=$(printf '%s' "$manifest_matrix" | jq -c \
-                --arg tag "${tag}-nosign" --argjson arches "$twin_arches" \
-                '. += [{tag: $tag, arches: $arches}]')
-            fi
-            global_inputs+="${name} $(sha256sum "$name" | cut -d' ' -f1)"$'\n'
           done
           global_hash=$(printf '%s' "$global_inputs" | sha256sum | cut -d' ' -f1)
           # Split into wave1 (FROM external) and wave2 (FROM our own registry).
