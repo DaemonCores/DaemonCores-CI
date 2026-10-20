@@ -20,6 +20,10 @@
 #
 # Set ARCH (empty = keep every arch) to also drop the other arch's packages in
 # the same pass: a package is kept when its when.arch is absent or equal.
+#
+# Set UNSIGNED_KERNEL (empty = keep everything) to "yes" or "no" to decide the
+# packages marked `when: {unsigned-kernel: true}` (the -nosign kernel twins):
+# they are kept only for "yes". Unmarked packages are always kept.
 
 def subst($k): sub("\\{variant\\}"; $k);
 
@@ -49,4 +53,6 @@ def expand:
   .packages[]
   | if has("variants") then expand else . end
   | select((env.ARCH // "") == "" or ((.when.arch // env.ARCH) == env.ARCH))
+  | select((env.UNSIGNED_KERNEL // "") != "no"
+           or ((.when["unsigned-kernel"] // false) | not))
 ] | {packages: .}
