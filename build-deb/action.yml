@@ -48,6 +48,13 @@ inputs:
     type: string
     default: 'amd64'
 
+  variant-suffix:
+    description: >-
+      Cache suffix of the build variant: empty for the primary variant,
+      `-nosign` for the unsigned variant published beside a signed one.
+    required: false
+    default: ''
+
 outputs:
   skipped:
     description: 'true when the cached deb was reused, false when it was built.'
@@ -76,4 +83,5 @@ runs:
         DEB_GLOB: ${{ inputs.deb-glob }}
         PAGES_URL: ${{ inputs.pages-url }}
         ARCH: ${{ inputs.arch }}
+        VARIANT_SUFFIX: ${{ inputs.variant-suffix }}
       run: bash "${GITHUB_ACTION_PATH}/build-deb.sh"

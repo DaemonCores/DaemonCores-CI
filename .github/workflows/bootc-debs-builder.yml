@@ -20,6 +20,11 @@ on:
         required: false
         type: string
         default: 'no'
+      variant_suffix:
+        description: 'Empty for the primary variant, -nosign for the unsigned variant of a both signing run. Forwarded to build-one-deb and bootc-debs-end.'
+        required: false
+        type: string
+        default: ''
       deploy_pages:
         description: 'true to upload and deploy the APT repo to GitHub Pages. Set false when a separate debs_publish job handles deployment (prevents duplicate github-pages artifacts when amd64 and arm64 both run publish in the same workflow run).'
         required: false
@@ -123,6 +128,7 @@ jobs:
       container_image: ${{ needs.setup.outputs.env_image }}
       arch: ${{ inputs.arch }}
       signing_active: ${{ inputs.signing_active }}
+      variant_suffix: ${{ inputs.variant_suffix }}
     secrets: inherit
 
   wave1:
@@ -143,6 +149,7 @@ jobs:
       container_image: ${{ needs.setup.outputs.env_image }}
       arch: ${{ inputs.arch }}
       signing_active: ${{ inputs.signing_active }}
+      variant_suffix: ${{ inputs.variant_suffix }}
     secrets: inherit
 
   wave2:
@@ -165,6 +172,7 @@ jobs:
       container_image: ${{ needs.setup.outputs.env_image }}
       arch: ${{ inputs.arch }}
       signing_active: ${{ inputs.signing_active }}
+      variant_suffix: ${{ inputs.variant_suffix }}
     secrets: inherit
 
   wave3:
@@ -185,6 +193,7 @@ jobs:
       container_image: ${{ needs.setup.outputs.env_image }}
       arch: ${{ inputs.arch }}
       signing_active: ${{ inputs.signing_active }}
+      variant_suffix: ${{ inputs.variant_suffix }}
     secrets: inherit
 
   publish:
