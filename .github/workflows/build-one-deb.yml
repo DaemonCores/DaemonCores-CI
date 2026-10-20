@@ -32,11 +32,6 @@ on:
         required: false
         type: string
         default: 'no'
-      variant_suffix:
-        description: 'Empty for the primary variant, -nosign for the unsigned variant of a both signing run. Suffixes the artifact names and selects the deb cache.'
-        required: false
-        type: string
-        default: ''
 
 jobs:
   build:
@@ -136,6 +131,14 @@ jobs:
             # workspace-relative for build-deb.
             echo "sources=$(yq "${sel} | .sources[]" "${MAN}" \
               | sed 's#^#workflows/bootc-debs-builder/#' | paste -sd' ' -)"
+            # Only a package built with lib/kernel-signing.sh depends on the
+            # signing flag, so only its content hash may carry it.
+            if yq "${sel} | .sources[]" "${MAN}" \
+              | grep -qx 'lib/kernel-signing.sh'; then
+              echo "signs=yes"
+            else
+              echo "signs=no"
+            fi
           } >>"$GITHUB_OUTPUT"
           # env = non-secret KEY=VALUE lines, then resolved secret-env lines.
           envlines=$(yq "${sel} | (.env // {}) | to_entries | .[] \
@@ -171,7 +174,7 @@ jobs:
           # merge-multiple would land both libcomposefs_*_amd64.deb and
           # libcomposefs_*_arm64.deb in /tmp/prior, causing a multi-arch
           # Conflicts error when apt tries to install them together.
-          pattern: debs-*-${{ inputs.arch }}${{ inputs.variant_suffix }}
+          pattern: debs-*-${{ inputs.arch }}
           merge-multiple: true
           path: /tmp/prior
 
@@ -232,8 +235,7 @@ jobs:
           env: ${{ steps.track.outputs.env }}
           build: ${{ steps.def.outputs.build }}
           arch: ${{ inputs.arch }}
-          extra-env: MODULE_SIGNING_ACTIVE=${{ inputs.signing_active }}
-          variant-suffix: ${{ inputs.variant_suffix }}
+          extra-env: ${{ steps.def.outputs.signs == 'yes' && format('MODULE_SIGNING_ACTIVE={0}', inputs.signing_active) || '' }}
 
       # The build failed but the last-good published deb was kept, so the
       # pipeline is not blocked. Record the breakage as an issue (deduped by
@@ -298,7 +300,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          artifact_name="debs-${{ inputs.package }}-${{ inputs.arch }}${{ inputs.variant_suffix }}"
+          artifact_name="debs-${{ inputs.package }}-${{ inputs.arch }}"
           ids=$(gh api "repos/${{ github.repository }}/actions/artifacts?name=${artifact_name}" --jq '.artifacts[].id')
           for id in $ids; do
             gh api --method DELETE "repos/${{ github.repository }}/actions/artifacts/$id"
@@ -307,7 +309,7 @@ jobs:
       - name: Upload ${{ inputs.package }} debs
         uses: actions/upload-artifact@v7
         with:
-          name: debs-${{ inputs.package }}-${{ inputs.arch }}${{ inputs.variant_suffix }}
+          name: debs-${{ inputs.package }}-${{ inputs.arch }}
           path: /debs
           include-hidden-files: true
 

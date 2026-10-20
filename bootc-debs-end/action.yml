@@ -12,14 +12,6 @@ inputs:
     description: 'Set to true to skip the GitHub Pages upload and deploy steps (used when another job handles deployment).'
     required: false
     default: 'false'
-  nosign_variant:
-    description: >-
-      `yes` to also publish the unsigned variant of a `both` signing run: the
-      debs-*-<arch>-nosign artifacts become the suite trixie-nosign (component
-      nosign) of the same repository, with their own deb cache folder
-      debs-cache-nosign.
-    required: false
-    default: 'no'
 
 outputs:
   any_rebuilt:
@@ -30,31 +22,12 @@ runs:
   using: 'composite'
   steps:
     - uses: actions/checkout@v7
-    # Each package uploads its own artifact debs-<pkg>-<arch>; merge them all
-    # into debs/. The suffixed unsigned-variant artifacts (-nosign) are not
-    # matched here: they go to debs-nosign/ below.
+    # Each package uploads its own artifact debs-<pkg>; merge them all into debs/.
     - uses: actions/download-artifact@v8
       with:
-        pattern: debs-*-amd64
+        pattern: debs-*
         merge-multiple: true
         path: debs/
-    - uses: actions/download-artifact@v8
-      with:
-        pattern: debs-*-arm64
-        merge-multiple: true
-        path: debs/
-    - if: ${{ inputs.nosign_variant == 'yes' }}
-      uses: actions/download-artifact@v8
-      with:
-        pattern: debs-*-amd64-nosign
-        merge-multiple: true
-        path: debs-nosign/
-    - if: ${{ inputs.nosign_variant == 'yes' }}
-      uses: actions/download-artifact@v8
-      with:
-        pattern: debs-*-arm64-nosign
-        merge-multiple: true
-        path: debs-nosign/
 
     - name: Compute any_rebuilt
       id: rebuilt
@@ -65,7 +38,7 @@ runs:
           || { apt-get update >/dev/null; apt-get install -y jq >/dev/null; }
         any=false
         shopt -s nullglob
-        for m in debs/.meta/*.json debs-nosign/.meta/*.json; do
+        for m in debs/.meta/*.json; do
           if [ "$(jq -r .skipped "$m")" = "false" ]; then
             any=true
             break
@@ -83,58 +56,6 @@ runs:
         codename: trixie
         components: main
         architectures: amd64 arm64
-
-    # Unsigned variant of a both run: a second suite in the same repository
-    # (dists/trixie-nosign, pool/nosign) so a client picks the signed or the
-    # unsigned kernel and modules by its sources, never by version.
-    - name: Create the unsigned APT suite
-      id: nosign-apt-repo
-      if: ${{ inputs.nosign_variant == 'yes' }}
-      uses: morph027/apt-repo-action@v3
-      with:
-        repo-name: ${{ inputs.repo_name }}
-        signing-key: ${{ inputs.apt_gpg_key }}
-        scan-dir: debs-nosign
-        codename: trixie-nosign
-        components: nosign
-        architectures: amd64 arm64
-
-    - name: Merge the unsigned suite into the repository
-      if: ${{ inputs.nosign_variant == 'yes' }}
-      shell: bash
-      env:
-        REPO_DIR: ${{ steps.create-apt-repo.outputs.dir }}
-        NOSIGN_DIR: ${{ steps.nosign-apt-repo.outputs.dir }}
-      run: |
-        set -euo pipefail
-        # Both runs may share one output directory; then nothing to merge.
-        if [ "$(realpath "${NOSIGN_DIR}")" != "$(realpath "${REPO_DIR}")" ]; then
-          cp -a "${NOSIGN_DIR}/dists/trixie-nosign" "${REPO_DIR}/dists/"
-          mkdir -p "${REPO_DIR}/pool"
-          cp -a "${NOSIGN_DIR}/pool/nosign" "${REPO_DIR}/pool/"
-        fi
-        # Deb cache of the unsigned variant: its own folder, since the file
-        # names are the same as the signed ones.
-        cache="${REPO_DIR}/debs-cache-nosign"
-        mkdir -p "${cache}"
-        find debs-nosign -maxdepth 1 -name '*.deb' -exec cp {} "${cache}/" \;
-        out="${cache}/hashes.json"
-        echo '{}' >"${out}"
-        shopt -s nullglob
-        for meta in debs-nosign/.meta/*.json; do
-          pkg=$(basename "${meta}" .json)
-          jq --arg p "${pkg}" --slurpfile m "${meta}" \
-            '. + {($p): {hash: $m[0].hash, debs: $m[0].debs}}' \
-            "${out}" >"${out}.n"
-          mv "${out}.n" "${out}"
-        done
-        for deb in "${cache}"/*.deb; do
-          if ! jq -e --arg f "$(basename "${deb}")" '[.[].debs[]?] | index($f)' "${out}" >/dev/null 2>&1; then
-            rm -f "${deb}"
-          fi
-        done
-        echo "debs-cache-nosign: $(jq 'keys | length' "${out}") package(s) recorded"
-        test -f "${REPO_DIR}/dists/trixie-nosign/Release"
 
     # Publish the content-addressed deb cache alongside the APT repo so the
     # build-deb action can reuse unchanged packages on the next run:
