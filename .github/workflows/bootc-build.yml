@@ -336,8 +336,16 @@ jobs:
           # distro name.
           product_name="${GITHUB_REPOSITORY##*/}"
           product_name="${product_name//-/ }"
+          # Layer cache in the registry: read on every run, rewritten only on main.
+          # --no-cache (monthly cron or force_no_cache) skips the lookup so the
+          # packages are refreshed, and the fresh layers still replace the cache.
+          cache=(--layers "--cache-from=${IMAGE}-cache-${ARCH}")
+          if [[ "${GITHUB_REF}" == "refs/heads/main" ]]; then
+            cache+=("--cache-to=${IMAGE}-cache-${ARCH}")
+          fi
           sudo podman build \
             "${flags[@]}" \
+            "${cache[@]}" \
             --build-arg "ARCH=${ARCH}" \
             --build-arg "PRODUCT_NAME=${product_name}" \
             "${apt_args[@]}" \
@@ -371,6 +379,14 @@ jobs:
             local tag="$1" kernel_suffix="$2" hash="$3"
             shift 3
             local flags=("$@")
+            # Layer cache in the registry: read on every run, rewritten only on main.
+            # --no-cache (monthly cron or force_no_cache) skips the lookup so the
+            # packages are refreshed, and the fresh layers still replace the cache.
+            local cache=(--layers "--cache-from=${IMAGE}-cache-${ARCH}")
+            if [[ "${GITHUB_REF}" == "refs/heads/main" ]]; then
+              cache+=("--cache-to=${IMAGE}-cache-${ARCH}")
+            fi
+
             # Monthly tag: 'monthly-YYYYMMDD' for the canonical latest combo only
             # (preserves the historical amd64-only monthly tag).
             if [[ "${{ github.event_name }}" == "schedule" && "$CANONICAL" == "true" ]]; then
@@ -442,6 +458,7 @@ jobs:
             fi
             sudo podman build \
               "${flags[@]}" \
+              "${cache[@]}" \
               --build-arg "BASE_IMAGE=localhost/debian-bootc-base" \
               --build-arg "ARCH=${ARCH}" \
               --build-arg "KERNEL_SUFFIX=${kernel_suffix}" \
@@ -687,6 +704,11 @@ jobs:
           fi
           product_name="${GITHUB_REPOSITORY##*/}"
           product_name="${product_name//-/ }"
+          # Layer cache: same rules as the wave 1 builds.
+          cache=(--layers "--cache-from=${IMAGE}-cache-${ARCH}")
+          if [[ "${GITHUB_REF}" == "refs/heads/main" ]]; then
+            cache+=("--cache-to=${IMAGE}-cache-${ARCH}")
+          fi
           sudo podman build \
             --arch "${ARCH}" \
             --build-arg ARCH="${ARCH}" \
@@ -696,6 +718,7 @@ jobs:
             --label "org.daemoncores.content-hash=wave2-${PRIMARY}" \
             --tag "${IMAGE}:${PRIMARY}" \
             "${flags[@]}" \
+            "${cache[@]}" \
             --file "${CF_FILE}" .
       - name: Push
         if: github.ref == 'refs/heads/main'
