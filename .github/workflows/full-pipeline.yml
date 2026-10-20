@@ -235,9 +235,7 @@ jobs:
     outputs:
       restart: ${{ steps.dispatch.outputs.restart }}
       signing_active: ${{ steps.need.outputs.signing_active }}
-      # yes in both mode with signing active: an unsigned set of debs and
-      # images is built and published next to the signed one.
-      nosign_variant: ${{ steps.need.outputs.nosign_variant }}
+      unsigned_kernel: ${{ steps.need.outputs.unsigned_kernel }}
       # The plan, forced to "nothing" when this run hands over to a new one.
       env: ${{ steps.dispatch.outputs.restart == 'yes' && 'false' || needs.changes.outputs.env }}
       debs: ${{ steps.dispatch.outputs.restart == 'yes' && 'false' || needs.changes.outputs.debs }}
@@ -271,7 +269,7 @@ jobs:
           ")
           fi
           active=no
-          nosign_variant=no
+          unsigned_kernel=no
           groups=()
           if [ "${PLAN_IMAGE}" = true ] && [ "${HAS_COSIGN}" != true ]; then
             groups+=(cosign)
@@ -287,16 +285,19 @@ jobs:
             sign|both)
               if [ "${HAS_MODULES}" = true ]; then
                 active=yes
-                [ "${mode}" = both ] && nosign_variant=yes
+                # both: the modules are signed once and shared; only the
+                # kernel (and the images on it) exists in a signed and an
+                # unsigned twin.
+                [ "${mode}" = both ] && unsigned_kernel=yes
               elif [ "${PLAN_DEBS}" = true ]; then
                 groups+=(modules)
               fi
               ;;
           esac
           echo "signing_active=${active}" >>"$GITHUB_OUTPUT"
-          echo "nosign_variant=${nosign_variant}" >>"$GITHUB_OUTPUT"
+          echo "unsigned_kernel=${unsigned_kernel}" >>"$GITHUB_OUTPUT"
           echo "groups=${groups[*]:-}" >>"$GITHUB_OUTPUT"
-          echo "module signing mode=${mode} active=${active} nosign_variant=${nosign_variant}; missing: ${groups[*]:-none}"
+          echo "module signing mode=${mode} active=${active} unsigned_kernel=${unsigned_kernel}; missing: ${groups[*]:-none}"
       - name: Fetch the shared tooling
         if: ${{ steps.need.outputs.groups != '' }}
         uses: actions/checkout@v7
@@ -450,6 +451,7 @@ jobs:
     with:
       arch: amd64
       signing_active: ${{ needs.prepare.outputs.signing_active }}
+      unsigned_kernel: ${{ needs.prepare.outputs.unsigned_kernel }}
       deploy_pages: false
     secrets: inherit
 
@@ -474,67 +476,7 @@ jobs:
     with:
       arch: arm64
       signing_active: ${{ needs.prepare.outputs.signing_active }}
-      deploy_pages: false
-    secrets: inherit
-
-  # Unsigned variant of a `both` signing run: the same manifest built with
-  # module signing off, under its own artifact names (-nosign) and deb cache.
-  debs_amd64_nosign:
-    name: Build .deb packages (amd64, unsigned variant)
-    needs: [prepare, base, build_env]
-    # The nested waveN jobs in bootc-debs-builder.yml (and build-one-deb.yml's
-    # build job) request 'actions: write' to delete stale CI artifacts via the
-    # gh api DELETE endpoint. GitHub intersects the caller's top-level/job-level
-    # permissions with the callee's request, and the top-level block of this
-    # workflow grants only contents/packages/pages/id-token/issues — so the
-    # intersection collapses to 'actions: none' and the nested call is rejected
-    # with "The nested job 'wave0' is requesting 'actions: write', but is only
-    # allowed 'actions: none'". Granting actions: write here (job-level) keeps
-    # least-privilege: only the debs callers get it, not the whole workflow.
-    permissions:
-      actions: write
-      contents: write
-      packages: write
-      pages: write
-      id-token: write
-      issues: write
-    if: |
-      !cancelled() &&
-      needs.prepare.outputs.debs == 'true' &&
-      needs.prepare.outputs.nosign_variant == 'yes' &&
-      (needs.base.result == 'success' || needs.base.result == 'skipped') &&
-      (needs.build_env.result == 'success' || needs.build_env.result == 'skipped')
-    uses: DaemonCores/DaemonCores-CI/.github/workflows/bootc-debs-builder.yml@main
-    with:
-      arch: amd64
-      signing_active: 'no'
-      variant_suffix: -nosign
-      deploy_pages: false
-    secrets: inherit
-
-  debs_arm64_nosign:
-    name: Build .deb packages (arm64, unsigned variant)
-    needs: [prepare, base, build_env]
-    # Same actions: write grant as debs_amd64_nosign — see that job's comment for the
-    # rationale (nested waveN jobs need to delete stale artifacts via gh api).
-    permissions:
-      actions: write
-      contents: write
-      packages: write
-      pages: write
-      id-token: write
-      issues: write
-    if: |
-      !cancelled() &&
-      needs.prepare.outputs.debs == 'true' &&
-      needs.prepare.outputs.nosign_variant == 'yes' &&
-      (needs.base.result == 'success' || needs.base.result == 'skipped') &&
-      (needs.build_env.result == 'success' || needs.build_env.result == 'skipped')
-    uses: DaemonCores/DaemonCores-CI/.github/workflows/bootc-debs-builder.yml@main
-    with:
-      arch: arm64
-      signing_active: 'no'
-      variant_suffix: -nosign
+      unsigned_kernel: ${{ needs.prepare.outputs.unsigned_kernel }}
       deploy_pages: false
     secrets: inherit
 
@@ -545,14 +487,12 @@ jobs:
   # named "github-pages"; two parallel uploads conflict at deploy time).
   debs_publish:
     name: Publish .deb packages (APT repo → GitHub Pages)
-    needs: [prepare, debs_amd64, debs_arm64, debs_amd64_nosign, debs_arm64_nosign]
+    needs: [prepare, debs_amd64, debs_arm64]
     if: |
       always() && !cancelled() &&
       needs.prepare.outputs.debs == 'true' &&
       (needs.debs_amd64.result == 'success' || needs.debs_amd64.result == 'failure') &&
-      (needs.debs_arm64.result == 'success' || needs.debs_arm64.result == 'failure') &&
-      (needs.debs_amd64_nosign.result == 'success' || needs.debs_amd64_nosign.result == 'failure' || needs.debs_amd64_nosign.result == 'skipped') &&
-      (needs.debs_arm64_nosign.result == 'success' || needs.debs_arm64_nosign.result == 'failure' || needs.debs_arm64_nosign.result == 'skipped')
+      (needs.debs_arm64.result == 'success' || needs.debs_arm64.result == 'failure')
     runs-on: ubuntu-latest
     permissions:
       pages: write
@@ -570,14 +510,13 @@ jobs:
         with:
           repo_name: ${{ steps.repo.outputs.name }}
           apt_gpg_key: ${{ secrets.APT_GPG_KEY }}
-          nosign_variant: ${{ needs.prepare.outputs.nosign_variant }}
 
   # Aggregate any_rebuilt from both arches: a rebuild on either arch forces a
   # no-cache image rebuild. workflow_call outputs from reusable workflows are
   # available via needs.<job>.outputs only for jobs that declared them.
   debs_aggregate:
     name: Aggregate debs outputs
-    needs: [debs_amd64, debs_arm64, debs_amd64_nosign, debs_arm64_nosign, debs_publish]
+    needs: [debs_amd64, debs_arm64, debs_publish]
     if: ${{ !cancelled() && !failure() }}
     runs-on: ubuntu-latest
     outputs:
@@ -589,8 +528,6 @@ jobs:
           any=false
           [ "${{ needs.debs_amd64.outputs.any_rebuilt }}" = "true" ] && any=true || true
           [ "${{ needs.debs_arm64.outputs.any_rebuilt }}" = "true" ] && any=true || true
-          [ "${{ needs.debs_amd64_nosign.outputs.any_rebuilt }}" = "true" ] && any=true || true
-          [ "${{ needs.debs_arm64_nosign.outputs.any_rebuilt }}" = "true" ] && any=true || true
           [ "${{ needs.debs_publish.outputs.any_rebuilt }}" = "true" ] && any=true || true
           echo "any_rebuilt=${any}" >> "$GITHUB_OUTPUT"
 
@@ -615,9 +552,8 @@ jobs:
       # committed to the Containerfiles).
       bootc_gpg_sha256: ${{ needs.apt_key.outputs.sha256 }}
       apt_url: ${{ needs.apt_key.outputs.url }}
-      # both mode: also build the unsigned images, tagged -nosign, against the
-      # unsigned APT suite.
-      nosign_images: ${{ needs.prepare.outputs.nosign_variant == 'yes' }}
+      # both mode: also build the unsigned-kernel twin images (<tag>-nosign).
+      nosign_images: ${{ needs.prepare.outputs.unsigned_kernel == 'yes' }}
     secrets: inherit
 
   iso:
