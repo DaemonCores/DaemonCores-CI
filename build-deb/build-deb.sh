@@ -19,12 +19,18 @@
 #   EXTRA_ENV   - KEY=VALUE lines exported for the build (e.g. a package
 #                 version, GH_TOKEN). Non-secret keys also feed the hash so a
 #                 version bump rebuilds; secret-looking keys are excluded.
+#   VARIANT_SUFFIX - empty for the primary variant, `-nosign` for the unsigned
+#                 variant published next to a signed one; selects the cache.
 #   CI_SCRIPTS  - (exported) directory of the shared DaemonCores-CI scripts.
 #   PAGES_URL   - APT repo base URL; derived from GITHUB_REPOSITORY if empty.
 #   GITHUB_REPOSITORY, GITHUB_WORKSPACE, GITHUB_OUTPUT - provided by Actions.
 set -euo pipefail
 
 DEBS_DIR=/debs
+# Folder of the published deb cache. The unsigned variant of a "both" signing
+# run keeps its own (`debs-cache-nosign`): its debs share file names with the
+# signed ones, so one folder would make each variant evict the other.
+CACHE_DIR="debs-cache${VARIANT_SUFFIX:-}"
 META_DIR="${DEBS_DIR}/.meta"
 
 # Env keys matching this (case-insensitive) are exported but kept out of the
@@ -211,7 +217,7 @@ restore_cached() {
   [[ -n "${files}" ]] || return 1
   while IFS= read -r f; do
     [[ -n "${f}" ]] || continue
-    curl -fsSL "${base}/debs-cache/${f}" -o "${DEBS_DIR}/${f}" || return 1
+    curl -fsSL "${base}/${CACHE_DIR}/${f}" -o "${DEBS_DIR}/${f}" || return 1
   done <<<"${files}"
   return 0
 }
@@ -274,13 +280,13 @@ main() {
   # coexist in hashes.json without overwriting each other.
   cache_key="${PACKAGE}-${ARCH:-amd64}"
 
-  prior=$(curl -fsSL "${base}/debs-cache/hashes.json" 2>/dev/null || echo '{}')
+  prior=$(curl -fsSL "${base}/${CACHE_DIR}/hashes.json" 2>/dev/null || echo '{}')
   prior_hash=$(printf '%s' "${prior}" \
     | jq -r --arg p "${cache_key}" '.[$p].hash // empty')
 
   # Diagnostics: shows why a package did (not) skip on the next run.
   echo "cache[${cache_key}]: hash=${hash} prior=${prior_hash:-<none>}" \
-    "src=${base}/debs-cache/hashes.json" >&2
+    "src=${base}/${CACHE_DIR}/hashes.json" >&2
 
   if [[ -n "${prior_hash}" && "${prior_hash}" == "${hash}" ]]; then
     local cached_debs

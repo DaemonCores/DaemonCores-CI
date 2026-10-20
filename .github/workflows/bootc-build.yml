@@ -20,6 +20,13 @@ on:
         type: string
         required: false
         default: ''
+      nosign_images:
+        description: >-
+          Also build every wave-1 image against the unsigned APT suite
+          (trixie-nosign), tagged `<tag>-nosign`. Used by the both signing mode.
+        type: boolean
+        required: false
+        default: false
 
 jobs:
   # Discover every Containerfile* at the repo root and emit a FLAT build
@@ -56,6 +63,8 @@ jobs:
 
       - name: List Containerfiles and build matrix
         id: list
+        env:
+          NOSIGN_IMAGES: ${{ inputs.nosign_images }}
         run: |
           set -euo pipefail
           # Find every Containerfile* at the repo root (maxdepth 1). Sorted for
@@ -138,6 +147,21 @@ jobs:
               matrix_wave1=$(printf '%s' "$matrix_wave1" | jq -c --argjson e "$entry" '. += [$e]')
             fi
           done < <(printf '%s' "$matrix" | jq -c '.[]')
+          # Entries carry the APT suite, component and deb-cache folder of
+          # their variant. With nosign_images every wave-1 image (and its
+          # manifest list) is duplicated against the unsigned suite, tagged
+          # <tag>-nosign; derived (wave 2) images stay on the primary variant.
+          primary_fields='{variant: "", suite: "trixie", component: "main", cache_dir: "debs-cache"}'
+          matrix_wave1=$(printf '%s' "$matrix_wave1" | jq -c "map(. + ${primary_fields})")
+          matrix_wave2=$(printf '%s' "$matrix_wave2" | jq -c "map(. + ${primary_fields})")
+          manifest_matrix=$(printf '%s' "$manifest_matrix" | jq -c "map(. + {variant: \"\"})")
+          if [ "${NOSIGN_IMAGES}" = true ]; then
+            wave1_tags=$(printf '%s' "$matrix_wave1" | jq -c '[.[].tag] | unique')
+            matrix_wave1=$(printf '%s' "$matrix_wave1" | jq -c \
+              '. + map(. + {tag: (.tag + "-nosign"), variant: "-nosign", suite: "trixie-nosign", component: "nosign", cache_dir: "debs-cache-nosign"})')
+            manifest_matrix=$(printf '%s' "$manifest_matrix" | jq -c --argjson t "$wave1_tags" \
+              '. + [.[] | select(.tag as $x | $t | any(. == $x)) | . + {tag: (.tag + "-nosign"), variant: "-nosign"}]')
+          fi
           has_derived="false"
           [ "$matrix_wave2" != '[]' ] && has_derived="true"
           echo "matrix_wave1=$(printf '%s' "$matrix_wave1" | jq -c .)" >>"$GITHUB_OUTPUT"
@@ -239,6 +263,7 @@ jobs:
         env:
           CF_FILE: ${{ matrix.entry.file }}
           CF_TAG: ${{ matrix.entry.tag }}
+          CACHE_DIR: ${{ matrix.entry.cache_dir }}
           GLOBAL_HASH: ${{ needs.discover.outputs.global_hash }}
           ARCH: ${{ matrix.entry.arch }}
           AUTOUPDATE: ${{ matrix.entry.autoupdate }}
@@ -252,7 +277,7 @@ jobs:
           owner="${GITHUB_REPOSITORY%%/*}"
           repo="${GITHUB_REPOSITORY#*/}"
           pages="https://${owner,,}.github.io/${repo}"
-          debs=$(curl -fsSL "${pages}/debs-cache/hashes.json" 2>/dev/null \
+          debs=$(curl -fsSL "${pages}/${CACHE_DIR}/hashes.json" 2>/dev/null \
             | jq -cS . 2>/dev/null || echo '{}')
           base=$(grep -m1 -iE '^FROM ' "$CF_FILE" | awk '{ print $2 }')
           # Resolve the base image's per-arch digest (--override-arch) so amd64
@@ -293,6 +318,8 @@ jobs:
           COSIGN_PUBLIC_KEY: ${{ secrets.COSIGN_PUBLIC_KEY }}
           BOOTC_GPG_SHA256: ${{ inputs.bootc_gpg_sha256 }}
           APT_URL: ${{ inputs.apt_url }}
+          APT_SUITE: ${{ matrix.entry.suite }}
+          APT_COMPONENT: ${{ matrix.entry.component }}
         run: |
           set -euo pipefail
           flags=()
@@ -307,6 +334,10 @@ jobs:
             || apt_args+=(--build-arg "BOOTC_GPG_SHA256=${BOOTC_GPG_SHA256}")
           [[ -z "${APT_URL}" ]] \
             || apt_args+=(--build-arg "BOOTC_APT_URL=${APT_URL}")
+          # The APT suite and component of the variant: the unsigned images
+          # install their kernel and modules from trixie-nosign / nosign.
+          apt_args+=(--build-arg "BOOTC_APT_SUITE=${APT_SUITE}" \
+            --build-arg "BOOTC_APT_COMPONENT=${APT_COMPONENT}")
           # Monthly tag: 'monthly-YYYYMMDD' for the canonical latest combo only
           # (preserves the historical amd64-only monthly tag).
           if [[ "${{ github.event_name }}" == "schedule" && "$CANONICAL" == "true" ]]; then

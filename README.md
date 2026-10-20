@@ -54,7 +54,7 @@ The reusable `full-pipeline.yml` workflow coordinates the following stages:
 
 | Action | Responsibility |
 | --- | --- |
-| `build-deb` | Hashes package inputs, reuses the last published artifact when unchanged, runs the package build, and records metadata. |
+| `build-deb` | Hashes package inputs, reuses the last published artifact when unchanged, runs the package build, and records metadata. In the unsigned variant of a `both` signing run (`variant-suffix: -nosign`) it reads and writes the separate cache `debs-cache-nosign`. |
 | `upstream-track` | Resolves the latest upstream release (version and asset SHA-256) of the entries a package lists under `track:`, so it follows upstream with nothing committed per version. |
 | `next-version` | Script (`next-version.sh`) that derives the next version from Conventional Commits since the last stable tag. |
 | `bootc-debs-start` | Checks out the caller and prepares the package workspace. |
@@ -160,7 +160,7 @@ The complete pipeline currently uses the following Actions secrets when the corr
 | `APT_GPG_KEY` | Signs the generated APT repository. Auto-generated. |
 | `SB_SIGNING_KEY`, `SB_SIGNING_CERT` | Self-signed Secure Boot key and certificate (base64) for the custom EFI bootloader. Auto-generated. |
 | `COSIGN_PRIVATE_KEY`, `COSIGN_PASSWORD`, `COSIGN_PUBLIC_KEY` | The repository's own image signing key. Auto-generated. |
-| `MODULE_SIGNING_KEY`, `MODULE_SIGNING_CERT` | Kernel module signing key. Auto-generated when module signing is enabled. |
+| `MODULE_SIGNING_KEY`, `MODULE_SIGNING_CERT` | Kernel module signing key. Auto-generated when module signing is enabled. In `both` mode the pipeline also builds an unsigned set: packages in the APT suite `trixie-nosign` (component `nosign`, cache `debs-cache-nosign`) and images tagged `<tag>-nosign`. |
 
 ### Generated secrets and the `prepare` job
 

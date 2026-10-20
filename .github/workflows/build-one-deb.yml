@@ -32,6 +32,11 @@ on:
         required: false
         type: string
         default: 'no'
+      variant_suffix:
+        description: 'Empty for the primary variant, -nosign for the unsigned variant of a both signing run. Suffixes the artifact names and selects the deb cache.'
+        required: false
+        type: string
+        default: ''
 
 jobs:
   build:
@@ -166,7 +171,7 @@ jobs:
           # merge-multiple would land both libcomposefs_*_amd64.deb and
           # libcomposefs_*_arm64.deb in /tmp/prior, causing a multi-arch
           # Conflicts error when apt tries to install them together.
-          pattern: debs-*-${{ inputs.arch }}
+          pattern: debs-*-${{ inputs.arch }}${{ inputs.variant_suffix }}
           merge-multiple: true
           path: /tmp/prior
 
@@ -228,6 +233,7 @@ jobs:
           build: ${{ steps.def.outputs.build }}
           arch: ${{ inputs.arch }}
           extra-env: MODULE_SIGNING_ACTIVE=${{ inputs.signing_active }}
+          variant-suffix: ${{ inputs.variant_suffix }}
 
       # The build failed but the last-good published deb was kept, so the
       # pipeline is not blocked. Record the breakage as an issue (deduped by
@@ -292,7 +298,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          artifact_name="debs-${{ inputs.package }}-${{ inputs.arch }}"
+          artifact_name="debs-${{ inputs.package }}-${{ inputs.arch }}${{ inputs.variant_suffix }}"
           ids=$(gh api "repos/${{ github.repository }}/actions/artifacts?name=${artifact_name}" --jq '.artifacts[].id')
           for id in $ids; do
             gh api --method DELETE "repos/${{ github.repository }}/actions/artifacts/$id"
@@ -301,7 +307,7 @@ jobs:
       - name: Upload ${{ inputs.package }} debs
         uses: actions/upload-artifact@v7
         with:
-          name: debs-${{ inputs.package }}-${{ inputs.arch }}
+          name: debs-${{ inputs.package }}-${{ inputs.arch }}${{ inputs.variant_suffix }}
           path: /debs
           include-hidden-files: true
 
