@@ -141,6 +141,18 @@ install_deps() {
     python3 -m venv "${WORK}/sbtool"
     "${WORK}/sbtool/bin/pip" install --quiet virt-firmware
   fi
+  # Refresh OVMF_DIR after ovmf may have been installed above: the global
+  # detection at the top of the script runs before install_deps, so on a CI
+  # runner where ovmf is not pre-installed OVMF_DIR would be empty.
+  if [ "${ARCH}" != "arm64" ]; then
+    OVMF_DIR=""
+    for _d in /usr/share/OVMF /usr/share/edk2/x64; do
+      if find "${_d}" -maxdepth 2 -name 'OVMF_CODE*.fd' 2>/dev/null | grep -q .; then
+        OVMF_DIR="${_d}"; break
+      fi
+    done
+    unset _d
+  fi
 }
 
 #######################################
