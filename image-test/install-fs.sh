@@ -225,6 +225,16 @@ else
   echo "::warning::could not find deployed commit — rollback slot not staged; rollback tests will fail"
 fi
 
+# Inject CI-only journald config: forward all logs to the serial console so
+# failures in logind, sshd and other services are visible in the CI log.
+# Written directly into each ostree deployment /etc — not baked into the image.
+for _deploy_etc in "${T}/ostree/deploy"/*/deploy/*/etc; do
+  [ -d "${_deploy_etc}" ] || continue
+  mkdir -p "${_deploy_etc}/systemd/journald.conf.d"
+  printf '[Journal]\nForwardToConsole=yes\n' \
+    > "${_deploy_etc}/systemd/journald.conf.d/99-ci-debug.conf"
+done
+
 # Seed the first-boot done flag so firstboot-user-setup skips its interactive
 # wizard and the VM reaches multi-user in CI. bootc finalizes ${T} read-only
 # once installed, so write straight into the var subvol via its own mount
