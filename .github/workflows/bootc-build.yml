@@ -343,16 +343,33 @@ jobs:
           if [[ "${GITHUB_REF}" == "refs/heads/main" ]]; then
             cache+=("--cache-to=${IMAGE}-cache-${ARCH}")
           fi
-          sudo podman build \
-            "${flags[@]}" \
-            "${cache[@]}" \
-            --build-arg "ARCH=${ARCH}" \
-            --build-arg "PRODUCT_NAME=${product_name}" \
-            "${apt_args[@]}" \
-            --tag localhost/debian-bootc-base \
-            -f Containerfile.base \
-            --format docker \
-            .
+          _bld_log=$(mktemp /tmp/podman-base-XXXXXX.log)
+          if ! sudo podman build \
+              "${flags[@]}" "${cache[@]}" \
+              --build-arg "ARCH=${ARCH}" \
+              --build-arg "PRODUCT_NAME=${product_name}" \
+              "${apt_args[@]}" \
+              --tag localhost/debian-bootc-base \
+              -f Containerfile.base \
+              --format docker \
+              . 2>&1 | tee "${_bld_log}"; then
+            if grep -qE "image not known|locating image with ID" "${_bld_log}"; then
+              echo "::warning::buildah cache push failed (stale storage blob), retrying base build without --cache-to"
+              local_cache_ro=(--layers "--cache-from=${IMAGE}-cache-${ARCH}")
+              sudo podman build \
+                "${flags[@]}" "${local_cache_ro[@]}" \
+                --build-arg "ARCH=${ARCH}" \
+                --build-arg "PRODUCT_NAME=${product_name}" \
+                "${apt_args[@]}" \
+                --tag localhost/debian-bootc-base \
+                -f Containerfile.base \
+                --format docker \
+                .
+            else
+              exit 1
+            fi
+          fi
+          rm -f "${_bld_log}"
 
       - name: Build
         env:
@@ -456,24 +473,36 @@ jobs:
             if [[ "${kernel_suffix}" == -16k* ]]; then
               arm_devices="rpi5 rk3588"
             fi
-            sudo podman build \
-              "${flags[@]}" \
-              "${cache[@]}" \
-              --build-arg "BASE_IMAGE=localhost/debian-bootc-base" \
-              --build-arg "ARCH=${ARCH}" \
-              --build-arg "KERNEL_SUFFIX=${kernel_suffix}" \
-              --build-arg "ARM_DEVICES=${arm_devices}" \
-              --build-arg "BOOT_PKG=${boot_pkg}" \
-              --build-arg "BOOT_PROFILE=${profile}" \
-              --build-arg "FIRMWARE_PKGS=${firmware_pkgs}" \
-              --build-arg "APT_HOLD_PKG=${apt_hold_pkg}" \
-              --build-arg "COSIGN_PUBKEY_B64=$(printf '%s' "${COSIGN_PUBLIC_KEY}" | base64 -w0)" \
-              --build-arg "IMAGE_REF=${IMAGE,,}" \
-              --label "org.daemoncores.content-hash=${hash}" \
-              --tag "${IMAGE}:${tag}_${ARCH}" \
-              -f "$CF_FILE" \
-              --format docker \
+            local build_args=(
+              --build-arg "BASE_IMAGE=localhost/debian-bootc-base"
+              --build-arg "ARCH=${ARCH}"
+              --build-arg "KERNEL_SUFFIX=${kernel_suffix}"
+              --build-arg "ARM_DEVICES=${arm_devices}"
+              --build-arg "BOOT_PKG=${boot_pkg}"
+              --build-arg "BOOT_PROFILE=${profile}"
+              --build-arg "FIRMWARE_PKGS=${firmware_pkgs}"
+              --build-arg "APT_HOLD_PKG=${apt_hold_pkg}"
+              --build-arg "COSIGN_PUBKEY_B64=$(printf '%s' "${COSIGN_PUBLIC_KEY}" | base64 -w0)"
+              --build-arg "IMAGE_REF=${IMAGE,,}"
+              --label "org.daemoncores.content-hash=${hash}"
+              --tag "${IMAGE}:${tag}_${ARCH}"
+              -f "$CF_FILE"
+              --format docker
               .
+            )
+            local _bld_log
+            _bld_log=$(mktemp /tmp/podman-build-XXXXXX.log)
+            if ! sudo podman build "${flags[@]}" "${cache[@]}" "${build_args[@]}" \
+                2>&1 | tee "${_bld_log}"; then
+              if grep -qE "image not known|locating image with ID" "${_bld_log}"; then
+                echo "::warning::buildah cache push failed (stale storage blob), retrying without --cache-to"
+                local cache_ro=(--layers "--cache-from=${IMAGE}-cache-${ARCH}")
+                sudo podman build "${flags[@]}" "${cache_ro[@]}" "${build_args[@]}"
+              else
+                exit 1
+              fi
+            fi
+            rm -f "${_bld_log}"
           }
 
           build_one "${CF_TAG}" "${KERNEL_SUFFIX}" "${HASH}" "${nocache[@]}"
