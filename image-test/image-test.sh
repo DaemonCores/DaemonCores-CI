@@ -278,9 +278,9 @@ boot_vm() {
       code="${code:-$(find "${OVMF_DIR}" -name 'OVMF_CODE*.fd' ! -name '*secboot*' \
         ! -name '*.ms.*' | head -1)}"
       vars=$(find "${OVMF_DIR}" -name 'OVMF_VARS_4M*.fd' ! -name '*.ms.*' \
-        ! -name '*secboot*' | head -1)
+        ! -name '*secboot*' ! -name '*snakeoil*' | sort | head -1)
       vars="${vars:-$(find "${OVMF_DIR}" -name 'OVMF_VARS*.fd' ! -name '*.ms.*' \
-        ! -name '*secboot*' | head -1)}"
+        ! -name '*secboot*' ! -name '*snakeoil*' | sort | head -1)}"
       echo "OVMF CODE: ${code}"
       echo "OVMF VARS: ${vars}"
       cp "${vars}" "${WORK}/OVMF_VARS.fd"
