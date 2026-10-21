@@ -19,6 +19,12 @@ inputs:
     description: 'The package env as KEY=VALUE lines (from the manifest).'
     required: false
     default: ''
+  source-manifest:
+    description: >-
+      The manifest `manifest` was expanded from; `require-patches` is relative
+      to its directory. Defaults to `manifest`.
+    required: false
+    default: ''
   strict:
     description: 'true to fail the step when an entry cannot be resolved.'
     required: false
@@ -41,6 +47,7 @@ runs:
       env:
         PKG: ${{ inputs.package }}
         MAN: ${{ inputs.manifest }}
+        SOURCE_MAN: ${{ inputs.source-manifest }}
         BASE_ENV: ${{ inputs.env }}
         STRICT: ${{ inputs.strict }}
         GH_TOKEN: ${{ inputs.token }}
