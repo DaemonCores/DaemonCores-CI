@@ -102,7 +102,7 @@ command -v bootupd >/dev/null 2>&1 || {
 
 mkfs.vfat -n EFI "${dev}p1" >/dev/null
 mkfs.ext4 -q -L boot "${dev}p2"
-mkfs.btrfs -q -L dcos "${dev}p3"
+mkfs.btrfs -q -f -L dcos "${dev}p3"
 
 # Subvolumes root / var / varlog (same names as the kickstart).
 mkdir -p /pool
@@ -112,16 +112,19 @@ btrfs subvolume create /pool/var >/dev/null
 btrfs subvolume create /pool/varlog >/dev/null
 umount /pool
 
-# Mount the target tree with zstd, matching the kickstart.
+# Mount the target tree without compress= so the remount,rw step later
+# (needed to stage the rollback slot) does not fail on the CI host kernel.
+# Production deployments set compress=zstd via the kickstart/fstab; the
+# test harness only needs a functional btrfs tree, not a compressed one.
 mkdir -p "${T}"
-mount -o subvol=root,compress=zstd LABEL=dcos "${T}"
+mount -o subvol=root LABEL=dcos "${T}"
 mkdir -p "${T}/boot" "${T}/var"
 mount "${dev}p2" "${T}/boot"
 mkdir -p "${T}/boot/efi"
 mount "${dev}p1" "${T}/boot/efi"
-mount -o subvol=var,compress=zstd LABEL=dcos "${T}/var"
+mount -o subvol=var LABEL=dcos "${T}/var"
 mkdir -p "${T}/var/log"
-mount -o subvol=varlog,compress=zstd LABEL=dcos "${T}/var/log"
+mount -o subvol=varlog LABEL=dcos "${T}/var/log"
 
 # Cap /var/log at 2G of on-disk usage via a btrfs qgroup quota.
 btrfs quota enable "${T}" >/dev/null 2>&1 || true
@@ -198,6 +201,9 @@ if [ -n "${deployed_dir}" ]; then
   # mount and btrfs rejects it on this remount ("Bad value for 'compress'"),
   # which left the target read-only.
   mount -o remount,rw "${T}" 2>&1 || true
+  # bootc also remounts the ext4 /boot partition read-only; ostree deploy needs
+  # to write BLS entries there (boot/loader.0), so unlock it too.
+  mount -o remount,rw "${T}/boot" 2>&1 || true
   # Verify write access before handing off to ostree.
   if ! touch "${T}/.rw-probe" 2>/dev/null; then
     echo "::warning::${T} is still read-only after btrfs unlock + remount — testrollback will fail"
@@ -228,3 +234,11 @@ mount -o subvol=var LABEL=dcos /varseed
 mkdir -p /varseed/lib
 touch /varseed/lib/firstboot-user-setup.done
 umount /varseed
+# Create the journal directory in the varlog subvolume so systemd-journald
+# uses persistent storage (Storage=auto writes to /var/log/journal only when
+# the dir exists). The varlog subvolume overlays /var/log at runtime, so the
+# directory must live there — not in the var subvolume above.
+mkdir -p /varlog
+mount -o subvol=varlog LABEL=dcos /varlog
+mkdir -p /varlog/journal
+umount /varlog
