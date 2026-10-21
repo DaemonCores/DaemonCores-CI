@@ -306,31 +306,25 @@ boot_vm() {
 #   0 when reachable, 1 on timeout.
 #######################################
 wait_ssh() {
-  local timeout="$1" i resets
-  for ((i = 0; i < timeout; i++)); do
-    ssh "${SSH_OPTS[@]}" root@localhost true 2>/dev/null && return 0
-    # Fail fast on definitive firmware failures instead of waiting out the whole
-    # timeout — a healthy boot reaches sshd in seconds, so any of these means SSH
-    # is never coming:
-    #   - Secure Boot rejected a boot binary (Verification failed / 0x1A);
-    #   - the guest EFI app keeps resetting in a loop.
-    if grep -q 'Security Violation' "${SERIAL}" 2>/dev/null; then
-      echo "::error::Secure Boot rejected a boot binary (Verification failed:" \
-        "Security Violation) — not booting; failing immediately"
-      return 3
-    fi
-    resets=$(grep -c 'Reset System' "${SERIAL}" 2>/dev/null || echo 0)
-    if [ "${resets}" -ge 3 ]; then
-      echo "::error::guest firmware reboot loop (${resets}x Reset System) —" \
-        "not booting; failing immediately"
-      return 2
-    fi
-    if ((i % 30 == 0)); then
-      echo "  … waiting for SSH (${i}/${timeout}s); serial tail:"
-      sudo tail -n 15 "${SERIAL}" 2>/dev/null | sed 's/^/    | /' || true
-    fi
-    sleep 1
-  done
+  local timeout="$1" resets
+  # timeout is a boot grace period — sleep through it so the VM can come up,
+  # then make a single SSH attempt.  If SSH is not answering after a healthy
+  # boot it will never answer; retrying wastes CI minutes.
+  echo "  … boot grace period: sleeping ${timeout}s"
+  sleep "${timeout}"
+  # Fail fast on definitive firmware failures before the SSH attempt.
+  if grep -q 'Security Violation' "${SERIAL}" 2>/dev/null; then
+    echo "::error::Secure Boot rejected a boot binary (Security Violation)"
+    return 3
+  fi
+  resets=$(grep -c 'Reset System' "${SERIAL}" 2>/dev/null || echo 0)
+  if [ "${resets}" -ge 3 ]; then
+    echo "::error::guest firmware reboot loop (${resets}x Reset System)"
+    return 2
+  fi
+  echo "  … single SSH attempt after grace period:"
+  sudo tail -n 15 "${SERIAL}" 2>/dev/null | sed 's/^/    | /' || true
+  ssh "${SSH_OPTS[@]}" root@localhost true 2>/dev/null && return 0
   return 1
 }
 
