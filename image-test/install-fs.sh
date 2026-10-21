@@ -224,6 +224,23 @@ if [ -n "${deployed_dir}" ]; then
     mkdir -p "${_deploy_etc}/systemd/journald.conf.d"
     printf '[Journal]\nForwardToConsole=yes\n' \
       > "${_deploy_etc}/systemd/journald.conf.d/99-ci-debug.conf"
+    # CI-only diagnostic oneshot: dump the real /etc and /etc/ssh state
+    # (existence, mount flags, live access() probe, live systemd condition
+    # evaluation, the shipped keygen unit) after ostree-remount — the same
+    # boot window where sshd-keygen.service's ConditionPathIsReadWrite fails
+    # in CI. Reaches the serial console through the ForwardToConsole config
+    # above. Diagnostic only, never ships in published images.
+    mkdir -p "${_deploy_etc}/systemd/system/multi-user.target.wants"
+    cat > "${_deploy_etc}/systemd/system/ci-ssh-debug.service" <<'UNIT'
+[Unit]
+Description=CI diagnostic: dump /etc writability and sshd-keygen condition state
+After=ostree-remount.service
+[Service]
+Type=oneshot
+ExecStart=/bin/sh -c "echo '| ci-ssh-dbg: ls /etc/ssh'; ls -la /etc/ssh 2>&1 | sed 's/^/| /'; echo '| ci-ssh-dbg: findmnt /etc /etc/ssh /'; findmnt /etc /etc/ssh / 2>&1 | sed 's/^/| /'; echo '| ci-ssh-dbg: touch probe'; touch /etc/ssh/.ci-rw-probe 2>&1 && echo '| ci-ssh-dbg: RW OK at this point' && rm -f /etc/ssh/.ci-rw-probe; echo '| ci-ssh-dbg: systemd-analyze condition'; systemd-analyze condition 'ConditionPathIsReadWrite=/etc/ssh' 2>&1 | sed 's/^/| /'; echo '| ci-ssh-dbg: sshd-keygen unit as shipped'; systemctl cat sshd-keygen.service 2>&1 | sed 's/^/| /'"
+UNIT
+    ln -sf "../ci-ssh-debug.service" \
+      "${_deploy_etc}/systemd/system/multi-user.target.wants/ci-ssh-debug.service"
   done
   mount "${dev}p3" /pool
   btrfs property set /pool/root ro true || true
