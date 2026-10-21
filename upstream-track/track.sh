@@ -50,6 +50,8 @@
 #
 # Environment:
 #   MAN       manifest path (default workflows/bootc-debs-builder/packages.yml)
+#   SOURCE_MAN  the manifest MAN was expanded from (default MAN); its directory
+#             is what `require-patches` is relative to
 #   PKG       package name (resolve)
 #   BASE_ENV  KEY=VALUE lines of the package env (resolve)
 #   ARCH      architecture whose published debs are compared (check)
@@ -148,7 +150,11 @@ select_kernel_release() {
     fetch_kernel_release "$3"
     return
   fi
-  manifest="$(dirname "${MAN}")/${req}"
+  manifest="$(dirname "${SOURCE_MAN:-${MAN}}")/${req}"
+  [[ -r "${manifest}" ]] || {
+    echo "patch manifest ${manifest} not found" >&2
+    return 1
+  }
   floor=$(published_kernel_floor "$1")
   while IFS= read -r version; do
     [[ -n "${version}" ]] || continue

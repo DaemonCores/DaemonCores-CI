@@ -221,6 +221,7 @@ jobs:
         with:
           package: ${{ inputs.package }}
           manifest: ${{ steps.expand.outputs.manifest }}
+          source-manifest: ${{ inputs.manifest }}
           env: ${{ steps.def.outputs.env }}
           token: ${{ github.token }}
 

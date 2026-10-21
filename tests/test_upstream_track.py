@@ -448,3 +448,48 @@ def test_resolve_refuses_a_kernel_older_than_the_published_one(
     )
     assert 'older than the published 7.2.10' in result.stderr
     assert not any(line.startswith('KERNEL_VER') for line in _env_output(api))
+
+
+def test_resolve_finds_the_patches_next_to_the_source_manifest(
+    api: Path, tmp_path: Path
+) -> None:
+    """An expanded copy elsewhere still resolves ``require-patches``.
+
+    Args:
+        api: API tree fixture.
+        tmp_path: Scratch directory holding the expanded copy.
+    """
+    _kernel_with_patches(api, {'7.1'})
+    expanded = tmp_path / 'expanded'
+    expanded.mkdir()
+    (expanded / 'packages.yml').write_text((api / 'packages.yml').read_text())
+    result = _run(
+        api,
+        'resolve',
+        PKG='kernel',
+        BASE_ENV='A=1',
+        MAN=str(expanded / 'packages.yml'),
+        SOURCE_MAN=str(api / 'packages.yml'),
+        KERNEL_ORG_URL=f'file://{api}'
+    )
+    assert result.returncode == 0, result.stderr
+    assert 'KERNEL_VER=7.1.20' in _env_output(api)
+
+
+def test_resolve_reports_a_missing_patch_manifest(api: Path) -> None:
+    """A patch manifest that cannot be read is an error, not a free pass.
+
+    Args:
+        api: API tree fixture.
+    """
+    _kernel_with_patches(api, {'7.2', '7.1'})
+    (api / 'patches.yml').unlink()
+    result = _run(
+        api,
+        'resolve',
+        PKG='kernel',
+        BASE_ENV='A=1',
+        KERNEL_ORG_URL=f'file://{api}'
+    )
+    assert 'patch manifest' in result.stderr
+    assert not any(line.startswith('KERNEL_VER') for line in _env_output(api))
