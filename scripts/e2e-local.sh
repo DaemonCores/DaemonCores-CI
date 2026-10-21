@@ -12,8 +12,9 @@
 #   ROOT     repository holding workflows/tests.yml (default: current directory)
 #   CI_REPO  DaemonCores-CI checkout (default: the one holding this script)
 #
-# The harness installs QEMU with apt-get and needs sudo, so this runs on a
-# Debian/Ubuntu host with /dev/kvm. It is not usable inside the dev container.
+# The harness needs sudo and /dev/kvm. On Debian/Ubuntu it installs QEMU with
+# apt-get when the tool is absent; on other distros (Arch, Fedora, …) QEMU must
+# be pre-installed. It is not usable inside the dev container.
 set -euo pipefail
 
 ROOT=$(cd "${ROOT:-.}" && pwd)
@@ -41,9 +42,17 @@ preflight() {
   local image="$1" arch="$2" tool
   [[ "${arch}" == amd64 || "${arch}" == arm64 ]] \
     || die "ARCH must be amd64 or arm64"
-  for tool in podman sudo apt-get; do
+  for tool in podman sudo; do
     command -v "${tool}" >/dev/null || die "missing required tool: ${tool}"
   done
+  # apt-get is only required on Debian/Ubuntu (the harness uses it to install
+  # QEMU when absent). On other distros QEMU must already be installed.
+  local qemu_bin="qemu-system-x86_64"
+  [[ "${arch}" == arm64 ]] && qemu_bin="qemu-system-aarch64"
+  if ! command -v "${qemu_bin}" >/dev/null 2>&1; then
+    command -v apt-get >/dev/null \
+      || die "missing required tool: apt-get (or pre-install ${qemu_bin})"
+  fi
   [[ -r "${CI_REPO}/image-test/image-test.sh" ]] \
     || die "harness not found, set CI_REPO (tried ${CI_REPO})"
   if [[ "${arch}" == amd64 && ! -e /dev/kvm ]]; then
