@@ -23,6 +23,16 @@ if echo "${IMAGE:-}" | grep -qE ':[^:]*minimal'; then
 fi
 WORK="${RUNNER_TEMP:-/tmp}"
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+# OVMF firmware directory: Debian/Ubuntu ship real files under /usr/share/OVMF;
+# Arch/edk2 puts them under /usr/share/edk2/x64 (on Arch /usr/share/OVMF is a
+# symlink that find does not traverse without -L, so list both paths explicitly).
+OVMF_DIR=""
+for _d in /usr/share/OVMF /usr/share/edk2/x64; do
+  if find "${_d}" -maxdepth 2 -name 'OVMF_CODE*.fd' 2>/dev/null | grep -q .; then
+    OVMF_DIR="${_d}"; break
+  fi
+done
+unset _d
 DISK="${WORK}/test-disk.raw"
 KEY="${WORK}/test-key"
 SERIAL="${WORK}/serial.log"
@@ -55,13 +65,23 @@ SSH_OPTS=(
 
 #######################################
 # Install QEMU/OVMF/yq and grant the runner access to /dev/kvm.
+# On Debian/Ubuntu: uses apt-get. On other distros: skips if already present.
 #######################################
 install_deps() {
-  sudo apt-get update
+  local need_qemu=0 need_jq=0
   if [ "${ARCH}" = "arm64" ]; then
-    sudo apt-get install -y --no-install-recommends qemu-system-arm qemu-efi-aarch64 jq
+    command -v qemu-system-aarch64 >/dev/null 2>&1 || need_qemu=1
   else
-    sudo apt-get install -y --no-install-recommends qemu-system-x86 ovmf jq
+    command -v qemu-system-x86_64 >/dev/null 2>&1 || need_qemu=1
+  fi
+  command -v jq >/dev/null 2>&1 || need_jq=1
+  if [ "${need_qemu}" = 1 ] || [ "${need_jq}" = 1 ]; then
+    sudo apt-get update
+    if [ "${ARCH}" = "arm64" ]; then
+      sudo apt-get install -y --no-install-recommends qemu-system-arm qemu-efi-aarch64 jq
+    else
+      sudo apt-get install -y --no-install-recommends qemu-system-x86 ovmf jq
+    fi
   fi
   command -v yq >/dev/null 2>&1 || {
     # Pinned version with SHA256 checksum — downloading from latest/download/
@@ -178,7 +198,7 @@ build_sb_vars() {
   # shellcheck disable=SC2024
   sudo podman run --rm "${IMAGE}" \
     cat /usr/share/debian-bootc/sb_signing.crt >"${WORK}/sb.crt"
-  base=$(find /usr/share/OVMF -name 'OVMF_VARS*.fd' ! -name '*.ms.*' \
+  base=$(find "${OVMF_DIR}" -name 'OVMF_VARS*.fd' ! -name '*.ms.*' \
     ! -name '*secboot*' | head -1)
   "${VIRT_FW}" -i "${base}" -o "${WORK}/OVMF_VARS.fd" \
     --set-pk "${guid}" "${WORK}/PK.pem" \
@@ -227,7 +247,7 @@ boot_vm() {
   else
     local secure=off
     if [ "${SECURE_BOOT}" = 1 ]; then
-      code=$(find /usr/share/OVMF -name 'OVMF_CODE*.fd' -name '*secboot*' \
+      code=$(find "${OVMF_DIR}" -name 'OVMF_CODE*.fd' -name '*secboot*' \
         | head -1)
       secure=on
       # ${WORK}/OVMF_VARS.fd already written by build_sb_vars.
@@ -241,13 +261,13 @@ boot_vm() {
       # drivers; OVMF then reports "No bootable option or device was found" because
       # it cannot enumerate the disk at all. Fallback to any non-secboot CODE if
       # the 4M variant is absent (unlikely on Ubuntu 24.04+).
-      code=$(find /usr/share/OVMF -name 'OVMF_CODE_4M*.fd' ! -name '*secboot*' \
+      code=$(find "${OVMF_DIR}" -name 'OVMF_CODE_4M*.fd' ! -name '*secboot*' \
         ! -name '*.ms.*' | head -1)
-      code="${code:-$(find /usr/share/OVMF -name 'OVMF_CODE*.fd' ! -name '*secboot*' \
+      code="${code:-$(find "${OVMF_DIR}" -name 'OVMF_CODE*.fd' ! -name '*secboot*' \
         ! -name '*.ms.*' | head -1)}"
-      vars=$(find /usr/share/OVMF -name 'OVMF_VARS_4M*.fd' ! -name '*.ms.*' \
+      vars=$(find "${OVMF_DIR}" -name 'OVMF_VARS_4M*.fd' ! -name '*.ms.*' \
         ! -name '*secboot*' | head -1)
-      vars="${vars:-$(find /usr/share/OVMF -name 'OVMF_VARS*.fd' ! -name '*.ms.*' \
+      vars="${vars:-$(find "${OVMF_DIR}" -name 'OVMF_VARS*.fd' ! -name '*.ms.*' \
         ! -name '*secboot*' | head -1)}"
       echo "OVMF CODE: ${code}"
       echo "OVMF VARS: ${vars}"
