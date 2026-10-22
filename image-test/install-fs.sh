@@ -236,11 +236,32 @@ if [ -n "${deployed_dir}" ]; then
     echo "::warning::testrollback slot not staged (sysroot locked after bootc install) — rollback tests will fail"
   fi
   # Inject CI-only journald config while the target is still rw (before re-lock).
+  # Also write /etc/fstab into every deployment so btrfs var/varlog subvolumes
+  # are mounted rw at boot. bootc install to-filesystem does not generate fstab;
+  # without it, ostree-prepare-root binds /var from the stateroot var directory
+  # (inside the ro btrfs root subvol), leaving /var and /etc read-only.
   for _deploy_etc in "${T}/ostree/deploy"/*/deploy/*/etc; do
     [ -d "${_deploy_etc}" ] || continue
     mkdir -p "${_deploy_etc}/systemd/journald.conf.d"
     printf '[Journal]\nForwardToConsole=yes\n' \
       > "${_deploy_etc}/systemd/journald.conf.d/99-ci-debug.conf"
+    # Write the fstab that bootc to-filesystem omits. Without /var and /var/log
+    # entries pointing at the writable btrfs subvolumes, ostree-prepare-root
+    # binds /var from the stateroot var directory inside the read-only root
+    # subvol, leaving the entire /var tree (and any etc overlay backed by it)
+    # read-only at runtime. The /boot and /boot/efi entries are included for
+    # completeness; they are not load-bearing for the writability fix.
+    cat > "${_deploy_etc}/fstab" <<'FSTAB'
+# Written by install-fs.sh — bootc install to-filesystem does not generate fstab.
+# NOTE: no "/" entry — composefs is enabled (prepare-root.conf), and the bootc
+# docs explicitly state that a "/" fstab entry does not work after the initrd
+# with composefs (the root is a composefs overlay, not the raw btrfs subvol).
+LABEL=dcos  /var       btrfs  subvol=var,x-systemd.device-timeout=0     0 0
+LABEL=dcos  /var/log   btrfs  subvol=varlog,x-systemd.device-timeout=0  0 0
+LABEL=boot  /boot      ext4   defaults                                   0 0
+LABEL=EFI   /boot/efi  vfat   umask=0077                                 0 2
+FSTAB
+    echo "=== fstab written to ${_deploy_etc}/fstab ==="
     # CI-only diagnostic oneshot: dump the real /etc and /etc/ssh state
     # (existence, mount flags, live access() probe, live systemd condition
     # evaluation, the shipped keygen unit) after ostree-remount — the same
@@ -275,9 +296,27 @@ UNIT
     ln -sf "../ci-ssh-debug.service" \
       "${_deploy_etc}/systemd/system/multi-user.target.wants/ci-ssh-debug.service"
   done
-  mount "${dev}p3" /pool
-  btrfs property set /pool/root ro true || true
-  umount /pool
+  # Populate the btrfs var subvol (mounted at ${T}/var) with the content that
+  # bootc placed in the stateroot var directory (inside the root subvol).
+  # The fstab entries above make systemd mount the btrfs var subvol at /var
+  # at runtime; for that to work, the subvol must have the same initial content
+  # as the stateroot var.  Without this copy, the runtime /var would be empty
+  # and tmpfiles / package state would be missing.
+  _stateroot_var="${T}/ostree/deploy/${stateroot}/var"
+  if [ -d "${_stateroot_var}" ] && [ -d "${T}/var" ]; then
+    cp -a "${_stateroot_var}/." "${T}/var/"
+    echo "=== var subvol populated from ${_stateroot_var} ==="
+  fi
+  # Do NOT re-lock the btrfs root subvol with ro=true here.
+  # The CI diag (run 39776149934) shows btrfs property ro=false BEFORE our
+  # unlock step — bootc install to-filesystem does not set btrfs-level ro on
+  # this runner (it may only set VFS SB_RDONLY, which remount,rw already
+  # cleared). Setting ro=true here makes the stateroot var (inside the root
+  # subvol) read-only, which prevents ostree-prepare-root from creating a
+  # writable upper dir for the /etc overlay → /etc and /var are ro at boot.
+  # The deployment content is already immutable via composefs (prepare-root.conf
+  # has composefs=enabled=yes); btrfs-level ro on the root subvol adds nothing
+  # and breaks the write paths that ostree sysroot.readonly=true depends on.
 else
   echo "::warning::could not find deployed commit — rollback slot not staged; rollback tests will fail"
 fi
