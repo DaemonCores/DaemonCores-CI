@@ -271,27 +271,35 @@ FSTAB
     mkdir -p "${_deploy_etc}/systemd/system/multi-user.target.wants"
     cat > "${_deploy_etc}/systemd/system/ci-ssh-debug.service" <<'UNIT'
 [Unit]
-Description=CI diagnostic: dump /etc and /var writability, mount layout, sshd-keygen state
-After=ostree-remount.service
+Description=CI diagnostic: mount layout, writability, sshd keygen, network state
+After=networking.service ssh.service
+Wants=networking.service
 [Service]
 Type=oneshot
 ExecStart=/bin/sh -c "\
-  echo '| ci-dbg: proc/mounts'; \
-  cat /proc/mounts 2>&1 | sed 's/^/| /'; \
   echo '| ci-dbg: findmnt /var / /etc'; \
   findmnt /var / /etc 2>&1 | sed 's/^/| /'; \
-  echo '| ci-dbg: ls /sysroot/ostree/deploy/default/var'; \
-  ls -la /sysroot/ostree/deploy/default/var 2>&1 | sed 's/^/| /'; \
-  echo '| ci-dbg: ls /var'; \
-  ls -la /var 2>&1 | sed 's/^/| /'; \
-  echo '| ci-dbg: ls /etc/ssh'; \
-  ls -la /etc/ssh 2>&1 | sed 's/^/| /'; \
   echo '| ci-dbg: touch /etc/ssh probe'; \
   touch /etc/ssh/.ci-rw-probe 2>&1 && echo '| ci-dbg: /etc/ssh RW OK' && rm -f /etc/ssh/.ci-rw-probe || echo '| ci-dbg: /etc/ssh NOT writable'; \
   echo '| ci-dbg: touch /var probe'; \
   touch /var/.ci-rw-probe 2>&1 && echo '| ci-dbg: /var RW OK' && rm -f /var/.ci-rw-probe || echo '| ci-dbg: /var NOT writable'; \
-  echo '| ci-dbg: sshd-keygen unit'; \
-  systemctl cat sshd-keygen.service 2>&1 | tail -12 | sed 's/^/| /'"
+  echo '| ci-dbg: ip addr'; \
+  ip addr show 2>&1 | sed 's/^/| /'; \
+  echo '| ci-dbg: ip route'; \
+  ip route show 2>&1 | sed 's/^/| /'; \
+  echo '| ci-dbg: /etc/network/interfaces'; \
+  cat /etc/network/interfaces 2>&1 | sed 's/^/| /'; \
+  echo '| ci-dbg: networking.service drop-ins'; \
+  ls -la /usr/lib/systemd/system/networking.service.d/ 2>&1 | sed 's/^/| /'; \
+  echo '| ci-dbg: ifupdown2-autoconf script'; \
+  ls -la /usr/sbin/ifupdown2-autoconf 2>&1 | sed 's/^/| /'; \
+  echo '| ci-dbg: systemctl cat networking.service'; \
+  systemctl cat networking.service 2>&1 | head -20 | sed 's/^/| /'; \
+  echo '| ci-dbg: /root/.ssh/authorized_keys'; \
+  ls -la /root/.ssh/ 2>&1 | sed 's/^/| /'; \
+  cat /root/.ssh/authorized_keys 2>&1 | head -3 | sed 's/^/| /'; \
+  echo '| ci-dbg: sshd status'; \
+  systemctl status ssh.service 2>&1 | tail -8 | sed 's/^/| /'"
 UNIT
     ln -sf "../ci-ssh-debug.service" \
       "${_deploy_etc}/systemd/system/multi-user.target.wants/ci-ssh-debug.service"
