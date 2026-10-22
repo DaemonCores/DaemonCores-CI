@@ -172,6 +172,23 @@ echo "=== ESP contents (${T}/boot/efi) ==="
 find "${T}/boot/efi" | sort
 echo "=== end ESP ==="
 
+# Diagnostic: probe the fstab and var layout that bootc generated, so we can
+# confirm whether the btrfs var subvol gets an fstab entry (required for it to
+# be mounted at /var at boot instead of the stateroot var inside the ro root
+# subvol).
+echo "=== generated fstab ==="
+find "${T}/ostree/deploy" -name fstab 2>/dev/null | while read -r _f; do
+  echo "--- $_f ---"
+  cat "$_f"
+done
+echo "=== end generated fstab ==="
+echo "=== stateroot var vs btrfs var subvol ==="
+echo "--- ${T}/ostree/deploy/default/var (stateroot var, inside root subvol) ---"
+ls -la "${T}/ostree/deploy/default/var" 2>/dev/null || echo "(not found)"
+echo "--- ${T}/var (btrfs var subvol mount) ---"
+ls -la "${T}/var" 2>/dev/null || echo "(not found)"
+echo "=== end var layout ==="
+
 # Stage a second identical deployment so CI rollback tests have two deployment
 # slots to work with. bootc install creates exactly one deployment; deploying
 # the same commit again gives the VM a rollback target without network access.
@@ -233,11 +250,27 @@ if [ -n "${deployed_dir}" ]; then
     mkdir -p "${_deploy_etc}/systemd/system/multi-user.target.wants"
     cat > "${_deploy_etc}/systemd/system/ci-ssh-debug.service" <<'UNIT'
 [Unit]
-Description=CI diagnostic: dump /etc writability and sshd-keygen condition state
+Description=CI diagnostic: dump /etc and /var writability, mount layout, sshd-keygen state
 After=ostree-remount.service
 [Service]
 Type=oneshot
-ExecStart=/bin/sh -c "echo '| ci-ssh-dbg: ls /etc/ssh'; ls -la /etc/ssh 2>&1 | sed 's/^/| /'; echo '| ci-ssh-dbg: findmnt /etc /etc/ssh /'; findmnt /etc /etc/ssh / 2>&1 | sed 's/^/| /'; echo '| ci-ssh-dbg: touch probe'; touch /etc/ssh/.ci-rw-probe 2>&1 && echo '| ci-ssh-dbg: RW OK at this point' && rm -f /etc/ssh/.ci-rw-probe; echo '| ci-ssh-dbg: systemd-analyze condition'; systemd-analyze condition 'ConditionPathIsReadWrite=/etc/ssh' 2>&1 | sed 's/^/| /'; echo '| ci-ssh-dbg: sshd-keygen unit as shipped'; systemctl cat sshd-keygen.service 2>&1 | sed 's/^/| /'"
+ExecStart=/bin/sh -c "\
+  echo '| ci-dbg: proc/mounts'; \
+  cat /proc/mounts 2>&1 | sed 's/^/| /'; \
+  echo '| ci-dbg: findmnt /var / /etc'; \
+  findmnt /var / /etc 2>&1 | sed 's/^/| /'; \
+  echo '| ci-dbg: ls /sysroot/ostree/deploy/default/var'; \
+  ls -la /sysroot/ostree/deploy/default/var 2>&1 | sed 's/^/| /'; \
+  echo '| ci-dbg: ls /var'; \
+  ls -la /var 2>&1 | sed 's/^/| /'; \
+  echo '| ci-dbg: ls /etc/ssh'; \
+  ls -la /etc/ssh 2>&1 | sed 's/^/| /'; \
+  echo '| ci-dbg: touch /etc/ssh probe'; \
+  touch /etc/ssh/.ci-rw-probe 2>&1 && echo '| ci-dbg: /etc/ssh RW OK' && rm -f /etc/ssh/.ci-rw-probe || echo '| ci-dbg: /etc/ssh NOT writable'; \
+  echo '| ci-dbg: touch /var probe'; \
+  touch /var/.ci-rw-probe 2>&1 && echo '| ci-dbg: /var RW OK' && rm -f /var/.ci-rw-probe || echo '| ci-dbg: /var NOT writable'; \
+  echo '| ci-dbg: sshd-keygen unit'; \
+  systemctl cat sshd-keygen.service 2>&1 | tail -12 | sed 's/^/| /'"
 UNIT
     ln -sf "../ci-ssh-debug.service" \
       "${_deploy_etc}/systemd/system/multi-user.target.wants/ci-ssh-debug.service"
