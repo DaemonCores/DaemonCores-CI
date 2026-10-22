@@ -323,8 +323,23 @@ wait_ssh() {
     return 2
   fi
   echo "  … single SSH attempt after grace period:"
-  sudo tail -n 15 "${SERIAL}" 2>/dev/null | sed 's/^/    | /' || true
-  ssh "${SSH_OPTS[@]}" root@localhost true 2>/dev/null && return 0
+  sudo tail -n 100 "${SERIAL}" 2>/dev/null | sed 's/^/    | /' || true
+  # TCP probe first — distinguishes "port closed" from "auth failure".
+  if nc -z -w 3 localhost "${SSH_PORT}" 2>/dev/null; then
+    echo "  … port ${SSH_PORT} open"
+  else
+    echo "  … port ${SSH_PORT} CLOSED (no TCP connection)"
+    return 1
+  fi
+  local _ssh_log
+  _ssh_log=$(mktemp)
+  if ssh "${SSH_OPTS[@]}" -v root@localhost true >"${_ssh_log}" 2>&1; then
+    rm -f "${_ssh_log}"
+    return 0
+  fi
+  echo "  … SSH failed — verbose output:"
+  sed 's/^/    | /' "${_ssh_log}" || true
+  rm -f "${_ssh_log}"
   return 1
 }
 
