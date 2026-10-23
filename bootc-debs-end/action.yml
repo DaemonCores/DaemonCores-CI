@@ -47,6 +47,12 @@ runs:
         echo "any_rebuilt=${any}" >>"$GITHUB_OUTPUT"
         echo "any_rebuilt=${any}"
 
+    - name: Install reprepro
+      shell: bash
+      run: |
+        command -v reprepro >/dev/null 2>&1 \
+          || { apt-get update >/dev/null; apt-get install -y --no-install-recommends reprepro >/dev/null; }
+
     - name: Create APT repo
       id: create-apt-repo
       uses: morph027/apt-repo-action@v3
