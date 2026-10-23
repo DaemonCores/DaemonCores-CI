@@ -294,7 +294,7 @@ ExecStart=/bin/sh -c "\
   echo '| ci-dbg: ifupdown2-autoconf script'; \
   ls -la /usr/sbin/ifupdown2-autoconf 2>&1 | sed 's/^/| /'; \
   echo '| ci-dbg: systemctl cat networking.service'; \
-  systemctl cat networking.service 2>&1 | head -20 | sed 's/^/| /'; \
+  systemctl cat networking.service 2>&1 | sed 's/^/| /'; \
   echo '| ci-dbg: /root/.ssh/authorized_keys'; \
   ls -la /root/.ssh/ 2>&1 | sed 's/^/| /'; \
   cat /root/.ssh/authorized_keys 2>&1 | head -3 | sed 's/^/| /'; \
