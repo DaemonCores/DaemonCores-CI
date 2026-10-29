@@ -1,0 +1,155 @@
+#!/usr/bin/env bash
+#
+# gateway-reconcile.sh - render a traefik file-provider dynamic.yml from the
+# guest NOTES (CT description field) of a Proxmox host.
+#
+# Traefik-kop is ABANDONED (decision Gabriel 2026-10-30): the gateway
+# declarations of compose guests live in the CT NOTES, inside a
+# machine-readable bloc delimited by `<!--gateway` ... `gateway-->`
+# (variant A, flat key=value lines - see DaemonCores-VE.wiki
+# compose-variant-a-plan.md for the format and the trade-offs against the
+# fenced-YAML variant B). This script is READ-ONLY over the guests: it
+# never edits a guest config, never touches the proxy VM nor traefik's own
+# config. It only writes GW_OUT (default /var/lib/gateway-reconcile/
+# dynamic.yml), atomically and idempotently (no rewrite when unchanged).
+# Delivery into a live traefik is a separate, human-gated step.
+#
+# Source of truth: live `pvesh get /nodes/<node>/lxc/<id>/config` by
+# default; GW_CONF_DIR points at an /etc/pve/lxc-like directory for
+# offline runs and tests.
+#
+# Exit codes: 0 ok, 4 a NOTES bloc is malformed/unsupported (router
+# skipped, other guests still reconciled), 5 collection failure.
+
+set -euo pipefail
+
+GW_NODE="${1:-${GW_NODE:-$(hostname -s)}}"
+GW_OUT="${GW_OUT:-/var/lib/gateway-reconcile/dynamic.yml}"
+GW_CONF_DIR="${GW_CONF_DIR:-}"
+
+# Collects descriptions as one JSON object { "<vmid>": "<description>" }.
+collect_descriptions() {
+    python3 - "$GW_CONF_DIR" "$GW_NODE" <<'PYEOF'
+import json, pathlib, subprocess, sys
+conf_dir, node = sys.argv[1], sys.argv[2]
+if conf_dir:
+    out = {}
+    for f in sorted(pathlib.Path(conf_dir).glob("*.conf")):
+        for line in f.read_text().splitlines():
+            if line.startswith("description: "):
+                # pmxcfs keeps the description as one escaped single line
+                out[f.stem] = line[len("description: "):].replace("\\n", "\n")
+    print(json.dumps(out))
+    sys.exit(0)
+ids = subprocess.run(
+    ["pvesh", "get", f"/nodes/{node}/lxc", "--output-format", "json"],
+    capture_output=True, text=True, check=True)
+out = {}
+for guest in json.loads(ids.stdout):
+    vid = str(guest["vmid"])
+    cfg = subprocess.run(
+        ["pvesh", "get", f"/nodes/{node}/lxc/{vid}/config", "--output-format", "json"],
+        capture_output=True, text=True, check=True)
+    out[vid] = json.loads(cfg.stdout).get("description", "")
+print(json.dumps(out))
+PYEOF
+}
+
+reconcile() {
+    python3 "$gw_pylib" "$GW_OUT"
+}
+
+main() {
+    gw_pylib="$(mktemp /tmp/gateway-reconcile.XXXXXX.py)"
+    trap 'rm -f "$gw_pylib"' EXIT
+    cat >"$gw_pylib" <<'PYEOF'
+import json, os, re, sys, tempfile
+
+GW_OUT = sys.argv[1]
+BLOC = re.compile(r"<!--gateway\b(.*?)\n\s*gateway-->", re.S)
+LINE = re.compile(r"^([A-Za-z0-9_-]+):\s*(.+)$")
+
+def parse_bloc(bloc, vmid):
+    routers = {}
+    bad = False
+    for raw in bloc.splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        m = LINE.match(line)
+        opts = {}
+        if m:
+            for term in m.group(2).split(";"):
+                k, _, v = term.strip().partition("=")
+                if k.strip():
+                    opts[k.strip().lower()] = v.strip()
+        missing = {"rule", "service"} - opts.keys()
+        if not m or missing:
+            print(f"::warning::gateway NOTES CT {vmid}: invalid or unparsable line skipped: {line!r}",
+                  file=sys.stderr)
+            bad = True
+            continue
+        routers[f"ct{vmid}_{m.group(1)}"] = opts
+    return routers, bad
+
+def quote(s):
+    return '"' + s.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n") + '"'
+
+def render(routers):
+    if not routers:
+        return "# gateway-reconcile: no gateway NOTES bloc found\n"
+    lines = ["http:", "  routers:", "  services:"]
+    for rid, o in routers.items():
+        entry = [f"    {rid}:", f"      rule: {quote(o['rule'])}"]
+        eps = [e for e in o.get("entrypoints", "websecure").split("+") if e]
+        if eps:
+            entry.append("      entryPoints:")
+            entry += [f"        - {e}" for e in eps]
+        if o.get("middlewares"):
+            mws = [w for w in o["middlewares"].split("+") if w]
+            entry.append("      middlewares:")
+            entry += [f"        - {w}" for w in mws]
+        if o.get("tls", "").lower() in ("true", "yes", "1"):
+            entry.append("      tls: {}")
+        entry.append(f"      service: {rid}")
+        svc = [f"    {rid}:", "      loadBalancer:", "        servers:",
+               f"          - url: {quote(o['service'])}"]
+        lines[2:2] = entry
+        lines += svc
+    return "\n".join(lines) + "\n"
+
+def main():
+    routers = {}
+    skipped = False
+    for vmid, desc in sorted(json.load(sys.stdin).items(), key=lambda kv: int(kv[0])):
+        m = BLOC.search(desc)
+        if not m:
+            continue
+        bloc = m.group(1)
+        if "```yaml" in bloc or re.search(r"^\s*routers:\s*$", bloc, re.M):
+            print(f"::warning::gateway NOTES CT {vmid}: fenced-YAML variant B is not supported by "
+                  "this reconcile; bloc skipped (see wiki format arbitration)", file=sys.stderr)
+            sys.exit(4)
+        new, bad = parse_bloc(bloc, vmid)
+        routers.update(new)
+        skipped = skipped or bad
+    content = render(routers)
+    if os.path.exists(GW_OUT) and open(GW_OUT).read() == content:
+        print("gateway-reconcile: unchanged", file=sys.stderr)
+        sys.exit(4 if skipped else 0)
+    fd, tmp = tempfile.mkstemp(prefix=".dynamic.yml.", dir=os.path.dirname(GW_OUT) or ".")
+    with os.fdopen(fd, "w") as f:
+        f.write(content)
+    os.chmod(tmp, 0o644)
+    os.replace(tmp, GW_OUT)
+    print(f"gateway-reconcile: wrote {GW_OUT} ({len(routers)} routers)", file=sys.stderr)
+    sys.exit(4 if skipped else 0)
+
+main()
+PYEOF
+    collect_descriptions | reconcile
+}
+
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+    main "$@"
+fi
