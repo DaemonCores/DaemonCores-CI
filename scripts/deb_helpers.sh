@@ -35,7 +35,9 @@ deb_overlay_apply() {
   while read -r p; do
     p="${p#./}"
     [ -n "${p}" ] || continue
-    patch --quiet --dry-run --forward -d "${tdir}/tree-dry" -p1 \
+    # GNU patch otherwise leaves a 0-byte file in the tree when the patch
+    # deletes its content (--remove-empty-files makes the deletion real).
+    patch --quiet --dry-run --forward --remove-empty-files -d "${tdir}/tree-dry" -p1 \
       <"${tdir}/overlay/${p}" \
       || { echo "ERROR: ${p} fails dry-run on ${tree} — overlay drift." >&2; rm -rf "${tdir}"; return 3; }
   done <"${tdir}/patchlist"
@@ -44,7 +46,7 @@ deb_overlay_apply() {
   while read -r p; do
     p="${p#./}"
     [ -n "${p}" ] || continue
-    patch --quiet --forward -d "${tree}" -p1 \
+    patch --quiet --forward --remove-empty-files -d "${tree}" -p1 \
       <"${tdir}/overlay/${p}" \
       || { echo "ERROR: ${p} failed to apply (unexpected: dry-run passed)." >&2; rm -rf "${tdir}"; return 3; }
   done <"${tdir}/patchlist"
@@ -98,7 +100,13 @@ deb_overlay_tree() {
   mkdir -p "$O"
   dpkg-deb -R "/tmp/${pkg}_*.deb" "$O"
   cp -r "${SAVE_PWD}/workflows/bootc-debs-builder/${tree:?}"/* "$O/"
-  for f in "$@"; do chmod 0755 "$O/${f:?}"; done
+  for f in "$@"; do
+    [ -e "$O/${f:?}" ] \
+      || { echo "ERROR: ${pkg} tree entry ${f} missing in the overlay" >&2; exit 1; }
+    test -x "$O/${f}" \
+      || { echo "ERROR: ${pkg} ${f} not executable" >&2; exit 1; }
+    chmod 0755 "$O/${f}"
+  done
 
   local ORIG_VER ARCH
   ORIG_VER=$(dpkg-deb -f "/tmp/${pkg}_*.deb" Version)
@@ -109,6 +117,9 @@ deb_overlay_tree() {
     | sed "s|$O/||" \
     > "$O/DEBIAN/md5sums"
   sed -i "s/^Version: .*/Version: 1:${ORIG_VER}${suffix}/" "$O/DEBIAN/control"
+  # Re-verify: a control without a Version: line made the sed a silent no-op.
+  grep -qF "Version: 1:${ORIG_VER}${suffix}" "$O/DEBIAN/control" \
+    || { echo "ERROR: ${pkg} rewritten Version missing/wrong" >&2; exit 1; }
   dpkg-deb --build "$O" \
     "/debs/${pkg}_${ORIG_VER}${suffix}_${ARCH}.deb"
 }
