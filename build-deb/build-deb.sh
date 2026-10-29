@@ -226,17 +226,15 @@ run_build() {
   # Shared check scripts of DaemonCores-CI, for the build scripts to call.
   CI_SCRIPTS="$(cd "$(dirname "${BASH_SOURCE[0]}")/../scripts" && pwd)"
   export CI_SCRIPTS
-  # The deb helper functions (deb_overlay_apply / deb_repack /
-  # deb_overlay_tree / deb_custom) are imported HERE, once, so the
-  # packages.yml build blocks stay free of helper plumbing.
-  . "${CI_SCRIPTS}/deb_helpers.sh"
   # Explicit failure propagation: when this function is evaluated in a context
   # where errexit is suppressed (a command substitution in an `if`/`||`), a
   # failing build must still return non-zero rather than falling through to the
   # deb listing and reporting success with no artifact.
   if ! (
     cd "${GITHUB_WORKSPACE:-.}" || exit 1
-    bash --noprofile --norc -eo pipefail -c "${BUILD}"
+    bash --noprofile --norc -eo pipefail -c '. "${CI_SCRIPTS}/deb_helpers.sh"
+       set -euo pipefail
+       eval "${BUILD}"' 
   ) >&2; then
     return 1
   fi
