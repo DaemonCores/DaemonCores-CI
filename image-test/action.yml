@@ -25,6 +25,10 @@ inputs:
     description: 'Target architecture: amd64 or arm64. Selects the QEMU binary, UEFI firmware, and filters arch-specific tests.'
     required: false
     default: amd64
+  ram-idle-max-mb:
+    description: 'Idle RAM budget in MiB for the boot-fresh gate: the image boot fails when MemTotal-MemAvailable exceeds it at idle. 0 disables the gate.'
+    required: false
+    default: '15'
 
 runs:
   using: composite
@@ -36,4 +40,5 @@ runs:
         MEM: ${{ inputs.memory }}
         VCPUS: ${{ inputs.vcpus }}
         ARCH: ${{ inputs.arch }}
+        RAM_IDLE_MAX_MB: ${{ inputs.ram-idle-max-mb }}
       run: bash "${GITHUB_ACTION_PATH}/image-test.sh"

@@ -148,30 +148,80 @@ class TestWiring:
             in text
 
 
-class TestNvidiaImageTwin:
-    """The ``-nvidia`` image twin follows the -nosign twin pattern."""
+class TestGpuUsageTwins:
+    """The ia/gaming usage twins follow the -nosign twin pattern."""
+
+    def _text(self) -> str:
+        """The current bootc-build.yml workflow text.
+
+        Returns:
+            The raw file text.
+        """
+        return (WORKFLOWS / "bootc-build.yml").read_text()
 
     def test_discover_filters_on_the_label_and_the_input(self) -> None:
-        """The discover step gates the twin on the label plus the input."""
-        text = (WORKFLOWS / 'bootc-build.yml').read_text()
-        assert ('if [[ "${GPU_DRIVER_IMAGES:-}" == "true" ]] && '
-                'grep -qE \'^[[:space:]]*LABEL[[:space:]]+org\\.daemoncores'
-                '\\.nvidia-image\' "$name"') in text
-        assert 'GPU_DRIVER_IMAGES: ${{ inputs.gpu_driver_images }}' in text
+        """The ia twin is gated on its label plus the input, gaming not."""
+        text = self._text()
+        # Both labels are grepped in the discover step.
+        assert "gpu-ia-image" in text
+        assert "gpu-gaming-image" in text
+        # Only the ia label sits on the input-gated line.
+        gated = [
+            line for line in text.splitlines()
+            if "gpu-ia-image" in line and "grep -qE" in line
+        ]
+        assert len(gated) == 1
+        assert "GPU_DRIVER_IMAGES" in gated[0]
+        ungated = [
+            line for line in text.splitlines()
+            if "gpu-gaming-image" in line and "grep -qE" in line
+        ]
+        assert len(ungated) == 1
+        assert "GPU_DRIVER_IMAGES" not in ungated[0]
+        assert "GPU_DRIVER_IMAGES: ${{ inputs.gpu_driver_images }}" in text
 
-    def test_matrix_and_manifest_carry_the_twin(self) -> None:
-        """Each matrix entry flags nvidia; the manifest gains -nvidia."""
-        text = (WORKFLOWS / 'bootc-build.yml').read_text()
-        assert 'twin_suffix: $ts, nvidia: $nv}]' in text
-        assert '--arg tag "${tag}-nvidia"' in text
+    def test_ia_twin_is_amd64_only(self) -> None:
+        """The ia rows stay on amd64: linux-modules-nvidia is amd64-only."""
+        text = self._text()
+        # The ia flag is per-arch (the gaming one is not).
+        nv = [line for line in text.splitlines() if "--argjson nv" in line]
+        gaming = [
+            line for line in text.splitlines() if "--argjson gmg" in line
+        ]
+        assert len(nv) == len(gaming) == 1
+        assert '$arch" == amd64' in nv[0] and '[[ ' in nv[0]
+        # The gaming flag is set once per Containerfile, not per arch.
+        assert "--argjson gmg \"$has_gaming\"" in gaming[0]
+        # The ia manifest row carries amd64 only, gaming both arches.
+        lines = text.splitlines()
+        ia_rows = [
+            lines[i + 1] for i, line in enumerate(lines)
+            if "--arg tag " in line and "${tag}-ia" in line
+        ]
+        gaming_rows = [
+            lines[i + 1] for i, line in enumerate(lines)
+            if "--arg tag " in line and "${tag}-gaming" in line
+        ]
+        assert len(ia_rows) == len(gaming_rows) == 1
+        assert "[\"amd64\"]" in ia_rows[0]
+        assert "[\"amd64\", \"arm64\"]" in gaming_rows[0]
 
-    def test_build_passes_the_extra_packages_only_to_the_twin(self) -> None:
-        """The build-arg is fed by the caller variable, default nvidia pkgs."""
-        text = (WORKFLOWS / 'bootc-build.yml').read_text()
-        assert "${{ vars.NVIDIA_EXTRA_PKGS || 'nvidia-driver " \
-               "nvidia-kernel-dkms' }}" in text
-        assert 'GPU_EXTRA_PKGS=$( [[ "$tag" == *-nvidia ]]' in text
-        assert 'build_one "${CF_TAG}-nvidia" "${KERNEL_SUFFIX}" ' \
-               '"${NVIDIA_HASH}"' in text
-        # A distinct content salt keeps the twin off the primary's hash.
-        assert "nvidia_hash=$(printf '%s\\nnvidia\\n' \"${hash}\"" in text
+    def test_matrix_and_manifest_carry_the_twins(self) -> None:
+        """Each matrix entry flags the twins; the manifest gains -ia/-gaming."""
+        text = self._text()
+        assert "twin_suffix: $ts, nvidia: $nv, gaming: $gmg}]" in text
+        assert "--arg tag \"${tag}-gaming\"" in text
+        assert "--arg tag \"${tag}-ia\"" in text
+
+    def test_build_passes_the_gpu_packages_only_to_the_twins(self) -> None:
+        """The build-args feed the twins; the public build keeps both empty."""
+        text = self._text()
+        assert "vars.NVIDIA_IA_PKGS ||" in text
+        assert 'GPU_IA_PKGS=$( [[ "$tag" == *-ia ]]' in text
+        assert 'GPU_GAMING_PKGS=$( [[ "$tag" == *-gaming ]]' in text
+        assert 'build_one "${CF_TAG}-gaming"' in text
+        assert '"${GAMING_HASH}"' in text
+        assert 'build_one "${CF_TAG}-ia"' in text
+        assert '"${IA_HASH}"' in text
+        assert "ia_hash=$(printf" in text and "nia" in text
+        assert "gaming_hash=$(printf" in text and "ngaming" in text

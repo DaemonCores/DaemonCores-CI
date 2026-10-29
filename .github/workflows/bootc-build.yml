@@ -34,11 +34,11 @@ on:
         default: false
       gpu_driver_images:
         description: >-
-          Also build the `-nvidia` twin (tag `<tag>-nvidia`) of every
-          Containerfile carrying `LABEL org.daemoncores.nvidia-image`: the
-          same image plus the NVIDIA proprietary user-space (GPU_EXTRA_PKGS,
-          EULA accepted at install time). Without this input the twin is
-          neither built nor pushed; a push never sets it.
+          Also build the `-ia` twin (tag `<tag>-ia`) of every Containerfile
+          carrying `LABEL org.daemoncores.gpu-ia-image`: the same image plus
+          the NVIDIA compute layer (the linux-modules-nvidia plan deb +
+          GPU_IA_PKGS, EULA accepted at install time). Without this input
+          the twin is neither built nor pushed; a push never sets it.
         type: boolean
         required: false
         default: false
@@ -121,14 +121,22 @@ jobs:
             if [[ "${NOSIGN_IMAGES}" == "true" ]] && grep -qE '^[[:space:]]*LABEL[[:space:]]+org\.daemoncores\.unsigned-kernel-image' "$name"; then
               has_twin=true
             fi
-            # The -nvidia twin (opt-in): the same layers plus the NVIDIA
-            # proprietary user-space (GPU_EXTRA_PKGS build-arg, EULA enforced
-            # at install time by the bootc-installer). It leaves the matrix
-            # unless the caller enables gpu_driver_images, so a plain push
-            # never builds or publishes an EULA-restricted artefact.
-            has_nvidia=false
-            if [[ "${GPU_DRIVER_IMAGES:-}" == "true" ]] && grep -qE '^[[:space:]]*LABEL[[:space:]]+org\.daemoncores\.nvidia-image' "$name"; then
-              has_nvidia=true
+            # The GPU usage twins (wiki: GPU-Support.md). The -ia twin
+            # (opt-in, EULA): the same layers plus linux-modules-nvidia (the
+            # plan deb built in CI against the same kernel) and the NVIDIA
+            # user-space (GPU_IA_PKGS, EULA enforced at install time by the
+            # bootc-installer). It leaves the matrix unless the caller
+            # enables gpu_driver_images, so a plain push never builds or
+            # publishes an EULA-restricted artefact. The -gaming twin is
+            # PUBLIC (display stack, no EULA): always planned when its label
+            # is present.
+            has_ia=false
+            if [[ "${GPU_DRIVER_IMAGES:-}" == "true" ]] && grep -qE '^[[:space:]]*LABEL[[:space:]]+org\.daemoncores\.gpu-ia-image' "$name"; then
+              has_ia=true
+            fi
+            has_gaming=false
+            if grep -qE '^[[:space:]]*LABEL[[:space:]]+org\.daemoncores\.gpu-gaming-image' "$name"; then
+              has_gaming=true
             fi
             twin_arches='[]'
             for arch in amd64 arm64; do
@@ -141,11 +149,14 @@ jobs:
                 twin_suffix="${suffix}-nosign"
                 twin_arches=$(printf '%s' "$twin_arches" | jq -c --arg a "$arch" '. += [$a]')
               fi
+                # linux-modules-nvidia is an amd64-only plan deb (arm64 has
+                # no shipped NVIDIA compute target): the ia twin never enters
+                # the arm64 rows of the matrix.
               matrix=$(printf '%s' "$matrix" | jq -c \
                 --arg file "$name" --arg tag "$tag" --arg arch "$arch" \
                 --arg ks "$suffix" --arg ts "$twin_suffix" \
-                --argjson nv "$has_nvidia" \
-                '. += [{file: $file, tag: $tag, arch: $arch, kernel_suffix: $ks, twin_suffix: $ts, nvidia: $nv}]')
+                --argjson nv "$( [[ "$arch" == amd64 ]] && printf '%s' "$has_ia" || printf false )" --argjson gmg "$has_gaming" \
+                '. += [{file: $file, tag: $tag, arch: $arch, kernel_suffix: $ks, twin_suffix: $ts, nvidia: $nv, gaming: $gmg}]')
             done
             manifest_matrix=$(printf '%s' "$manifest_matrix" | jq -c \
               --arg tag "$tag" \
@@ -160,10 +171,15 @@ jobs:
                 --arg tag "${tag}-4k" \
                 '. += [{tag: $tag, arches: ["arm64"]}]')
             fi
-            if [[ "$has_nvidia" == "true" ]]; then
+            if [[ "$has_gaming" == "true" ]]; then
               manifest_matrix=$(printf '%s' "$manifest_matrix" | jq -c \
-                --arg tag "${tag}-nvidia" \
+                --arg tag "${tag}-gaming" \
                 '. += [{tag: $tag, arches: ["amd64", "arm64"]}]')
+            fi
+            if [[ "$has_ia" == "true" ]]; then
+              manifest_matrix=$(printf '%s' "$manifest_matrix" | jq -c \
+                --arg tag "${tag}-ia" \
+                '. += [{tag: $tag, arches: ["amd64"]}]')
             fi
             if [[ "$twin_arches" != '[]' ]]; then
               manifest_matrix=$(printf '%s' "$manifest_matrix" | jq -c \
@@ -242,6 +258,7 @@ jobs:
           ARCH: ${{ matrix.entry.arch }}
           TWIN_SUFFIX: ${{ matrix.entry.twin_suffix }}
           NVIDIA: ${{ matrix.entry.nvidia }}
+          GAMING: ${{ matrix.entry.gaming }}
         run: |
           set -euo pipefail
           echo "IMAGE=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_ENV"
@@ -255,10 +272,15 @@ jobs:
             echo "twin_tag=${CF_TAG}-nosign" >>"$GITHUB_OUTPUT"
             echo "twin_primary=${CF_TAG}-nosign_${ARCH}" >>"$GITHUB_OUTPUT"
           fi
-          # The -nvidia twin of this image, when the discoverer planned it.
+          # The -ia twin of this image, when the discoverer planned it.
           if [[ "${NVIDIA}" == "true" ]]; then
-            echo "nvidia_tag=${CF_TAG}-nvidia" >>"$GITHUB_OUTPUT"
-            echo "nvidia_primary=${CF_TAG}-nvidia_${ARCH}" >>"$GITHUB_OUTPUT"
+            echo "ia_tag=${CF_TAG}-ia" >>"$GITHUB_OUTPUT"
+            echo "ia_primary=${CF_TAG}-ia_${ARCH}" >>"$GITHUB_OUTPUT"
+          fi
+          # The -gaming twin, when the discoverer planned it.
+          if [[ "${GAMING}" == "true" ]]; then
+            echo "gaming_tag=${CF_TAG}-gaming" >>"$GITHUB_OUTPUT"
+            echo "gaming_primary=${CF_TAG}-gaming_${ARCH}" >>"$GITHUB_OUTPUT"
           fi
           # Canonical combo = amd64. Only this one keeps the
           # historical tags (:latest / :<sha> / :monthly-*) for retrocompat
@@ -329,11 +351,13 @@ jobs:
           # The twin differs from its primary image by the kernel only.
           twin_hash=$(printf '%s\nnosign\n' "${hash}" | sha256sum | cut -d' ' -f1)
           echo "twin_hash=${twin_hash}" >>"$GITHUB_OUTPUT"
-          # The -nvidia twin differs from its primary image by the GPU layer
-          # only (the GPU_EXTRA_PKGS build-arg); the layer itself is opaque,
-          # so its identity is the extra "nvidia" salt.
-          nvidia_hash=$(printf '%s\nnvidia\n' "${hash}" | sha256sum | cut -d' ' -f1)
-          echo "nvidia_hash=${nvidia_hash}" >>"$GITHUB_OUTPUT"
+          # The GPU usage twins differ from their primary image by the GPU
+          # layer only (the GPU_IA_PKGS / GPU_GAMING_PKGS build-args); the
+          # layer itself is opaque, so their identity is the per-variant salt.
+          ia_hash=$(printf '%s\nia\n' "${hash}" | sha256sum | cut -d' ' -f1)
+          echo "ia_hash=${ia_hash}" >>"$GITHUB_OUTPUT"
+          gaming_hash=$(printf '%s\ngaming\n' "${hash}" | sha256sum | cut -d' ' -f1)
+          echo "gaming_hash=${gaming_hash}" >>"$GITHUB_OUTPUT"
           # Content-hash label of the currently published per-arch image.
           prior=$(sudo skopeo inspect --override-arch "${ARCH}" \
             --format '{{ index .Labels "org.daemoncores.content-hash" }}' \
@@ -416,8 +440,11 @@ jobs:
           KERNEL_SUFFIX: ${{ matrix.entry.kernel_suffix }}
           TWIN_SUFFIX: ${{ matrix.entry.twin_suffix }}
           NVIDIA: ${{ matrix.entry.nvidia }}
-          NVIDIA_HASH: ${{ steps.chash.outputs.nvidia_hash }}
-          GPU_EXTRA_PKGS: ${{ vars.NVIDIA_EXTRA_PKGS || 'nvidia-driver nvidia-kernel-dkms' }}
+          GAMING: ${{ matrix.entry.gaming }}
+          IA_HASH: ${{ steps.chash.outputs.ia_hash }}
+          GAMING_HASH: ${{ steps.chash.outputs.gaming_hash }}
+          GPU_IA_PKGS: ${{ vars.NVIDIA_IA_PKGS || 'nvidia-driver nvidia-settings firmware-misc-nonfree' }}
+          GPU_GAMING_PKGS: ${{ vars.GPU_GAMING_PKGS || 'mesa-vulkan-drivers firmware-amd-graphics firmware-misc-nonfree firmware-nvidia-graphics firmware-intel-graphics' }}
           CANONICAL: ${{ steps.tags.outputs.canonical }}
           COSIGN_PUBLIC_KEY: ${{ secrets.COSIGN_PUBLIC_KEY }}
           HASH: ${{ steps.chash.outputs.hash }}
@@ -523,9 +550,11 @@ jobs:
               --build-arg "BOOT_PROFILE=${profile}"
               --build-arg "FIRMWARE_PKGS=${firmware_pkgs}"
               --build-arg "APT_HOLD_PKG=${apt_hold_pkg}"
-              # The -nvidia twin only: the EULA-restricted packages listed
-              # by the caller; the public build keeps the arg empty.
-              --build-arg "GPU_EXTRA_PKGS=$( [[ "$tag" == *-nvidia ]] && printf '%s' "${GPU_EXTRA_PKGS:-}" || printf '' )"
+              # The GPU usage twins only: ia (EULA-restricted compute) and
+              # gaming (public display stack) carry their package lists; the
+              # public build keeps both args empty.
+              --build-arg "GPU_IA_PKGS=$( [[ "$tag" == *-ia ]] && printf '%s' "${GPU_IA_PKGS:-}" || printf '' )"
+              --build-arg "GPU_GAMING_PKGS=$( [[ "$tag" == *-gaming ]] && printf '%s' "${GPU_GAMING_PKGS:-}" || printf '' )"
               --build-arg "COSIGN_PUBKEY_B64=$(printf '%s' "${COSIGN_PUBLIC_KEY}" | base64 -w0)"
               --build-arg "IMAGE_REF=${IMAGE,,}"
               --label "org.daemoncores.content-hash=${hash}"
@@ -555,10 +584,13 @@ jobs:
           if [[ -n "${TWIN_SUFFIX}" ]]; then
             build_one "${CF_TAG}-nosign" "${TWIN_SUFFIX}" "${TWIN_HASH}"
           fi
-          # The -nvidia twin reuses the same layers: only the GPU layer and
-          # the ones after it are rebuilt.
+          # The GPU usage twins reuse the same layers: only the GPU layer
+          # and the ones after it are rebuilt.
+          if [[ "${GAMING}" == "true" ]]; then
+            build_one "${CF_TAG}-gaming" "${KERNEL_SUFFIX}" "${GAMING_HASH}"
+          fi
           if [[ "${NVIDIA}" == "true" ]]; then
-            build_one "${CF_TAG}-nvidia" "${KERNEL_SUFFIX}" "${NVIDIA_HASH}"
+            build_one "${CF_TAG}-ia" "${KERNEL_SUFFIX}" "${IA_HASH}"
           fi
 
       - name: Check runtime deps

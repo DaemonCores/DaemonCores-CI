@@ -11,9 +11,13 @@
 #   VCPUS       VM vCPUs (default 2)
 #   ARCH        target architecture: amd64 (default) or arm64
 #   RUNNER_TEMP scratch dir provided by Actions
+#   RAM_IDLE_MAX_MB  idle RAM budget in MiB: the boot-fresh measurement must
+#               stay under it or the run fails (default 15; Gabriel 30/10:
+#               the gate holds the idle footprint at 10-15 MiB).
 set -euo pipefail
 
 ARCH="${ARCH:-amd64}"
+RAM_IDLE_MAX_MB="${RAM_IDLE_MAX_MB:-15}"
 # Variant derived from the image tag: tags containing "minimal" map to "minimal";
 # everything else (latest, gallium, …) maps to "main". Used by run_tests to skip
 # tests whose `variant:` field does not match the image under test.
@@ -364,6 +368,46 @@ dump_serial() {
 }
 
 #######################################
+# Idle RAM budget gate, measured boot-fresh: the VM just settled (wait_boot)
+# and NOTHING else ran yet, so MemTotal - MemAvailable IS the idle
+# footprint. Fail (blocking the image push) when it exceeds the budget —
+# the regression to catch is a service creeping into the boot path, visible
+# as extra resident memory. The budget comes from RAM_IDLE_MAX_MB (default
+# 15 MiB; Gabriel 30/10: hold the idle footprint at 10-15 MiB).
+# Globals:
+#   SSH_OPTS, RAM_IDLE_MAX_MB
+# Returns:
+#   Exits 1 when the idle footprint is over budget.
+#######################################
+ram_gate() {
+  local readout used
+  # 0 disables the gate (e.g. an image lane still far above the budget).
+  if [ "${RAM_IDLE_MAX_MB}" = "0" ]; then
+    echo "RAM idle gate disabled (RAM_IDLE_MAX_MB=0)"
+    return 0
+  fi
+  # MemTotal (line 1) then MemAvailable (line 2), the fixed order of
+  # /proc/meminfo. The awk program is single-quoted for the REMOTE shell:
+  # $2 is escaped for the LOCAL shell so it only expands on the guest.
+  readout=$(ssh "${SSH_OPTS[@]}" root@localhost \
+    'awk "/^(MemTotal|MemAvailable):/{print \$2}" /proc/meminfo' 2>/dev/null \
+    || true)
+  if [ "$(echo "${readout}" | wc -l)" -lt 2 ]; then
+    echo "::error::ram gate: MemTotal/MemAvailable not read back from the guest"
+    echo "::error::ram gate (raw): ${readout:-<empty>}"
+    exit 1
+  fi
+  # kB → MiB, ceil so a marginal over-budget never rounds its way past the gate.
+  used=$(echo "${readout}" | awk 'NR==1{t=$1} NR==2{a=$1} END{print t-a}')
+  used=$(( (used + 1023) / 1024 ))
+  echo "RAM idle (boot-fresh): ${used} MiB MemTotal-MemAvailable used; budget: ${RAM_IDLE_MAX_MB} MiB"
+  if [ "${used}" -gt "${RAM_IDLE_MAX_MB}" ]; then
+    echo "::error::RAM idle budget exceeded: ${used} MiB at idle over the ${RAM_IDLE_MAX_MB} MiB budget"
+    exit 1
+  fi
+}
+
+#######################################
 # Run every test in TESTS_FILE over SSH. A test passes on exit 0, or when its
 # optional `expect` string is found in the output.
 # Globals:
@@ -536,6 +580,7 @@ main() {
     exit 1
   fi
   wait_boot
+  ram_gate
   run_tests "tests"
 
   # Optional second phase: if the manifest defines reboot_tests, trigger a VM
