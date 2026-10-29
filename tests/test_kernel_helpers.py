@@ -69,7 +69,11 @@ def test_patch_list_from_native_patches_json():
     patches = json.dumps(yaml.safe_load(VE_MANIFEST.read_text())["patches"])
     r = run_helper("kernel_patch_list - amd64 7.0.14 | wc -l", PATCHES_JSON=patches)
     assert r.returncode == 0, r.stderr
-    assert int(r.stdout.strip()) == 22
+    # One line per patch entry: the count belongs to the VE manifest (edited
+    # by its own lane), the test pins the helper's semantics, not VE history.
+    import json as _json
+
+    assert int(r.stdout.strip()) == len(_json.loads(patches))
 
 
 def test_patch_list_json_matches_file():
