@@ -1,0 +1,154 @@
+#!/bin/bash
+#
+# deb_helpers.sh - shared deb-rebuild helpers for the bootc-debs builders
+# (DaemonCores-VE, debian-bootc). Exported to the build via CI_SCRIPTS.
+#
+# The overlay model (Gabriel spec 2026-10-30): package dirs mirror the deb
+# tree — new files are real files at their deb path; modified upstream files
+# are git .patch at the MIRROR PATH of the file they patch; all patches are
+# dry-run first (all-or-nothing); .patch is never shipped.
+#
+# Functions:
+#   deb_overlay_apply <overlay-dir> <extracted-tree>          -> exit 3 on drift
+#   deb_repack <pkg> <ver-suffix> <overlay-dir>               -> full repack
+#   deb_overlay_tree <pkg> <ver-suffix> <tree-dir> [exec...]  -> tree-copy repack
+#   deb_custom <pkg> <ver> <tree-dir>                         -> custom whole tree
+set -euo pipefail
+
+deb_overlay_apply() {
+  local ovl="${1:?}" tree="${2:?}"
+  local tdir cand p tmp
+  tdir=$(mktemp -d "/tmp/overlays.XXXXXX")
+  cp -r "${ovl}" "${tdir}/overlay"
+  # Mirror everything EXCEPT the patch/lock metadata onto the tree copy so a
+  # dry-run sees the exact files the apply will create or replace.
+  (cd "${tdir}/overlay" && find . -name '*.patch' -print) >"${tdir}/patchlist"
+  find "${tdir}/overlay" -name '*.patch' -prune -o \
+       -name 'patches.lock.json' -prune -o -type f -print |
+    while read -r cand; do
+      mkdir -p "${tdir}/tree/$(dirname "${cand}")"
+      cp -a "${tdir}/overlay/${cand#./}" "${tdir}/tree/${cand#./}"
+    done
+  # Copy the pristine tree for the dry run of the patches it touches.
+  rm -rf "${tdir}/tree-dry"
+  cp -a "${tree?}" "${tdir}/tree-dry"
+  while read -r p; do
+    p="${p#./}"
+    [ -n "${p}" ] || continue
+    patch --quiet --dry-run --forward -d "${tdir}/tree-dry" -p1 \
+      <"${tdir}/overlay/${p}" \
+      || { echo "ERROR: ${p} fails dry-run on ${tree} — overlay drift." >&2; rm -rf "${tdir}"; return 3; }
+  done <"${tdir}/patchlist"
+  # Real application on the real tree.
+  cp -a "${tdir}/tree/." "${tree}/"
+  while read -r p; do
+    p="${p#./}"
+    [ -n "${p}" ] || continue
+    patch --quiet --forward -d "${tree}" -p1 \
+      <"${tdir}/overlay/${p}" \
+      || { echo "ERROR: ${p} failed to apply (unexpected: dry-run passed)." >&2; rm -rf "${tdir}"; return 3; }
+  done <"${tdir}/patchlist"
+  rm -rf "${tdir}"
+  return 0
+}
+
+deb_repack() {
+  local pkg="${1:?}" suffix="${2:?}" ovl="${3:?}"
+  local O SAVE_PWD
+  SAVE_PWD="${SAVE_PWD:-$PWD}"
+  O="/output/${pkg}"
+  apt-get update
+  cd /tmp
+  apt-get download "${pkg}"
+  mkdir -p "$O"
+  dpkg-deb -R "/tmp/${pkg}_*.deb" "$O"
+
+  local ORIG_VER ARCH
+  ORIG_VER=$(dpkg-deb -f "/tmp/${pkg}_*.deb" Version)
+  ARCH=$(dpkg-deb -f "/tmp/${pkg}_*.deb" Architecture)
+
+  # drift (exit 3) = skip the build: last-good deb retained by the caller
+  set +e
+  deb_overlay_apply "${SAVE_PWD}/workflows/bootc-debs-builder/${ovl}" "$O"
+  rc=$?
+  set -e
+  if [ "$rc" -ne 0 ]; then
+    echo "${pkg} skipped (overlay drift) — last-good version retained."
+    exit 0
+  fi
+
+  find "$O" -not -path '*/DEBIAN/*' -type f \
+    | xargs md5sum \
+    | sed "s|$O/||" \
+    > "$O/DEBIAN/md5sums"
+  sed -i "s/^Version: .*/Version: 1:${ORIG_VER}${suffix}/" "$O/DEBIAN/control"
+  dpkg-deb --build "$O" \
+    "/debs/${pkg}_${ORIG_VER}${suffix}_${ARCH}.deb"
+}
+
+deb_overlay_tree() {
+  local pkg="${1:?}" suffix="${2:?}" tree="${3:?}"
+  shift 3
+  local O SAVE_PWD f ORIG_VER ARCH
+  SAVE_PWD="${SAVE_PWD:-$PWD}"
+  O="/output/${pkg}"
+  apt-get update
+  cd /tmp
+  apt-get download "${pkg}"
+  mkdir -p "$O"
+  dpkg-deb -R "/tmp/${pkg}_*.deb" "$O"
+  cp -r "${SAVE_PWD}/workflows/bootc-debs-builder/${tree:?}"/* "$O/"
+  for f in "$@"; do chmod 0755 "$O/${f:?}"; done
+
+  local ORIG_VER ARCH
+  ORIG_VER=$(dpkg-deb -f "/tmp/${pkg}_*.deb" Version)
+  ARCH=$(dpkg-deb -f "/tmp/${pkg}_*.deb" Architecture)
+
+  find "$O" -not -path '*/DEBIAN/*' -type f \
+    | xargs md5sum \
+    | sed "s|$O/||" \
+    > "$O/DEBIAN/md5sums"
+  sed -i "s/^Version: .*/Version: 1:${ORIG_VER}${suffix}/" "$O/DEBIAN/control"
+  dpkg-deb --build "$O" \
+    "/debs/${pkg}_${ORIG_VER}${suffix}_${ARCH}.deb"
+}
+
+deb_custom() {
+  local pkg="${1:?}" ver="${2:?}" tree="${3:?}"
+  local O SAVE_PWD key src
+  SAVE_PWD="${SAVE_PWD:-$PWD}"
+  key="$(echo "${pkg^^}" | tr '[:lower:]-' '[:upper:]_')_VER"
+  O="/output/${pkg}"
+  mkdir -p "$O"
+  cp -r "${SAVE_PWD}/workflows/bootc-debs-builder/${tree:?}"/* "$O/"
+  [ -e "$O/usr/sbin/${pkg}" ] && chmod 0755 "$O/usr/sbin/${pkg}"
+  chmod 0755 "$O/DEBIAN/postinst"
+
+  sed -i \
+    -e "s|{{ VER }}|${ver}|g" \
+    -e "s|, {{ DEPS }}||g" \
+    "$O/DEBIAN/control"
+
+  ! grep -q '{{' "$O/DEBIAN/control" \
+    || { echo "ERROR: ${pkg} control has unexpanded template" >&2; exit 1; }
+  src="$O/usr/sbin/${pkg}"
+  if [ -e "${src}" ]; then
+    test -x "${src}" \
+      || { echo "ERROR: ${pkg} ${src} missing/not exec" >&2; exit 1; }
+    if head -1 "${src}" | grep -qE "^#!.*sh"; then
+      bash -n "${src}" \
+        || { echo "ERROR: ${pkg} ${src} shell syntax" >&2; exit 1; }
+    fi
+  fi
+  if head -1 "$O/DEBIAN/postinst" | grep -qE "^#!.*sh"; then
+    bash -n "$O/DEBIAN/postinst" \
+      || { echo "ERROR: ${pkg} postinst shell syntax" >&2; exit 1; }
+  fi
+
+  find "$O" -not -path '*/DEBIAN/*' -type f \
+    | xargs md5sum \
+    | sed "s|$O/||" \
+    > "$O/DEBIAN/md5sums"
+  dpkg-deb --build "$O" \
+    "/debs/${pkg}_${ver}_all.deb"
+}
