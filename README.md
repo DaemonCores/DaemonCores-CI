@@ -44,7 +44,7 @@ The reusable `full-pipeline.yml` workflow coordinates the following stages:
 | `bootc-build.yml` | Discovers image variants, builds them natively, runs QEMU tests, scans images with Trivy (report only), signs images, and publishes manifest lists. |
 | `iso-builder.yml` | Produces online and offline installer ISOs from a Fedora Anaconda environment. |
 | `img-builder.yml` | Produces opt-in raw disk images for supported targets. |
-| `docs-wiki-sync.yml` | Copies `docs/*.md` into a repository wiki. |
+| `docs-wiki-sync.yml` | Copies `docs/*.md` into a repository wiki (obsolete for DaemonCores repos whose `docs/` is a wiki symlink). |
 | `upstream-check.yml` | Fails when a package tracking an upstream release does not ship that release in the published APT repository (the latest release did not build). |
 | `release.yml` | Publishes a GitHub release from Conventional Commits: `channel: edge` makes a pre-release `vX.Y.Z-edge.N` per releasable push, `channel: stable` makes `vX.Y.Z` and only runs when triggered manually. |
 | `lint.yml` | Provisions the lint toolchain (checksum-pinned hadolint) and runs the caller's `make admission check docs-check`. |
@@ -74,7 +74,7 @@ workflows/
   bootc-debs-builder/packages.yml
   bootc-debs-builder/<package sources>
   tests.yml
-docs/*.md
+docs -> ../<repo>.wiki (symlink; the wiki is the documentation)
 ```
 
 Each root-level `Containerfile*` becomes an image variant. `Containerfile` maps to the `latest` family; for example, `Containerfile.minimal` maps to the `minimal` family. Each tag has one image per architecture (`<tag>_<arch>`) and a multi-arch manifest list `<tag>`; automatic updates are a run-time choice, not an image variant. A Containerfile carrying the `org.daemoncores.unsigned-kernel-image` label also gets a `<tag>-nosign` twin when the `both` signing mode is active: the same image on the unsigned kernel package, for amd64 and the plain-tag arm64 kernel only. `Containerfile.base` is not an image variant: it is the shared base every other Containerfile builds on (`BASE_IMAGE`, default `localhost/debian-bootc-base`). Each build job builds it once, then the image, then its twin on the same layers, and pushes only the images the run asked for; the base is never pushed.

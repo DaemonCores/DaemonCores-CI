@@ -71,7 +71,8 @@ command -v mkfs.vfat >/dev/null 2>&1 || {
 #     --no-install-recommends, so it is absent there.
 # The ISO installer does not need this: it derives from the full image, which
 # carries both. Installing them here keeps the published minimal image as
-# designed (docs/minimal.md lists Podman among its deliberate omissions) while
+# designed (debian-bootc wiki docs/minimal.md lists Podman among its
+# deliberate omissions) while
 # giving the harness the same environment the installer runs in.
 if ! command -v podman >/dev/null 2>&1 || ! command -v skopeo >/dev/null 2>&1; then
   apt-get update -qq >/dev/null
