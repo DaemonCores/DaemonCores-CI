@@ -7,9 +7,10 @@
 # The overlay directory mirrors the deb tree exactly:
 #   - new files are real files at their deb-tree path, copied as-is;
 #   - files modified upstream are git-format .patch files, placed at the
-#     overlay-dir ROOT; they are never copied into the deb (removed from the
-#     tree copy right below), and applied by this loop:
-#         for p in <overlay-dir>/*.patch; do
+#     MIRROR PATH of the file they patch (decision Gabriel 2026-10-30:
+#     pve-manager/usr/share/pve-manager/js/pvemanagerlib.js.patch sits
+#     beside the real file), applied with full deb-tree a/b paths:
+#         for p in $(find <overlay-dir> -name '*.patch'); do
 #             patch --fuzz=0 --forward -p1 -d <tree> < $p
 #         done
 #     The hunks ARE the patch anchors: drift is the patch tool refusing one.
@@ -40,24 +41,25 @@ T="${2:?usage: apply_overlays.sh <overlay-dir> <extracted-tree>}"
 #   $2 - patch file that did not apply
 #######################################
 skip_pkg() {
-  local ov="$1" p="$2"
-  echo "::error title=${ov##*/} overlay drift::patch $(basename "${p}") does not apply"
+  local ov="$1" p="$2" rel
+  rel="${p#"${OV}"/}"
+  echo "::error title=${ov##*/} overlay drift::patch ${rel} does not apply"
   {
     echo "### ⛔ ${ov##*/} not rebuilt — overlay drift"
     echo
-    echo "**\`$(basename "${p}")\` no longer applies: an upstream refactor changed"
+    echo "**\`${rel}\` no longer applies: an upstream refactor changed"
     echo "the patched file. The last-good \`+bootc\`/\`+dcve\` build is kept; the"
     echo "unpatched upstream is never shipped. Re-anchor:"
-    echo "\`workflows/bootc-debs-builder/${ov##*/}/$(basename "${p}")\`."
+    echo "\`workflows/bootc-debs-builder/${ov##*/}/${rel}\`."
   } >>"${GITHUB_STEP_SUMMARY:-/dev/stderr}"
   exit 3
 }
 
-local_patches=()
-for p in "${OV}"/*.patch; do
-  [[ -e "${p}" ]] || continue
+declare -a local_patches=()
+# Mirror layout: walk the whole overlay for the .patch files, no mapping.
+while IFS= read -r -d '' p; do
   local_patches+=("${p}")
-done
+done < <(find "${OV}" -name '*.patch' -print0 | sort -z)
 local_patch_count=${#local_patches[@]}
 
 # Dry-run the whole set on the pristine tree FIRST: on drift the tree is
@@ -68,12 +70,13 @@ for p in "${local_patches[@]}"; do
 done
 echo "apply_overlays: ${local_patch_count} patch(es) dry-run OK."
 
-# The deb root is tree content only: overlay the tree, keep the .patch files
-# out of it (deb root would get a stray patch otherwise).
-rm -f "${T}"/*.patch "${T}"/patches.lock.json 2>/dev/null || true    # meta, never shipped
+# The deb ships tree content only: copy the overlay, then drop the copies
+# of .patch and patches.lock.json in the TREE ONLY - the overlay repo
+# keeps its .patch files (Gabriel spec 2026-10-30).
 if compgen -G "${OV}/*" >/dev/null; then
-  cp -r "${OV}"/* "${T}/"
-  find "${T}" -maxdepth 1 '(' -name '*.patch' -o -name patches.lock.json ')' -delete
+  cp -r "${OV}"/. "${T}/"
+  find "${T}" -name '*.patch' -delete          # meta, never shipped
+  find "${T}" -name patches.lock.json -delete  # meta, never shipped
 fi
 echo "apply_overlays: overlay copied."
 
