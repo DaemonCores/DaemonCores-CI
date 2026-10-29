@@ -190,7 +190,7 @@ def test_docs_flag_stale_citations_and_links(tmp_path: Path) -> None:
         "blank [src: file: code.txt:2]\n"
         "far [src: file: code.txt:9]\n"
         "gone [src: file: nothing.txt:1]\n"
-        "[dead](missing.md) [live](page.md) [web](https://x.y)\n",
+        "[dead](missing.md) [live](page.md) [web](https://x.y) [wiki](Home)\n",
     )
     found = "\n".join(
         check_docs.check_page(tmp_path, tmp_path / "docs/page.md")
@@ -201,6 +201,7 @@ def test_docs_flag_stale_citations_and_links(tmp_path: Path) -> None:
     assert "broken link missing.md" in found
     assert "code.txt:1" not in found
     assert "page.md" not in found.replace("docs/page.md", "")
+    assert "Home" not in found  # extensionless wiki link: not checked
 
 
 def test_docs_skip_kronn_backups(tmp_path: Path) -> None:
