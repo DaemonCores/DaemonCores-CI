@@ -12,7 +12,8 @@
 #   deb_overlay_apply <overlay-dir> <extracted-tree>          -> exit 3 on drift
 #   deb_repack <pkg> <ver-suffix> <overlay-dir>               -> full repack
 #   deb_overlay_tree <pkg> <ver-suffix> <tree-dir> [exec...]  -> tree-copy repack
-#   deb_custom <pkg> <ver> <tree-dir>                         -> custom whole tree
+#   deb_custom <pkg> <ver> <tree-dir>                         -> custom whole...
+#   deb_source_build <pkg> <commit> <src-ver> <src-lane> [overlay...]    -> upstream source build, patch lanes applied on the source treeee
 #
 # Kernel build primitives live in scripts/kernel_helpers.sh (both kernel
 # modes: VE kernel-pve and debian-bootc linux-image), sourced here so the
@@ -129,6 +130,73 @@ deb_overlay_tree() {
     || { echo "ERROR: ${pkg} rewritten Version missing/wrong" >&2; exit 1; }
   dpkg-deb --build "$O" \
     "/debs/${pkg}_${ORIG_VER}${suffix}_${ARCH}.deb"
+}
+
+deb_source_build() {
+  local pkg="${1:?}" commit="${2:?}" src_ver="${3:?}" lane="${4:?}"
+  shift 4
+  local O SAVE_PWD o p sp
+  SAVE_PWD="${SAVE_PWD:-$PWD}"
+  O="/output/${pkg}-src"
+  mkdir -p "$O"
+
+  # Upstream source tree, pinned to the commit the patch lane is anchored on.
+  git clone --quiet https://git.proxmox.com/git/pve-cluster.git "$O/src" \
+    || return 1
+  git -C "$O/src" checkout --quiet "${commit:?}"
+
+  # Lock guard on the pristine tree (pre-patch sha256), then all-or-nothing
+  # dry run before the real application. Drift (exit 3) = skip the build:
+  # last-good deb retained by the caller. C-lane patches mirror paths of the
+  # source tree root (src/pmxcfs/...).
+  python3 "${CI_SCRIPTS}/patch_guard.py" --tree "$O/src" \
+    --lock "${SAVE_PWD}/workflows/bootc-debs-builder/${lane}/patches.lock.json" \
+    "${SAVE_PWD}/workflows/bootc-debs-builder/${lane}"/src/pmxcfs/*.patch \
+    || exit 3
+  for p in "${SAVE_PWD}/workflows/bootc-debs-builder/${lane}"/src/pmxcfs/*.patch; do
+    patch --quiet --dry-run --forward --remove-empty-files -p1 -d "$O/src" <"$p" \
+      || { echo "ERROR: pve-src patch ${p} fails dry-run — lane drift." >&2; exit 3; }
+  done
+  for p in "${SAVE_PWD}/workflows/bootc-debs-builder/${lane}"/src/pmxcfs/*.patch; do
+    patch --quiet --forward --remove-empty-files -p1 -d "$O/src" <"$p"
+  done
+
+  # deb-tree overlay lanes (usr/share/perl5/...) ride the same source tree:
+  # rewrite the deb path to the source path (usr/share/perl5/PVE/... ->
+  # src/PVE/...) and strip the .patch extension, then apply with -p3 as in
+  # the overlay model.
+  for o in "${@:?}"; do
+    while read -r p; do
+      p="${p#./}"; [ -n "${p}" ] || continue
+      sp=$(echo "${p%.patch}" | sed 's|^usr/share/perl5/|src/|')
+      patch --quiet --dry-run --forward -p3 -d "$O/src" "$sp" \
+        <"${SAVE_PWD}/workflows/bootc-debs-builder/${o}/${p}" \
+        || { echo "ERROR: overlay ${o}/${p} fails dry-run — overlay drift." >&2; exit 3; }
+    done < <(cd "${SAVE_PWD}/workflows/bootc-debs-builder/${o}" && find . -name '*.patch' -print)
+  done
+  for o in "${@}"; do
+    while read -r p; do
+      p="${p#./}"; [ -n "${p}" ] || continue
+      sp=$(echo "${p%.patch}" | sed 's|^usr/share/perl5/|src/|')
+      patch --quiet --forward -p3 -d "$O/src" "$sp" \
+        <"${SAVE_PWD}/workflows/bootc-debs-builder/${o}/${p}"
+    done < <(cd "${SAVE_PWD}/workflows/bootc-debs-builder/${o}" && find . -name '*.patch' -print)
+  done
+
+  # Version from the manifest (NO epoch: the upstream top Makefile cannot
+  # carry a ':' through its filename rules).
+  sed -i "1s/(.*)/(${src_ver:?})/" "$O/src/debian/changelog"
+
+  # Upstream build flow: build deps from debian/control, then the staged
+  # `make deb` (not raw dpkg-buildpackage on the git root — its Makefile
+  # stages src + debian into a build dir first). Debs land in $O/src.
+  (cd "$O/src" && apt-get build-dep -y . && dpkg-checkbuilddeps >/dev/null)
+  # The upstream Makefile runs lintian after every dpkg-buildpackage; the
+  # buildenv image does not bake it, so install it on demand (quietly).
+  command -v lintian >/dev/null 2>&1 || apt-get install -y -qq lintian >/dev/null
+  make -C "$O/src" deb
+
+  cp -v "$O/src"/*.deb /debs/
 }
 
 deb_custom() {
