@@ -32,6 +32,16 @@ on:
         type: boolean
         required: false
         default: false
+      gpu_driver_images:
+        description: >-
+          Also build the `-nvidia` twin (tag `<tag>-nvidia`) of every
+          Containerfile carrying `LABEL org.daemoncores.nvidia-image`: the
+          same image plus the NVIDIA proprietary user-space (GPU_EXTRA_PKGS,
+          EULA accepted at install time). Without this input the twin is
+          neither built nor pushed; a push never sets it.
+        type: boolean
+        required: false
+        default: false
 
 jobs:
   # Discover every Containerfile* at the repo root and emit a FLAT build
@@ -72,6 +82,7 @@ jobs:
         id: list
         env:
           NOSIGN_IMAGES: ${{ inputs.nosign_images }}
+          GPU_DRIVER_IMAGES: ${{ inputs.gpu_driver_images }}
         run: |
           set -euo pipefail
           # Find every Containerfile* at the repo root (maxdepth 1). Sorted for
@@ -110,6 +121,15 @@ jobs:
             if [[ "${NOSIGN_IMAGES}" == "true" ]] && grep -qE '^[[:space:]]*LABEL[[:space:]]+org\.daemoncores\.unsigned-kernel-image' "$name"; then
               has_twin=true
             fi
+            # The -nvidia twin (opt-in): the same layers plus the NVIDIA
+            # proprietary user-space (GPU_EXTRA_PKGS build-arg, EULA enforced
+            # at install time by the bootc-installer). It leaves the matrix
+            # unless the caller enables gpu_driver_images, so a plain push
+            # never builds or publishes an EULA-restricted artefact.
+            has_nvidia=false
+            if [[ "${GPU_DRIVER_IMAGES:-}" == "true" ]] && grep -qE '^[[:space:]]*LABEL[[:space:]]+org\.daemoncores\.nvidia-image' "$name"; then
+              has_nvidia=true
+            fi
             twin_arches='[]'
             for arch in amd64 arm64; do
               suffix=""
@@ -124,7 +144,8 @@ jobs:
               matrix=$(printf '%s' "$matrix" | jq -c \
                 --arg file "$name" --arg tag "$tag" --arg arch "$arch" \
                 --arg ks "$suffix" --arg ts "$twin_suffix" \
-                '. += [{file: $file, tag: $tag, arch: $arch, kernel_suffix: $ks, twin_suffix: $ts}]')
+                --argjson nv "$has_nvidia" \
+                '. += [{file: $file, tag: $tag, arch: $arch, kernel_suffix: $ks, twin_suffix: $ts, nvidia: $nv}]')
             done
             manifest_matrix=$(printf '%s' "$manifest_matrix" | jq -c \
               --arg tag "$tag" \
@@ -138,6 +159,11 @@ jobs:
               manifest_matrix=$(printf '%s' "$manifest_matrix" | jq -c \
                 --arg tag "${tag}-4k" \
                 '. += [{tag: $tag, arches: ["arm64"]}]')
+            fi
+            if [[ "$has_nvidia" == "true" ]]; then
+              manifest_matrix=$(printf '%s' "$manifest_matrix" | jq -c \
+                --arg tag "${tag}-nvidia" \
+                '. += [{tag: $tag, arches: ["amd64", "arm64"]}]')
             fi
             if [[ "$twin_arches" != '[]' ]]; then
               manifest_matrix=$(printf '%s' "$manifest_matrix" | jq -c \
@@ -215,6 +241,7 @@ jobs:
           CF_TAG: ${{ matrix.entry.tag }}
           ARCH: ${{ matrix.entry.arch }}
           TWIN_SUFFIX: ${{ matrix.entry.twin_suffix }}
+          NVIDIA: ${{ matrix.entry.nvidia }}
         run: |
           set -euo pipefail
           echo "IMAGE=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_ENV"
@@ -227,6 +254,11 @@ jobs:
           if [[ -n "${TWIN_SUFFIX}" ]]; then
             echo "twin_tag=${CF_TAG}-nosign" >>"$GITHUB_OUTPUT"
             echo "twin_primary=${CF_TAG}-nosign_${ARCH}" >>"$GITHUB_OUTPUT"
+          fi
+          # The -nvidia twin of this image, when the discoverer planned it.
+          if [[ "${NVIDIA}" == "true" ]]; then
+            echo "nvidia_tag=${CF_TAG}-nvidia" >>"$GITHUB_OUTPUT"
+            echo "nvidia_primary=${CF_TAG}-nvidia_${ARCH}" >>"$GITHUB_OUTPUT"
           fi
           # Canonical combo = amd64. Only this one keeps the
           # historical tags (:latest / :<sha> / :monthly-*) for retrocompat
@@ -297,6 +329,11 @@ jobs:
           # The twin differs from its primary image by the kernel only.
           twin_hash=$(printf '%s\nnosign\n' "${hash}" | sha256sum | cut -d' ' -f1)
           echo "twin_hash=${twin_hash}" >>"$GITHUB_OUTPUT"
+          # The -nvidia twin differs from its primary image by the GPU layer
+          # only (the GPU_EXTRA_PKGS build-arg); the layer itself is opaque,
+          # so its identity is the extra "nvidia" salt.
+          nvidia_hash=$(printf '%s\nnvidia\n' "${hash}" | sha256sum | cut -d' ' -f1)
+          echo "nvidia_hash=${nvidia_hash}" >>"$GITHUB_OUTPUT"
           # Content-hash label of the currently published per-arch image.
           prior=$(sudo skopeo inspect --override-arch "${ARCH}" \
             --format '{{ index .Labels "org.daemoncores.content-hash" }}' \
@@ -378,6 +415,9 @@ jobs:
           ARCH: ${{ matrix.entry.arch }}
           KERNEL_SUFFIX: ${{ matrix.entry.kernel_suffix }}
           TWIN_SUFFIX: ${{ matrix.entry.twin_suffix }}
+          NVIDIA: ${{ matrix.entry.nvidia }}
+          NVIDIA_HASH: ${{ steps.chash.outputs.nvidia_hash }}
+          GPU_EXTRA_PKGS: ${{ vars.NVIDIA_EXTRA_PKGS || 'nvidia-driver nvidia-kernel-dkms' }}
           CANONICAL: ${{ steps.tags.outputs.canonical }}
           COSIGN_PUBLIC_KEY: ${{ secrets.COSIGN_PUBLIC_KEY }}
           HASH: ${{ steps.chash.outputs.hash }}
@@ -483,6 +523,9 @@ jobs:
               --build-arg "BOOT_PROFILE=${profile}"
               --build-arg "FIRMWARE_PKGS=${firmware_pkgs}"
               --build-arg "APT_HOLD_PKG=${apt_hold_pkg}"
+              # The -nvidia twin only: the EULA-restricted packages listed
+              # by the caller; the public build keeps the arg empty.
+              --build-arg "GPU_EXTRA_PKGS=$( [[ "$tag" == *-nvidia ]] && printf '%s' "${GPU_EXTRA_PKGS:-}" || printf '' )"
               --build-arg "COSIGN_PUBKEY_B64=$(printf '%s' "${COSIGN_PUBLIC_KEY}" | base64 -w0)"
               --build-arg "IMAGE_REF=${IMAGE,,}"
               --label "org.daemoncores.content-hash=${hash}"
@@ -511,6 +554,11 @@ jobs:
           # --no-cache here, or the sharing would be thrown away.
           if [[ -n "${TWIN_SUFFIX}" ]]; then
             build_one "${CF_TAG}-nosign" "${TWIN_SUFFIX}" "${TWIN_HASH}"
+          fi
+          # The -nvidia twin reuses the same layers: only the GPU layer and
+          # the ones after it are rebuilt.
+          if [[ "${NVIDIA}" == "true" ]]; then
+            build_one "${CF_TAG}-nvidia" "${KERNEL_SUFFIX}" "${NVIDIA_HASH}"
           fi
 
       - name: Check runtime deps
