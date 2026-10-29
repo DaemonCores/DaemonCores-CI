@@ -28,10 +28,12 @@ def make_tree(root: Path) -> Path:
 
 
 def make_overlay(root: Path, *, drifted: bool = False) -> Path:
+    # Gabriel spec 2026-10-30: the .patch file sits at the MIRROR PATH of
+    # the file it patches, not at the overlay root.
     overlay = root / "overlay"
     touch(overlay / "usr/share/newfile.txt", "new\n")
     if drifted:
-        touch(overlay / "Up.pm.patch", (
+        touch(overlay / "usr/share/perl5/PVE/Up.pm.patch", (
             "diff --git a/usr/share/perl5/PVE/Up.pm b/usr/share/perl5/PVE/Up.pm\n"
             "--- a/usr/share/perl5/PVE/Up.pm\n"
             "+++ b/usr/share/perl5/PVE/Up.pm\n"
@@ -40,7 +42,7 @@ def make_overlay(root: Path, *, drifted: bool = False) -> Path:
             "+replacement\n"
         ))
     else:
-        touch(overlay / "Two.pm.patch", (
+        touch(overlay / "usr/share/perl5/PVE/Two.pm.patch", (
             "diff --git a/usr/share/perl5/PVE/Two.pm b/usr/share/perl5/PVE/Two.pm\n"
             "--- a/usr/share/perl5/PVE/Two.pm\n"
             "+++ b/usr/share/perl5/PVE/Two.pm\n"
@@ -65,9 +67,11 @@ def test_overlay_copies_tree_and_applies_patches(tmp_path: Path) -> None:
     assert (tree / "DEBIAN/control").read_text() == "Package: t\n"
     two = tree / "usr/share/perl5/PVE/Two.pm"
     assert "line3\n" in two.read_text()
-    # the .patch files never land in the deb, and neither does the meta
-    assert not list(tree.glob("*.patch"))
-    assert not (tree / "patches.lock.json").exists()
+    # the .patch files never land in the deb, at ANY depth, and neither
+    # does the meta - the overlay repo keeps its copies untouched
+    assert not list(tree.rglob("*.patch"))
+    assert not list(tree.rglob("patches.lock.json"))
+    assert (overlay / "usr/share/perl5/PVE/Two.pm.patch").exists()
     assert "applied clean" in result.stdout
 
 
