@@ -29,6 +29,14 @@ inputs:
     required: false
     default: ''
 
+  gpu-driver:
+    description: >-
+      `no` drops the packages marked `when: {gpu-driver: true}` (the opt-in
+      GPU userspace entries, e.g. the proprietary NVIDIA libraries). Empty
+      keeps them.
+    required: false
+    default: ''
+
 outputs:
   manifest:
     description: 'Path to the resolved manifest.'
@@ -47,6 +55,7 @@ runs:
         OUT: ${{ inputs.out }}
         ARCH: ${{ inputs.arch }}
         UNSIGNED_KERNEL: ${{ inputs.unsigned-kernel }}
+        GPU_DRIVER: ${{ inputs.gpu-driver }}
       run: |
         set -euo pipefail
         # yq reads the YAML and jq does the expansion (the jq language has the

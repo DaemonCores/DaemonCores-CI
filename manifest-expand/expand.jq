@@ -24,6 +24,11 @@
 # Set UNSIGNED_KERNEL (empty = keep everything) to "yes" or "no" to decide the
 # packages marked `when: {unsigned-kernel: true}` (the -nosign kernel twins):
 # they are kept only for "yes". Unmarked packages are always kept.
+#
+# Set GPU_DRIVER (empty = keep everything) to "no" to drop the packages marked
+# `when: {gpu-driver: true}` (opt-in GPU userspace entries, e.g. the
+# proprietary NVIDIA libraries): they are built only when the caller asks for
+# them. Unmarked packages are always kept.
 
 def subst($k): sub("\\{variant\\}"; $k);
 
@@ -55,4 +60,6 @@ def expand:
   | select((env.ARCH // "") == "" or ((.when.arch // env.ARCH) == env.ARCH))
   | select((env.UNSIGNED_KERNEL // "") != "no"
            or ((.when["unsigned-kernel"] // false) | not))
+  | select((env.GPU_DRIVER // "") != "no"
+           or ((.when["gpu-driver"] // false) | not))
 ] | {packages: .}

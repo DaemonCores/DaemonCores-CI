@@ -35,6 +35,12 @@ on:
       run_iso:
         type: string
         default: 'true'
+      # Opt-in GPU entries (when.gpu-driver, e.g. the proprietary NVIDIA libs,
+      # EULA-restricted): forwarded verbatim to the deb builder; 'true' on a
+      # dispatch build includes them, a push never does.
+      gpu_driver:
+        type: string
+        default: 'false'
       # Opt-in disk-image (.img) build, split per format. NEVER activated by
       # default — only via the workflow_dispatch checkboxes. The img job runs
       # after the container image build and produces flashable .img files.
@@ -452,6 +458,7 @@ jobs:
       arch: amd64
       signing_active: ${{ needs.prepare.outputs.signing_active }}
       unsigned_kernel: ${{ needs.prepare.outputs.unsigned_kernel }}
+      gpu_driver: ${{ inputs.gpu_driver == 'true' && 'yes' || 'no' }}
       deploy_pages: false
     secrets: inherit
 
@@ -477,6 +484,7 @@ jobs:
       arch: arm64
       signing_active: ${{ needs.prepare.outputs.signing_active }}
       unsigned_kernel: ${{ needs.prepare.outputs.unsigned_kernel }}
+      gpu_driver: ${{ inputs.gpu_driver == 'true' && 'yes' || 'no' }}
       deploy_pages: false
     secrets: inherit
 
