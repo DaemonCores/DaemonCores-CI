@@ -87,6 +87,10 @@ def check_page(root: Path, page: Path) -> list[str]:
         for link in cast(list[str], LINK_RE.findall(text)):
             if "://" in link or link.startswith(("mailto:", "/")):
                 continue
+            # GitHub wiki pages are linked without an extension; only files
+            # with a recognised extension must exist on disk.
+            if not Path(link).suffix.strip("."):
+                continue
             if not (page.parent / link).exists():
                 found.append(f"{rel}:{number}: broken link {link}")
     return found
