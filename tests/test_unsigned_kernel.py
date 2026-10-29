@@ -86,7 +86,9 @@ def test_there_is_one_image_per_tag_and_arch(tmp_path: Path) -> None:
     """
     result = _discover(tmp_path, nosign=False)
     keys = {key for entry in result['wave1'] for key in entry}
-    assert keys == {'file', 'tag', 'arch', 'kernel_suffix', 'twin_suffix'}
+    # `nvidia` flags the -nvidia twin (opt-in GPU variant) per entry.
+    assert keys == {'file', 'tag', 'arch', 'kernel_suffix', 'twin_suffix',
+                    'nvidia'}
     assert all('lock' not in entry for entry in result['manifest'])
     pairs = [(e['tag'], e['arch']) for e in result['wave1']]
     assert len(pairs) == len(set(pairs))

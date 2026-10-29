@@ -146,3 +146,32 @@ class TestWiring:
                           "'yes' || 'no' }}") == 2
         assert "gpu_driver:\n        type: string\n        default: 'false'" \
             in text
+
+
+class TestNvidiaImageTwin:
+    """The ``-nvidia`` image twin follows the -nosign twin pattern."""
+
+    def test_discover_filters_on_the_label_and_the_input(self) -> None:
+        """The discover step gates the twin on the label plus the input."""
+        text = (WORKFLOWS / 'bootc-build.yml').read_text()
+        assert ('if [[ "${GPU_DRIVER_IMAGES:-}" == "true" ]] && '
+                'grep -qE \'^[[:space:]]*LABEL[[:space:]]+org\\.daemoncores'
+                '\\.nvidia-image\' "$name"') in text
+        assert 'GPU_DRIVER_IMAGES: ${{ inputs.gpu_driver_images }}' in text
+
+    def test_matrix_and_manifest_carry_the_twin(self) -> None:
+        """Each matrix entry flags nvidia; the manifest gains -nvidia."""
+        text = (WORKFLOWS / 'bootc-build.yml').read_text()
+        assert 'twin_suffix: $ts, nvidia: $nv}]' in text
+        assert '--arg tag "${tag}-nvidia"' in text
+
+    def test_build_passes_the_extra_packages_only_to_the_twin(self) -> None:
+        """The build-arg is fed by the caller variable, default nvidia pkgs."""
+        text = (WORKFLOWS / 'bootc-build.yml').read_text()
+        assert "${{ vars.NVIDIA_EXTRA_PKGS || 'nvidia-driver " \
+               "nvidia-kernel-dkms' }}" in text
+        assert 'GPU_EXTRA_PKGS=$( [[ "$tag" == *-nvidia ]]' in text
+        assert 'build_one "${CF_TAG}-nvidia" "${KERNEL_SUFFIX}" ' \
+               '"${NVIDIA_HASH}"' in text
+        # A distinct content salt keeps the twin off the primary's hash.
+        assert "nvidia_hash=$(printf '%s\\nnvidia\\n' \"${hash}\"" in text
