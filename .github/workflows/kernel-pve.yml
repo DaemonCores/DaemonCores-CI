@@ -1,4 +1,14 @@
-name: Kernel PVE + XanMod build
+name: Kernel PVE + XanMod build (DEPRECATED)
+
+# Kernel PVE + XanMod build
+#
+# DEPRECATED — the production path is the deb pipeline
+# (DaemonCores-VE packages.yml, kernel-pve class entry, debs published to
+# the APT repo like any other package). Keep this reusable workflow ONLY
+# while the in-flight kernel validation lane drives its artifact-only
+# nightly build through it; remove it once that lane lands so exactly ONE
+# build path remains. The lib (kernel-pve/lib/kernel-pve-build.sh) is the
+# single source of the build logic and is shared with the deb-lane entry.
 
 # Reusable kernel build: the PVE kernel packaging (fetched with apt-get
 # source on a Debian trixie container) with the XanMod patch set from the

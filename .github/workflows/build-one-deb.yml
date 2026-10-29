@@ -143,6 +143,18 @@ jobs:
           # env = non-secret KEY=VALUE lines, then resolved secret-env lines.
           envlines=$(yq "${sel} | (.env // {}) | to_entries | .[] \
             | .key + \"=\" + .value" "${MAN}")
+          # Native patch data (Gabriel, 30/10/2026): an entry may carry a
+          # `patches:` key — the canonical declarative patch schema (same
+          # structure as a patches.yml file), as compact one-line JSON in
+          # PATCHES_JSON. It rides in EXTRA_ENV: exported for the build AND
+          # hashed into the content hash (non-secret). The kernel helper
+          # reads it as first-class data; a patches.yml file path stays
+          # equally supported.
+          patches_json=$(yq "${sel} | (.patches // []) | select(length > 0)" \
+            -o=json -I=0 "${MAN}")
+          if [ "${patches_json}" != "[]" ] && [ -n "${patches_json}" ]; then
+            envlines="${envlines}"$'\n'"PATCHES_JSON=${patches_json}"
+          fi
           while IFS= read -r pair; do
             [ -n "${pair}" ] || continue
             key="${pair%%=*}"
