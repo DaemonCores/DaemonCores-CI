@@ -29,6 +29,11 @@
 # `when: {gpu-driver: true}` (opt-in GPU userspace entries, e.g. the
 # proprietary NVIDIA libraries): they are built only when the caller asks for
 # them. Unmarked packages are always kept.
+#
+# KERNEL_ARM (unset = drop) gates the coded-but-disabled kernel variants
+# (kernel-pve arm64): a package marked `when: {kernel-arm: true}` is kept
+# only when the caller sets KERNEL_ARM=yes. Unmarked packages are always
+# kept.
 
 def subst($k): sub("\\{variant\\}"; $k);
 
@@ -62,4 +67,6 @@ def expand:
            or ((.when["unsigned-kernel"] // false) | not))
   | select((env.GPU_DRIVER // "") != "no"
            or ((.when["gpu-driver"] // false) | not))
+  | select((env.KERNEL_ARM // "") == "yes"
+           or ((.when["kernel-arm"] // false) | not))
 ] | {packages: .}

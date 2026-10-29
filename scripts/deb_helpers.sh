@@ -13,7 +13,14 @@
 #   deb_repack <pkg> <ver-suffix> <overlay-dir>               -> full repack
 #   deb_overlay_tree <pkg> <ver-suffix> <tree-dir> [exec...]  -> tree-copy repack
 #   deb_custom <pkg> <ver> <tree-dir>                         -> custom whole tree
+#
+# Kernel build primitives live in scripts/kernel_helpers.sh (both kernel
+# modes: VE kernel-pve and debian-bootc linux-image), sourced here so the
+# build shells get them implicitly like the deb_* functions.
 set -euo pipefail
+
+KERNEL_HELPERS="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/kernel_helpers.sh"
+. "${KERNEL_HELPERS}"
 
 deb_overlay_apply() {
   local ovl="${1:?}" tree="${2:?}"
