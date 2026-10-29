@@ -1,1 +1,1 @@
-../DaemonCores-CI.wiki
+../../DaemonCores-CI.wiki
