@@ -462,7 +462,8 @@ jobs:
               firmware_pkgs="intel-microcode amd64-microcode firmware-linux-free firmware-linux firmware-misc-nonfree"
               apt_hold_pkg="grub-efi-amd64-signed"
             fi
-            # arm64 ships two kernels (docs/decisions.md, "Two arm64 kernels"): the
+            # arm64 ships two kernels (debian-bootc wiki docs/Handoff-Decisions.md,
+            # "Two arm64 kernels"): the
             # 16 KB one on the plain tag for recent hardware (Raspberry Pi 5,
             # RK3588), the 4 KB one (`-4k` image) for the older devices (Raspberry
             # Pi 3 and 4). The
