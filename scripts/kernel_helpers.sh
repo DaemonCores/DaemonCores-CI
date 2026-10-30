@@ -125,10 +125,10 @@ kernel_patch_list() {
       '"${filter}"' | select(.stage == strenv(STAGE))
         | select(strenv(CLASS) == "-" or .class == strenv(CLASS))
         | . as $e | .name + " " +
-          (.url | sub("\{seriesdir\}"; strenv(SDIR))
-                  | sub("\{series\}"; strenv(SERIES))
-                  | sub("\{version\}"; strenv(VERSION))
-                  | sub("\{topic\}"; ($e.topic // "")))'
+          (.url | sub("{seriesdir}"; strenv(SDIR))
+                  | sub("{series}"; strenv(SERIES))
+                  | sub("{version}"; strenv(VERSION))
+                  | sub("{topic}"; ($e.topic // "")))'
   done
 }
 

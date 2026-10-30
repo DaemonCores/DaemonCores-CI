@@ -35,7 +35,7 @@
 # only when the caller sets KERNEL_ARM=yes. Unmarked packages are always
 # kept.
 
-def subst($k): sub("\\{variant\\}"; $k);
+def subst($k): sub("{variant}"; $k);
 
 def expand:
   . as $t
