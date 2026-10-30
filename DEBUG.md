@@ -241,3 +241,6 @@ image-test action reads by default).
   another `DEPS_HASH`; no deps -> empty `extra-env` as before. One-time effect: every package with `deps`
   rebuilds once on the next run. Real check: next full run must rebuild rpi3/rpi4 on 7.2.14 and the 4k images
   must install.
+- Real check, run 41118096830: `cache[linux-modules-rpi3-arm64]: hash=da642668... prior=209ab93a...` and
+  rpi4 `hash=80e0281a... prior=46905193...` -> both `built`; the published arm64 index now lists
+  `linux-modules-rpi3` and `-rpi4` at `7.2.14-1+r1`. Image jobs started afterwards (results below once read).
