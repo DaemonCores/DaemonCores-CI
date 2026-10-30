@@ -71,11 +71,18 @@ deb_repack() {
   cd /tmp
   apt-get download "${pkg}"
   mkdir -p "$O"
-  dpkg-deb -R "/tmp/${pkg}_*.deb" "$O"
+  # The glob part must stay OUTSIDE the quotes: bash never expands a glob
+  # inside "...", and dpkg-deb would receive the literal asterisk.
+  local UP_DEB
+  set -- "/tmp/${pkg}"_*.deb
+  [ -f "${1:-}" ] \
+    || { echo "ERROR: no upstream .deb for ${pkg} left in /tmp after download" >&2; exit 1; }
+  UP_DEB="$1"
+  dpkg-deb -R "$UP_DEB" "$O"
 
   local ORIG_VER ARCH
-  ORIG_VER=$(dpkg-deb -f "/tmp/${pkg}_*.deb" Version)
-  ARCH=$(dpkg-deb -f "/tmp/${pkg}_*.deb" Architecture)
+  ORIG_VER=$(dpkg-deb -f "$UP_DEB" Version)
+  ARCH=$(dpkg-deb -f "$UP_DEB" Architecture)
 
   # drift (exit 3) = skip the build: last-good deb retained by the caller
   set +e
@@ -100,15 +107,23 @@ deb_overlay_tree() {
   local pkg="${1:?}" suffix="${2:?}" tree="${3:?}"
   shift 3
   local O SAVE_PWD f ORIG_VER ARCH
+  # Snapshot the exec list: the glob resolution below does `set --`.
+  local EXEC_LIST=("$@")
   SAVE_PWD="${SAVE_PWD:-$PWD}"
   O="/output/${pkg}"
   apt-get update
   cd /tmp
   apt-get download "${pkg}"
   mkdir -p "$O"
-  dpkg-deb -R "/tmp/${pkg}_*.deb" "$O"
+  # Same quoted-glob discipline as deb_repack above.
+  local UP_DEB
+  set -- "/tmp/${pkg}"_*.deb
+  [ -f "${1:-}" ] \
+    || { echo "ERROR: no upstream .deb for ${pkg} left in /tmp after download" >&2; exit 1; }
+  UP_DEB="$1"
+  dpkg-deb -R "$UP_DEB" "$O"
   cp -r "${SAVE_PWD}/workflows/bootc-debs-builder/${tree:?}"/* "$O/"
-  for f in "$@"; do
+  for f in "${EXEC_LIST[@]}"; do
     [ -e "$O/${f:?}" ] \
       || { echo "ERROR: ${pkg} tree entry ${f} missing in the overlay" >&2; exit 1; }
     test -x "$O/${f}" \
@@ -117,8 +132,8 @@ deb_overlay_tree() {
   done
 
   local ORIG_VER ARCH
-  ORIG_VER=$(dpkg-deb -f "/tmp/${pkg}_*.deb" Version)
-  ARCH=$(dpkg-deb -f "/tmp/${pkg}_*.deb" Architecture)
+  ORIG_VER=$(dpkg-deb -f "$UP_DEB" Version)
+  ARCH=$(dpkg-deb -f "$UP_DEB" Architecture)
 
   find "$O" -not -path '*/DEBIAN/*' -type f \
     | xargs md5sum \
