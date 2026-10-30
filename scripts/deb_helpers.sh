@@ -28,6 +28,13 @@ deb_overlay_apply() {
   local tdir cand p tmp
   tdir=$(mktemp -d "/tmp/overlays.XXXXXX")
   cp -r "${ovl}" "${tdir}/overlay"
+  # Debian multiarch: the overlay mirror paths name x86_64-linux-gnu; the
+  # arm64 deb tree names aarch64-linux-gnu. Translate the triplet IN THE COPY
+  # (the repo keeps the amd64 mirror; these .patch copies never ship).
+  if [ "${BUILD_ARCH:-amd64}" = "arm64" ]; then
+    find "${tdir}/overlay" -name '*.patch' -type f -exec sed -i \
+      's/x86_64-linux-gnu/aarch64-linux-gnu/g' {} +
+  fi
   # Mirror everything EXCEPT the patch/lock metadata onto the tree copy so a
   # dry-run sees the exact files the apply will create or replace.
   (cd "${tdir}/overlay" && find . -name '*.patch' -print) >"${tdir}/patchlist"
