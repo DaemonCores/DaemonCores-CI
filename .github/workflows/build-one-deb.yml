@@ -191,6 +191,7 @@ jobs:
           path: /tmp/prior
 
       - name: Install dependency debs
+        id: depdebs
         if: steps.def.outputs.deps != ''
         shell: bash
         env:
@@ -221,6 +222,13 @@ jobs:
           # Intentional split + glob of the collected local deb paths.
           # shellcheck disable=SC2086
           apt-get install -y ${debs}
+          # Identity of the dependency debs this build really consumes. The
+          # content hash only saw the tracked upstream version, so a package
+          # built against a last-good dep (its newer build had failed) kept
+          # that hash after the dep caught up and was then reused with a stale
+          # `Depends` pin. The digest of the installed debs is hashed too.
+          echo "hash=$(sha256sum ${debs} | awk '{ print $1 }' | sort \
+            | sha256sum | cut -d' ' -f1)" >>"$GITHUB_OUTPUT"
 
       # Rolling release: a package that lists `track:` in the manifest builds
       # the latest upstream release (version + asset checksums resolved here),
@@ -237,6 +245,22 @@ jobs:
           env: ${{ steps.def.outputs.env }}
           token: ${{ github.token }}
 
+      - name: Compose hashed build env
+        id: hashenv
+        shell: bash
+        env:
+          SIGNS: ${{ steps.def.outputs.signs }}
+          SIGNING_ACTIVE: ${{ inputs.signing_active }}
+          DEPS_HASH: ${{ steps.depdebs.outputs.hash }}
+        run: |
+          set -euo pipefail
+          {
+            echo "lines<<HASHENV_EOF"
+            [ "${SIGNS}" = yes ] && echo "MODULE_SIGNING_ACTIVE=${SIGNING_ACTIVE}"
+            [ -z "${DEPS_HASH}" ] || echo "DEPS_HASH=${DEPS_HASH}"
+            echo "HASHENV_EOF"
+          } >>"$GITHUB_OUTPUT"
+
       - name: Build ${{ inputs.package }}
         id: build
         uses: DaemonCores/DaemonCores-CI/build-deb@main
@@ -248,7 +272,7 @@ jobs:
           env: ${{ steps.track.outputs.env }}
           build: ${{ steps.def.outputs.build }}
           arch: ${{ inputs.arch }}
-          extra-env: ${{ steps.def.outputs.signs == 'yes' && format('MODULE_SIGNING_ACTIVE={0}', inputs.signing_active) || '' }}
+          extra-env: ${{ steps.hashenv.outputs.lines }}
 
       # The build failed but the last-good published deb was kept, so the
       # pipeline is not blocked. Record the breakage as an issue (deduped by
