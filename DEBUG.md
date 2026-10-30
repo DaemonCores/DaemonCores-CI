@@ -179,3 +179,12 @@ Local check (functions sourced, `ssh` stubbed): `latest_amd64` -> `signed`
 - End-to-end with a real image (install-fs.sh disk, SSH reachable) under
   `SECURE_BOOT=1` is now the CI run itself (default 1); result to be read from the
   real run, per architecture.
+
+## A push touching only tests.yml never booted an image
+
+Full Pipeline 41101835515 (debian-bootc `5ded36a`, only `workflows/tests.yml`
+changed) concluded `success` with `image=false`: the plan job matches changed
+files against `^(Containerfile|src/|assets/|workflows/image-tests/)` and that
+directory does not exist in the product repo, so the manifest was never run.
+Fix: `full-pipeline.yml` also matches `workflows/tests.yml` (the manifest the
+image-test action reads by default).
