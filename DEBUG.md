@@ -291,3 +291,24 @@ image-test action reads by default).
 - Second blocker (ESTIMATED, not tested): no standard boot-time page-size detection. A 16k kernel on a core without
   the 16 KB granule (Pi 3/4) does not boot and falls back to nothing; selection would need a per-board map.
 - Next: implement the `-embedded` variant (test category + twin logic keyed on it), keep one kernel per image.
+
+## Full run 41129742013 (debian-bootc, after `0e54237`): results
+
+- Progress (MEASURED): no `bad shim signature` in any of the 6 image jobs; latest-amd64 boots with Secure Boot
+  enforced and runs the suite (43 PASS, 4 SKIP, 1 FAIL). `linux-image` jobs are green with `SB_SIGNING_KEY/CERT`
+  exposed. arm64 `signed` logs `AAVMF_CODE.secboot.fd`; `uboot` logs `AAVMF_CODE.fd` (SB off, by design).
+- latest-amd64: `signed kernel enforces module signatures` fails, `sig_enforce=N`, package
+  `daemoncores-kernel-7.2.14 7.2.14-1`.
+  - Proof: job "Prepare signing secrets" prints `module signing mode=both active=no unsigned_kernel=no; missing:
+    cosign modules` then `PAT_SECRETS is not set: missing signing secrets cannot be generated`.
+    `gh secret list` of the repo shows only `APT_GPG_KEY`, `SB_SIGNING_CERT`, `SB_SIGNING_KEY`: neither
+    `PAT_SECRETS` nor `MODULE_SIGNING_*`/`COSIGN_*`. `ensure-secrets.sh` can only generate them with a token
+    holding secrets:write, and `full-pipeline.yml` (`HAS_MODULES`) then keeps `signing_active=no`, which makes
+    `kernel-signing.sh` build with `MODULE_SIG_FORCE` off. The test is legitimate; it cannot pass until the
+    repository has `PAT_SECRETS` (then the next run creates the keys and the run after uses them).
+  - Not caused by `0e54237`. No twin `-nosign` image is built in this state (`unsigned_kernel=no`).
+- latest-arm64, minimal-arm64 (secboot): `VM did not become reachable within 300s`; serial log stops at about 4.6
+  s guest, no panic, no shim error. Cause UNKNOWN (TCG slowness vs real hang): to reproduce on the local arm64
+  bench before any fix.
+- latest-4k-arm64 (uboot): the raw `Image` boots under U-Boot (userspace ready at 206 s guest) but the 300 s
+  window expires (TCG slowness, known). minimal-4k-arm64 and minimal-amd64: RAM idle gate (205 / 330 MiB over 15).
