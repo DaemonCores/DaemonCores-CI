@@ -53,7 +53,14 @@ SSH_PORT=2222
 # section; the grub is now built with --sbat (see DEBUG.md). The MOK carries the
 # image signing certificate (grub and kernel are signed with that key) and the
 # certificates of the image's mok.d, as the installer enrolls them.
-SECURE_BOOT="${SECURE_BOOT:-1}"
+# The value comes from the `secure_boot:` of the manifest category the image
+# belongs to (select_category); a SECURE_BOOT already in the environment wins,
+# for a local run. A manifest with no `categories:` keeps the former default, 0.
+SECURE_BOOT="${SECURE_BOOT:-}"
+# Manifest category of the image under test and whether it is the reference one
+# (set by select_category).
+CATEGORY=""
+REFERENCE=0
 # 1 once we know /dev/kvm is present and usable, 0 otherwise (set in
 # install_deps). GitHub's hosted arm64 runners expose no /dev/kvm at all —
 # nested virtualization is not available on that fleet — so the arm64 boot
@@ -132,17 +139,6 @@ install_deps() {
     echo "::warning::/dev/kvm unavailable on arm64; booting the VM under QEMU TCG emulation"
   fi
 
-  if [ "${SECURE_BOOT}" = 1 ]; then
-    # virt-firmware builds the Secure Boot varstore (it bundles the Microsoft
-    # UEFI CAs); openssl generates our own PK/KEK. Kept in a venv so the runner's
-    # system Python is untouched (PEP 668).
-    if ! python3 -c 'import ensurepip, venv' 2>/dev/null \
-      || ! command -v openssl >/dev/null 2>&1; then
-      sudo apt-get install -y --no-install-recommends python3-venv openssl
-    fi
-    python3 -m venv "${WORK}/sbtool"
-    "${WORK}/sbtool/bin/pip" install --quiet virt-firmware
-  fi
   # Refresh OVMF_DIR after ovmf may have been installed above: the global
   # detection at the top of the script runs before install_deps, so on a CI
   # runner where ovmf is not pre-installed OVMF_DIR would be empty. An
@@ -201,6 +197,15 @@ install_disk() {
 build_sb_vars() {
   local certs guid base k
   local -a mok_args
+  # virt-firmware builds the Secure Boot varstore (it bundles the Microsoft
+  # UEFI CAs); openssl generates our own PK/KEK. Kept in a venv so the runner's
+  # system Python is untouched (PEP 668).
+  if ! python3 -c 'import ensurepip, venv' 2>/dev/null \
+    || ! command -v openssl >/dev/null 2>&1; then
+    sudo apt-get install -y --no-install-recommends python3-venv openssl
+  fi
+  python3 -m venv "${WORK}/sbtool"
+  "${WORK}/sbtool/bin/pip" install --quiet virt-firmware
   certs=$("${WORK}/sbtool/bin/python" -c \
     'import os,virt.firmware as v; print(os.path.join(
      os.path.dirname(v.__file__), "certs/microsoft.com"))')
@@ -467,7 +472,7 @@ ram_gate() {
 #######################################
 run_tests() {
   local section="${1:-tests}"
-  local n i name cmd expect diag test_arch test_variant out rc fail=0 pass
+  local n i name cmd expect diag test_arch test_variant test_cats out rc fail=0 pass
   n=$(yq ".${section} | length" "${TESTS_FILE}")
   for ((i = 0; i < n; i++)); do
     name=$(yq ".${section}[${i}].name" "${TESTS_FILE}")
@@ -482,6 +487,20 @@ run_tests() {
     if [ -n "${test_variant}" ] && [ "${test_variant}" != "${VARIANT}" ]; then
       echo "  SKIP  ${name} (variant: ${test_variant}, running: ${VARIANT})"
       continue
+    fi
+    # Skip tests of another category; a test with no category is global and
+    # only runs on the reference one. Without `categories:` everything runs.
+    if [ -n "${CATEGORY}" ]; then
+      test_cats=$(yq ".${section}[${i}].category[]" "${TESTS_FILE}")
+      if [ -n "${test_cats}" ]; then
+        if ! printf '%s\n' "${test_cats}" | grep -qxF "${CATEGORY}"; then
+          echo "  SKIP  ${name} (category: ${test_cats//$'\n'/,}, running: ${CATEGORY})"
+          continue
+        fi
+      elif [ "${REFERENCE}" != 1 ]; then
+        echo "  SKIP  ${name} (global test, running: ${CATEGORY})"
+        continue
+      fi
     fi
     cmd=$(yq ".${section}[${i}].run" "${TESTS_FILE}")
     expect=$(yq ".${section}[${i}].expect // \"\"" "${TESTS_FILE}")
@@ -545,6 +564,82 @@ _validate_section() {
 }
 
 #######################################
+# Check the manifest's `categories:` (when present): every entry has a name, an
+# arch, a `suffix:` key (empty = the plain tags) and a `secure_boot:` of 0 or 1;
+# (arch, suffix) pairs are unique; each arch has exactly one `reference: true`
+# category (the one running the global tests); every `category:` a test lists
+# names a defined category.
+# Globals:
+#   TESTS_FILE
+# Returns:
+#   Exits 1 on the first inconsistent category definition.
+#######################################
+_validate_categories() {
+  local n bad=0 msg sec
+  n=$(yq '.categories | length // 0' "${TESTS_FILE}")
+  [ "${n}" -gt 0 ] || return 0
+  msg=$(yq '.categories[] | select(
+    (.name // "") == ""
+    or ((.arch // "") != "amd64" and (.arch // "") != "arm64")
+    or (has("suffix") | not)
+    or ((.secure_boot // -1) != 0 and (.secure_boot // -1) != 1)
+  ) | .name' "${TESTS_FILE}")
+  [ -z "${msg}" ] || {
+    echo "::error::categories need name, arch (amd64|arm64), suffix and secure_boot (0|1): ${msg}"
+    bad=1
+  }
+  msg=$(yq '[.categories[] | .arch + ":" + .suffix] | group_by(.) | .[] | select(length > 1) | .[0]' "${TESTS_FILE}")
+  [ -z "${msg}" ] || { echo "::error::duplicate (arch:suffix) in categories: ${msg}"; bad=1; }
+  msg=$(yq '.categories | group_by(.arch) | .[] | select(([.[] | select(.reference == true)] | length) != 1) | .[0].arch' "${TESTS_FILE}")
+  [ -z "${msg}" ] || { echo "::error::categories of arch ${msg} must have exactly one reference: true"; bad=1; }
+  for sec in tests reboot_tests; do
+    msg=$(yq "[.categories[].name] as \$known | .${sec}[]?.category[]? | select(. as \$c | \$known | contains([\$c]) | not)" "${TESTS_FILE}")
+    [ -z "${msg}" ] || { echo "::error::${sec} lists unknown categories: ${msg}"; bad=1; }
+  done
+  [ "${bad}" -eq 0 ] || exit 1
+}
+
+#######################################
+# Pick the manifest category of the image under test: among the categories of
+# this arch whose `suffix:` ends the tag name (the tag minus its `_<arch>`), the
+# one with the longest suffix. Sets CATEGORY, REFERENCE and, unless already
+# set, SECURE_BOOT from the category's `secure_boot:`. A manifest with no
+# `categories:` leaves CATEGORY empty (every test runs) and SECURE_BOOT at 0.
+# Globals:
+#   IMAGE, ARCH, TESTS_FILE, CATEGORY, REFERENCE, SECURE_BOOT
+# Returns:
+#   Exits 1 when the manifest has categories but none matches this image.
+#######################################
+select_category() {
+  local tag n i c_arch c_suffix best=-1 best_i=-1
+  tag=${IMAGE##*:}
+  tag=${tag%_"${ARCH}"}
+  n=$(yq '.categories | length // 0' "${TESTS_FILE}")
+  if [ "${n}" -eq 0 ]; then
+    SECURE_BOOT="${SECURE_BOOT:-0}"
+    return 0
+  fi
+  for ((i = 0; i < n; i++)); do
+    c_arch=$(yq ".categories[${i}].arch" "${TESTS_FILE}")
+    [ "${c_arch}" = "${ARCH}" ] || continue
+    c_suffix=$(yq ".categories[${i}].suffix" "${TESTS_FILE}")
+    case "${tag}" in *"${c_suffix}") ;; *) continue ;; esac
+    if [ "${#c_suffix}" -gt "${best}" ]; then
+      best=${#c_suffix}
+      best_i=${i}
+    fi
+  done
+  if [ "${best_i}" -lt 0 ]; then
+    echo "::error::no category of ${TESTS_FILE} matches tag '${tag}' on ${ARCH}"
+    exit 1
+  fi
+  CATEGORY=$(yq ".categories[${best_i}].name" "${TESTS_FILE}")
+  [ "$(yq ".categories[${best_i}].reference // false" "${TESTS_FILE}")" = true ] && REFERENCE=1
+  SECURE_BOOT="${SECURE_BOOT:-$(yq ".categories[${best_i}].secure_boot" "${TESTS_FILE}")}"
+  echo "Category: ${CATEGORY} (tag ${tag}, reference=${REFERENCE}, secure_boot=${SECURE_BOOT})"
+}
+
+#######################################
 # Enforce that every test ships its own `diag:` command. A test with no diag is
 # a manifest error and fails the run BEFORE the VM is even booted — so a test
 # can never regress into a blind, undiagnosable failure later. Also checks the
@@ -556,6 +651,7 @@ _validate_section() {
 #   Exits 1 if any test is missing name, run, or diag.
 #######################################
 validate_manifest() {
+  _validate_categories
   _validate_section "tests"
   local reboot_n
   reboot_n=$(yq '.reboot_tests | length // 0' "${TESTS_FILE}" 2>/dev/null || echo 0)
@@ -611,6 +707,7 @@ main() {
   install_deps
   # Fail fast on an incomplete manifest (missing diag) before paying for a boot.
   validate_manifest
+  select_category
   install_disk
   if [ "${SECURE_BOOT}" = 1 ]; then
     build_sb_vars
