@@ -328,3 +328,13 @@ image-test action reads by default).
   boot it with the bench (`AAVMF_CODE.secboot.fd` + enrolled varstore) and, to separate the two variables,
   also boot the same disk with `AAVMF_CODE.fd` (SB off, NOT a test change, a diagnostic only).
 - No fix written: cause unproven.
+
+## arm64 timing comparison (job logs only, still no local reproduction)
+
+- `latest-4k-arm64` (uboot): `Startup finished in 6.111s (kernel) + 1min 13.453s (initrd) + 2min 6.438s
+  (userspace)`; sshd listening at guest 190.9 s, `port 2222 open`, then `Connection timed out during banner
+  exchange`: the SSH step is lost to TCG slowness, the guest itself is healthy.
+- `latest-arm64` (secboot, 16 KB kernel): after the same 300 s wall window the serial log ends at guest
+  4.56 s. The captured serial of the 4k job only starts at guest 186.6 s, so the 4k boot cannot be compared
+  with the secboot one before that point. Whether the secboot guest is silent in the initrd or stalled is
+  still UNKNOWN. A local boot of the same disk is required; blocked on the binfmt prerequisite above.
