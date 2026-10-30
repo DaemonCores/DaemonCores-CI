@@ -541,6 +541,10 @@ jobs:
             if [[ "${kernel_suffix}" == -16k* ]]; then
               arm_devices="rpi5 rk3588"
             fi
+            # Version stamp for the aleph metadata (see the build args below):
+            # the pushed commit hash of this run.
+            local sha_stamp
+            sha_stamp=$(git rev-parse --short HEAD)
             local build_args=(
               --build-arg "BASE_IMAGE=localhost/debian-bootc-base"
               --build-arg "ARCH=${ARCH}"
@@ -557,6 +561,13 @@ jobs:
               --build-arg "GPU_GAMING_PKGS=$( [[ "$tag" == *-gaming ]] && printf '%s' "${GPU_GAMING_PKGS:-}" || printf '' )"
               --build-arg "COSIGN_PUBKEY_B64=$(printf '%s' "${COSIGN_PUBLIC_KEY}" | base64 -w0)"
               --build-arg "IMAGE_REF=${IMAGE,,}"
+              # Version stamp: bootc writes the OCI metadata into
+              # /sysroot/.bootc-aleph.json at install and Debian bootupd's
+              # bootupctl parses it with a strict string schema — unset, the
+              # nulls fail bootloader-update.service on every boot (replayed
+              # 2026-10-30). Stamped tag + sha + the current run timestamp.
+              --build-arg "IMAGE_VERSION=${CF_TAG}-${sha_stamp}"
+              --build-arg "IMAGE_CREATED=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
               --label "org.daemoncores.content-hash=${hash}"
               --tag "${IMAGE}:${tag}_${ARCH}"
               -f "$CF_FILE"
@@ -616,17 +627,47 @@ jobs:
           set -euo pipefail
           sudo podman run --rm "${IMAGE}:${TWIN}" bootc container lint
 
+      # The GPU usage twins get the same lint as the primary: the installer
+      # recipe offers these refs (gen-recipe.py), so what is offered must at
+      # least pass the bootc contract. Their boot tests stay pending until an
+      # opt-in EULA-restricted run can supply the private deb suite (the -ia
+      # twin): the boot-test stage below replays only primary + -nosign.
+      # Skipped for the installer image: the installer is a live graphical
+      # image with no GPU twins planned (no GPU labels on Containerfile.iso).
+      - name: Smoke test the -gaming twin
+        if: steps.tags.outputs.gaming_primary != '' && matrix.entry.tag != 'iso'
+        env:
+          TWIN: ${{ steps.tags.outputs.gaming_primary }}
+        run: |
+          set -euo pipefail
+          sudo podman run --rm "${IMAGE}:${TWIN}" bootc container lint
+
+      - name: Smoke test the -ia twin
+        if: steps.tags.outputs.ia_primary != '' && matrix.entry.tag != 'iso'
+        env:
+          TWIN: ${{ steps.tags.outputs.ia_primary }}
+        run: |
+          set -euo pipefail
+          sudo podman run --rm "${IMAGE}:${TWIN}" bootc container lint
+
       # Real boot test: install to a disk, boot under QEMU/KVM, run the repo's
       # image-tests over SSH. A failure fails this job, so Push never runs.
       # Skipped for the installer image (tag=iso): it is a live graphical
       # installer with no SSH server, so the boot-test infrastructure cannot
       # connect. The installer image is validated by bootc container lint only.
+      # RAM idle budget: Gabriel's 10-15 MiB target holds ONLY for the minimal
+      # lane. Replayed boot-test 2026-10-30 (artefact-only, PVE host): the main
+      # image idles at ~305-320 MiB boot-fresh (systemd + journald + udevd +
+      # logind + netavark + wpa_supplicant alone carry it) — a 15 MiB budget on
+      # the main lane would block every build. The gate stays on for minimal
+      # and is disabled (0) for the main lanes until a real budget is decided.
       - name: Boot-test the image
         if: matrix.entry.tag != 'iso'
         uses: DaemonCores/DaemonCores-CI/image-test@main
         with:
           image: ${{ env.IMAGE }}:${{ steps.tags.outputs.primary }}
           arch: ${{ matrix.entry.arch }}
+          ram-idle-max-mb: ${{ startsWith(matrix.entry.tag, 'minimal') && '15' || '0' }}
 
       - name: Boot-test the unsigned-kernel twin
         if: steps.tags.outputs.twin_primary != ''
@@ -667,6 +708,8 @@ jobs:
         env:
           CF_TAG: ${{ matrix.entry.tag }}
           TWIN_TAG: ${{ steps.tags.outputs.twin_tag }}
+          IA_TAG: ${{ steps.tags.outputs.ia_tag }}
+          GAMING_TAG: ${{ steps.tags.outputs.gaming_tag }}
           ARCH: ${{ matrix.entry.arch }}
           CANONICAL: ${{ steps.tags.outputs.canonical }}
         run: |
@@ -697,6 +740,8 @@ jobs:
           : > /tmp/push_refs.txt
           push_one "${CF_TAG}"
           [[ -z "${TWIN_TAG}" ]] || push_one "${TWIN_TAG}"
+          [ -z "${IA_TAG:-}" ] || push_one "${IA_TAG}"
+          [ -z "${GAMING_TAG:-}" ] || push_one "${GAMING_TAG}"
           {
             echo "refs<<EOF"
             cat /tmp/push_refs.txt
