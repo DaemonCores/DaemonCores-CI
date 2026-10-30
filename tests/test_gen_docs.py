@@ -1,5 +1,6 @@
 """Unit tests for ``scripts/gen_docs.py``."""
 
+import io
 import sys
 from pathlib import Path
 
@@ -49,3 +50,27 @@ def test_root_option_documents_another_repository(tmp_path: Path) -> None:
     assert (tmp_path / "docs/reference/Reference-Python.md").is_file()
     sys.argv = ["gen_docs.py", "--root", str(tmp_path), "--check"]
     assert gen_docs.main() == 0
+
+
+def test_dangling_docs_symlink_skips_the_reference_check(
+    tmp_path: Path,
+) -> None:
+    """A docs -> wiki symlink with no wiki clone in CI is skipped, not stale.
+
+    Args:
+        tmp_path: Scratch repository with a docs symlink pointing nowhere.
+    """
+    (tmp_path / "Makefile").write_text(
+        "PYTHON_SRCS := m.py\nSHELL_SRCS :=\nPOSTINST_SRCS :=\n"
+    )
+    (tmp_path / "m.py").write_text('"""Module doc."""\n')
+    (tmp_path / "docs").symlink_to(tmp_path / "absent-wiki")
+    sys.argv = ["gen_docs.py", "--root", str(tmp_path), "--check"]
+    errs = io.StringIO()
+    old = sys.stderr
+    sys.stderr = errs
+    try:
+        assert gen_docs.main() == 0
+    finally:
+        sys.stderr = old
+    assert "reference check skipped" in errs.getvalue()
