@@ -270,3 +270,24 @@ image-test action reads by default).
   vmlinuz stay signed for everyone. The `unsigned-kernel` categories now boot with Secure Boot enforced.
 - Real check pending: full run, then read `linux-image` signing, boot tests `signed`/`unsigned-kernel` on
   amd64+arm64 (no more `bad shim signature`), U-Boot 4k arm64 with the raw `Image` (untested risk).
+
+## Design check: one image with both 4k and 16k arm64 kernels (step 1.1, upstream source read)
+
+- Decision from the owner: the U-Boot/embedded criterion must be an `-embedded` image variant, not the `-4k` tag
+  suffix (page size is a kernel detail). Today `tests.yml` category `uboot` is selected by suffix `-4k` and the
+  `-nosign` twin is skipped for the `-4k` image; no Containerfile carries `LABEL org.daemoncores.boot-profile`.
+- Question: can one image hold both kernels and pick at boot? Upstream source (shallow clones of bootc-dev/bootc
+  and ostreedev/ostree, read 2026-10-30):
+  - `ostree/src/libostree/ostree-repo-os.c:67` `ostree_commit_metadata_for_bootable`: "Multiple kernels found in
+    /usr/lib/modules" (commit-time error).
+  - `bootc/crates/ostree-ext/src/bootabletree.rs:41` and `:86`: "Found multiple subdirectories in
+    /usr/lib/modules"; `bootc/crates/lib/src/lints.rs:492` lints the same condition.
+  - `ostree-sysroot-deploy.c` `get_kernel_from_tree` / `install_deployment_kernel` (l.1420, l.1834) yield one
+    kernel layout per deployment, hence one BLS entry per deployment.
+- Conclusion (MEASURED by source reading, not yet by a build): a two-kernel image is rejected at three layers.
+  Supporting it means patching ostree (C: commit check, deploy, BLS generation) AND bootc (Rust) AND bootupd
+  status/rollback logic: not a simple patch. This repo currently carries no bootc/ostree patch (only
+  `bootupd-dpkg.patch` and the installer patches); both are built unpatched.
+- Second blocker (ESTIMATED, not tested): no standard boot-time page-size detection. A 16k kernel on a core without
+  the 16 KB granule (Pi 3/4) does not boot and falls back to nothing; selection would need a per-board map.
+- Next: implement the `-embedded` variant (test category + twin logic keyed on it), keep one kernel per image.
