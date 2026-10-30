@@ -218,3 +218,26 @@ image-test action reads by default).
   `apt install`: `linux-modules-rpi3:arm64=7.2.13-1+r1 … Depends daemoncores-kernel-7.2.13 (= 7.2.13-1)
   but none of the choices are installable`. Separate from Secure Boot; not analysed yet.
 - amd64 `linux-image` had failed at resolution (section above), so the amd64 images used the last published kernel deb.
+
+## 4k arm64 images: `linux-modules-rpi3/rpi4` pinned to a kernel that left the index (cause proven)
+
+- Symptom (run 41103751203, `latest-4k-arm64`/`minimal-4k-arm64`): `apt install` fails,
+  `linux-modules-rpi3 7.2.13-1+r1 Depends daemoncores-kernel-7.2.13 (= 7.2.13-1)`, no candidate.
+  Pages `Packages` (arm64): rpi3/rpi4 modules are 7.2.13 and depend on `daemoncores-kernel-7.2.13`, while the
+  index only carries `daemoncores-kernel-7.2.14`.
+- `hashes.json`: `linux-modules-rpi3-arm64` hash `209ab93a...` -> deb `linux-modules-rpi3_7.2.13-1+r1`.
+- That hash is the one of `KERNEL_VER=7.2.14`: recomputed locally, the env digest `e49e8580...` of the job log is
+  `sort` of `HELPERS_VER=5 DEVICE=rpi3 KERNEL_VER=7.2.14 MODULE_SIGNING_ACTIVE=no` (7.2.13 and variants give
+  other digests).
+- Runs 41054040585 and 41062757704 tracked `KERNEL_VER=7.2.14` but the `linux-image` arm64 build had not
+  produced 7.2.14 (last-good kept); their rpi3 job installed the dep from
+  `/tmp/prior/linux-image-common_7.2.13-1_arm64.deb` and built `...7.2.13-1+r1` under the 7.2.14 hash.
+- Run 41103751203: `linux-image` arm64 built 7.2.14, but rpi3's hash did not move (the dep's version is not an
+  input of the hash): `cache[linux-modules-rpi3-arm64]: hash=209ab93a... prior=209ab93a...`,
+  `unchanged; reused cached deb(s)`. rpi5 (hash differs) was rebuilt on 7.2.14.
+- Cause: the content hash of a package never sees the dependency debs it is actually built against.
+- Fix (`build-one-deb.yml`): the digest of the installed dependency debs is hashed as `DEPS_HASH`
+  (step `depdebs`, composed in `hashenv`). Local replay of both scripts: a dep deb with other content gives
+  another `DEPS_HASH`; no deps -> empty `extra-env` as before. One-time effect: every package with `deps`
+  rebuilds once on the next run. Real check: next full run must rebuild rpi3/rpi4 on 7.2.14 and the 4k images
+  must install.
