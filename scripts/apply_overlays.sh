@@ -62,10 +62,23 @@ while IFS= read -r -d '' p; do
 done < <(find "${OV}" -name '*.patch' -print0 | sort -z)
 local_patch_count=${#local_patches[@]}
 
+# Debian multiarch: the amd64 overlay mirror paths (and patch a/b paths) name
+# x86_64-linux-gnu; the arm64 deb tree names aarch64-linux-gnu. Translate the
+# triplet when the build targets arm64 - the overlay dir keeps mirroring the
+# amd64 tree, the patch stream is what reaches the target tree.
+arch_patch() {
+  if [[ "${BUILD_ARCH:-amd64}" = "arm64" ]]; then
+    sed 's/x86_64-linux-gnu/aarch64-linux-gnu/g' "$1"
+  else
+    cat "$1"
+  fi
+}
+
 # Dry-run the whole set on the pristine tree FIRST: on drift the tree is
 # left exactly as upstream before anything is copied or applied.
 for p in "${local_patches[@]}"; do
-  patch --fuzz=0 --forward --dry-run -p1 -d "${T}" <"${p}" \
+  arch_patch "${p}" \
+    | patch --fuzz=0 --forward --dry-run -p1 -d "${T}" \
     || skip_pkg "${OV}" "${p}"
 done
 echo "apply_overlays: ${local_patch_count} patch(es) dry-run OK."
@@ -81,7 +94,7 @@ fi
 echo "apply_overlays: overlay copied."
 
 for p in "${local_patches[@]}"; do
-  patch --fuzz=0 --forward -p1 -d "${T}" <"${p}"
+  arch_patch "${p}" | patch --fuzz=0 --forward -p1 -d "${T}"
 done
 
 echo "apply_overlays: ${local_patch_count} patch(es) applied clean."
