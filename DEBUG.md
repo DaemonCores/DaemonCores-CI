@@ -116,9 +116,20 @@ Fix: the CI computes a per-architecture fingerprint of `hashes.json` and passes 
 as `--build-arg DEBS_HASH`; `Containerfile` and `Containerfile.minimal` declare
 `ARG DEBS_HASH=none` before the first layer that installs from the repository.
 
+## Confirmed on the real run (debian-bootc 3213bbf, Full Pipeline 41081357672)
+
+- Image `latest_amd64` pulled after the run: `grubx64.efi` has the `.sbat`
+  section (`.text .data mods .sbat .reloc`), sha256 `f0d212e9...` = the deb on Pages.
+- Bench (OVMF secboot, `q35,smm=on`, KVM, own PK/KEK, MS UEFI CA 2011 in db): the
+  image's own shim (sha `e103c5d0...`) + that grub, with the image's
+  `sb_signing.crt` (CN=debian-bootc Secure Boot Signing Key) as MOK: shim loads
+  grub, `GRUB version 2.12`, `grub>` prompt. No 0x1A.
+- Job results of that run: `latest-amd64` success; the 4 other image jobs failed on
+  the unrelated RAM gate / arm64 TCG slowness (see Open).
+
 ## Open
 
-- Read the next real runs of the debian-bootc pipeline (grub `.sbat`, shim accepts it).
+- Needs root (image pull + install-fs.sh): run `image-test.sh` with `SECURE_BOOT=1 ARCH=amd64` on the real image; blocked while nobody validates the pkexec prompt.
 - Whether the Fedora head used by the package carries the fixes behind SBAT
   generation 5 is inherited from the Fedora packaging, not verified here.
 - End-to-end with a real image (install-fs.sh disk, SSH reachable) under
