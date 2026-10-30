@@ -254,8 +254,21 @@ boot_vm() {
   if [ "${ARCH}" = "arm64" ]; then
     # arm64: QEMU virt machine, AAVMF (arm64 UEFI from qemu-efi-aarch64 package).
     # SECURE_BOOT is not supported on arm64 yet (see install_deps guard).
-    code=$(find /usr/share/AAVMF -name 'AAVMF_CODE*.fd' | head -1)
-    vars=$(find /usr/share/AAVMF -name 'AAVMF_VARS*.fd' | head -1)
+    # Ubuntu's package ships several flavours side by side (.secboot, .ms,
+    # .snakeoil, .no-secboot); the first match in directory order may be a
+    # Secure Boot firmware, which rejects the unsigned EFI Shell and the
+    # disk's loader ("Security Violation"/"Access Denied"). Take a plain,
+    # non-enforcing pair, sorted for determinism.
+    code=$(find /usr/share/AAVMF -name 'AAVMF_CODE*.fd' ! -name '*.secboot.*' \
+      ! -name '*.ms.*' ! -name '*.snakeoil.*' | sort | head -1)
+    vars=$(find /usr/share/AAVMF -name 'AAVMF_VARS*.fd' ! -name '*.secboot.*' \
+      ! -name '*.ms.*' ! -name '*.snakeoil.*' | sort | head -1)
+    if [ -z "${code}" ] || [ -z "${vars}" ]; then
+      echo "::error::no non-Secure-Boot AAVMF firmware pair under /usr/share/AAVMF"
+      exit 1
+    fi
+    echo "AAVMF CODE: ${code}"
+    echo "AAVMF VARS: ${vars}"
     cp "${vars}" "${WORK}/OVMF_VARS.fd"
     sudo qemu-system-aarch64 \
       ${accel} -m "${MEM:-4096}" -smp "${VCPUS:-2}" \
