@@ -312,3 +312,19 @@ image-test action reads by default).
   bench before any fix.
 - latest-4k-arm64 (uboot): the raw `Image` boots under U-Boot (userspace ready at 206 s guest) but the 300 s
   window expires (TCG slowness, known). minimal-4k-arm64 and minimal-amd64: RAM idle gate (205 / 330 MiB over 15).
+
+## arm64 secboot "VM did not become reachable" (latest-arm64, minimal-arm64): reproduction status
+
+- Observed (job logs of run 41129742013): serial output ends at `[    4.560027] PM: genpd: Disabling unused
+  power domains`, nothing for the remaining 300 s window, no panic and no shim error. The `-4k` U-Boot job
+  (SB off) prints systemd up to `Startup finished` at 206 s guest. Two differences between the cases (Secure
+  Boot firmware and 16 KB vs 4 KB kernel) are confounded: the cause is NOT established.
+- Local reproduction blocked: building and installing the arm64 image needs arm64 binaries to run on this
+  amd64 host and `/proc/sys/fs/binfmt_misc/` has no `qemu-aarch64` handler (`qemu-aarch64` exists, not
+  registered). Registering it needs root (one batched pkexec prompt). No arm64 disk image of this run is
+  available (the image is built inside the job; artifacts hold only the `.deb` files).
+- Next step once a root prompt can be answered: register the handler, `podman build --platform linux/arm64`
+  the current Containerfile against the published APT repository, install to a disk as `image-test.sh` does,
+  boot it with the bench (`AAVMF_CODE.secboot.fd` + enrolled varstore) and, to separate the two variables,
+  also boot the same disk with `AAVMF_CODE.fd` (SB off, NOT a test change, a diagnostic only).
+- No fix written: cause unproven.
