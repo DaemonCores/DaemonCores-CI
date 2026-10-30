@@ -127,10 +127,45 @@ as `--build-arg DEBS_HASH`; `Containerfile` and `Containerfile.minimal` declare
 - Job results of that run: `latest-amd64` success; the 4 other image jobs failed on
   the unrelated RAM gate / arm64 TCG slowness (see Open).
 
+## Second blocker found locally: the kernel is not signed
+
+- `vmlinuz` of the image (`/usr/lib/modules/7.2.14/vmlinuz`) has an empty PE
+  certificate table (`off/size 0 0`): nothing in the pipeline signed it (`sbsign`
+  was only applied to grub).
+- Bench (shim + the image's grub + `grub.cfg` + the kernel on the ESP, bench cert
+  and `sb_signing.crt` in MOK):
+
+| # | kernel on the ESP                                 | result                                                        |
+|---|---------------------------------------------------|---------------------------------------------------------------|
+| 1 | unsigned `vmlinuz`                                | `shim_lock_verifier_write: bad shim signature`, `linux` rc=45 |
+| 2 | `vmlinuz` signed by a bench key, cert in MOK      | `linux` rc=0                                                  |
+
+So the end-to-end boot would have failed at the kernel even with the fixed grub.
+
+Fix (debian-bootc): `kernel_sign_efi` in `lib/kernel-signing.sh`, called from the
+`linux-image` entry of `packages.yml` on the repacked `boot/vmlinuz-*`; it signs
+with `SB_SIGNING_KEY`/`SB_SIGNING_CERT`, verifies with `sbverify`, and only then
+replaces the file. Without a key, or for an image that is not a PE (arm64
+`Image.gz`), it prints a notice and leaves the file untouched. The arm64 kernel is
+therefore not signable this way: the arm64 end-to-end run will show whether the
+shim accepts it.
+
+The module signing key (`MODULE_SIGNING_*`) is compiled into the kernel's built-in
+keyring: no MOK entry is needed for it. MOK is needed for the keys of forks, which
+is what the installer's `mok-stage` enrolls (`sb_signing.crt` plus
+`/usr/share/debian-bootc/mok.d/*.{crt,cer,pem,der}`, never a private key).
+
+## Harness change: default on, mok.d enrolled
+
+`image-test.sh`: `SECURE_BOOT` now defaults to 1 and `build_sb_vars` enrolls in the
+MOK the same set as the installer: `sb.crt` plus the certificates found in the
+image's `mok.d` (PEM or DER, files holding a private key skipped).
+
 ## Open
 
 - Needs root (image pull + install-fs.sh): run `image-test.sh` with `SECURE_BOOT=1 ARCH=amd64` on the real image; blocked while nobody validates the pkexec prompt.
 - Whether the Fedora head used by the package carries the fixes behind SBAT
   generation 5 is inherited from the Fedora packaging, not verified here.
 - End-to-end with a real image (install-fs.sh disk, SSH reachable) under
-  `SECURE_BOOT=1`, then flip the default to 1 in CI and confirm on a real run.
+  `SECURE_BOOT=1` is now the CI run itself (default 1); result to be read from the
+  real run, per architecture.
