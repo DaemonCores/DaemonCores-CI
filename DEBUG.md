@@ -244,3 +244,16 @@ image-test action reads by default).
 - Real check, run 41118096830: `cache[linux-modules-rpi3-arm64]: hash=da642668... prior=209ab93a...` and
   rpi4 `hash=80e0281a... prior=46905193...` -> both `built`; the published arm64 index now lists
   `linux-modules-rpi3` and `-rpi4` at `7.2.14-1+r1`. Image jobs started afterwards (results below once read).
+
+## Real run 41118096830: all six image jobs built; per-category boot results
+
+- 4k arm64 images now build (the dependency hash fix holds). Category `uboot` (SB off by design):
+  `AAVMF CODE: /usr/share/AAVMF/AAVMF_CODE.fd`, `AAVMF VARS: /usr/share/AAVMF/AAVMF_VARS.fd`.
+- `latest-4k-arm64`: the guest boots (`Startup finished in 6.167s (kernel) + 1min 14.665s (initrd) + 2min
+  15.255s (userspace) = 3min 36.088s`, TCG), port 2222 opens, then ssh stops at `Connection timed out during
+  banner exchange` and the run ends at `VM did not become reachable within 300s`. Slowness of software
+  emulation against a 300 s window; not Secure Boot. Not fixed, cause of the sshd delay not analysed.
+- `minimal-4k-arm64`: `RAM idle budget exceeded: 204 MiB at idle over the 15 MiB budget` (known gate, the
+  breakdown work is the uncommitted `ram_gate` block, not mine).
+- `signed` (`latest`/`minimal` x amd64/arm64): unchanged, shim + grub pass under SB and the boot stops at
+  `bad shim signature` (unsigned `vmlinuz`), arm64 on `AAVMF_CODE.secboot.fd`.
