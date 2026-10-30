@@ -50,9 +50,10 @@ SSH_PORT=2222
 # UEFI CAs so the MS-signed shim validates + our MOK for grub, no revocation
 # dbx). The former 0x1A Security Violation was not a QEMU/OVMF defect: the
 # shim's built-in SBAT policy revoked a grub carrying no (or a too old) .sbat
-# section; the grub is now built with --sbat (see DEBUG.md). Default stays 0
-# until the enforced path is confirmed end to end on a real run.
-SECURE_BOOT="${SECURE_BOOT:-0}"
+# section; the grub is now built with --sbat (see DEBUG.md). The MOK carries the
+# image signing certificate (grub and kernel are signed with that key) and the
+# certificates of the image's mok.d, as the installer enrolls them.
+SECURE_BOOT="${SECURE_BOOT:-1}"
 # 1 once we know /dev/kvm is present and usable, 0 otherwise (set in
 # install_deps). GitHub's hosted arm64 runners expose no /dev/kvm at all —
 # nested virtualization is not available on that fleet — so the arm64 boot
@@ -199,6 +200,7 @@ install_disk() {
 #######################################
 build_sb_vars() {
   local certs guid base k
+  local -a mok_args
   certs=$("${WORK}/sbtool/bin/python" -c \
     'import os,virt.firmware as v; print(os.path.join(
      os.path.dirname(v.__file__), "certs/microsoft.com"))')
@@ -214,6 +216,24 @@ build_sb_vars() {
   # shellcheck disable=SC2024
   sudo podman run --rm "${IMAGE}" \
     cat /usr/share/debian-bootc/sb_signing.crt >"${WORK}/sb.crt"
+  # The certificates the installer's mok-stage enrolls besides the signing one:
+  # the public ones dropped in the image's mok.d (a fork's own key), PEM or DER,
+  # never a file holding a private key.
+  mok_args=(--add-mok "${guid}" "${WORK}/sb.crt")
+  mkdir -p "${WORK}/mok.d"
+  if sudo podman run --rm "${IMAGE}" test -d /usr/share/debian-bootc/mok.d; then
+    sudo podman run --rm "${IMAGE}" tar -C /usr/share/debian-bootc -c mok.d \
+      | tar -C "${WORK}" -x
+  fi
+  for k in "${WORK}"/mok.d/*; do
+    [ -f "${k}" ] || continue
+    case "${k}" in *.crt | *.cer | *.pem | *.der) ;; *) continue ;; esac
+    grep -q 'PRIVATE KEY' "${k}" && continue
+    openssl x509 -in "${k}" -outform PEM -out "${k}.pem" 2>/dev/null \
+      || openssl x509 -inform DER -in "${k}" -outform PEM -out "${k}.pem" \
+      || { echo "::error::mok.d/${k##*/} is not a certificate"; exit 1; }
+    mok_args+=(--add-mok "${guid}" "${k}.pem")
+  done
   if [ "${ARCH}" = "arm64" ]; then
     base=$(find /usr/share/AAVMF -name 'AAVMF_VARS*.fd' ! -name '*.ms.*' \
       ! -name '*.snakeoil.*' | sort | head -1)
@@ -231,7 +251,7 @@ build_sb_vars() {
     --add-db "${guid}" "${certs}/ms-uefi-2011.pem" \
     --add-db "${guid}" "${certs}/ms-uefi-2023.pem" \
     --add-db "${guid}" "${WORK}/sb.crt" \
-    --add-mok "${guid}" "${WORK}/sb.crt" \
+    "${mok_args[@]}" \
     --secure-boot
 }
 
