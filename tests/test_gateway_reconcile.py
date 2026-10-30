@@ -117,6 +117,18 @@ def test_variant_a_flat_bloc_is_refused(tmp_path: Path) -> None:
     assert "variant A" in r.stderr
 
 
+def test_routers_without_fence_is_refused(tmp_path: Path) -> None:
+    conf = make_conf(
+        tmp_path, 140,
+        "<!--gateway\nrouters:\n  forge:\n    rule: Host(`x`)\n"
+        "    service: http://10.0.0.140:3000\ngateway-->",
+    )
+    out = tmp_path / "dynamic.yml"
+    r = run(conf, out)
+    assert r.returncode == 4, r.stderr
+    assert "without a ```yaml fence" in r.stderr
+
+
 def test_unparsable_yaml_refused_exit4(tmp_path: Path) -> None:
     conf = make_conf(
         tmp_path, 120,

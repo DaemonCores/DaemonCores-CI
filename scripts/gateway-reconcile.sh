@@ -28,7 +28,9 @@
 # offline runs and tests.
 #
 # Exit codes: 0 ok, 4 a NOTES bloc is malformed/unsupported (router
-# skipped, other guests still reconciled), 5 collection failure.
+# skipped, other guests still reconciled; the rejected variant A and a
+# routers block without a fence abort loudly the run instead), 5
+# collection failure or missing PyYAML.
 
 set -euo pipefail
 
