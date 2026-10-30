@@ -142,24 +142,34 @@ as `--build-arg DEBS_HASH`; `Containerfile` and `Containerfile.minimal` declare
 
 So the end-to-end boot would have failed at the kernel even with the fixed grub.
 
-Fix (debian-bootc): `kernel_sign_efi` in `lib/kernel-signing.sh`, called from the
-`linux-image` entry of `packages.yml` on the repacked `boot/vmlinuz-*`; it signs
-with `SB_SIGNING_KEY`/`SB_SIGNING_CERT`, verifies with `sbverify`, and only then
-replaces the file. Without a key, or for an image that is not a PE (arm64
-`Image.gz`), it prints a notice and leaves the file untouched. The arm64 kernel is
-therefore not signable this way: the arm64 end-to-end run will show whether the
-shim accepts it.
+Status: no fix is applied. A first attempt (a `kernel_sign_efi` step in the
+`linux-image` build) was reverted: it ignored the signing modes the build already
+has (`MODULE_SIGNING_ACTIVE`, `KERNEL_SIGNING_ENFORCE`, the `-nosign` twins). The
+EFI signature of `vmlinuz` has to follow those modes; until it does, a signed
+category booted under Secure Boot stops at the kernel (`rc=45` above).
 
 The module signing key (`MODULE_SIGNING_*`) is compiled into the kernel's built-in
 keyring: no MOK entry is needed for it. MOK is needed for the keys of forks, which
 is what the installer's `mok-stage` enrolls (`sb_signing.crt` plus
 `/usr/share/debian-bootc/mok.d/*.{crt,cer,pem,der}`, never a private key).
 
-## Harness change: default on, mok.d enrolled
+## Harness change: Secure Boot follows the image category, mok.d enrolled
 
-`image-test.sh`: `SECURE_BOOT` now defaults to 1 and `build_sb_vars` enrolls in the
-MOK the same set as the installer: `sb.crt` plus the certificates found in the
-image's `mok.d` (PEM or DER, files holding a private key skipped).
+`image-test.sh` reads `categories:` of the tests manifest. The category is the one
+of the running arch whose `suffix` ends the tag (minus `_<arch>`), longest suffix
+first; it gives `secure_boot` (0|1) and `reference`. Tests with a `category:` list
+run only there; tests without one are global and run on the `reference` category
+only. A manifest without `categories` keeps every test and Secure Boot off.
+`SECURE_BOOT` in the environment still overrides, for a local run.
+
+When Secure Boot is on, `build_sb_vars` enrolls in the MOK the same set as the
+installer: `sb.crt` plus the certificates found in the image's `mok.d` (PEM or
+DER, files holding a private key skipped).
+
+Local check (functions sourced, `ssh` stubbed): `latest_amd64` -> `signed`
+(SB=1, reference); `latest-nosign_amd64` -> `unsigned-kernel` (SB=0);
+`latest-4k_arm64` -> `uboot` (SB=0); an unknown category in a test, a duplicate
+`(arch, suffix)` or a `secure_boot` outside 0|1 are refused before the VM boots.
 
 ## Open
 
