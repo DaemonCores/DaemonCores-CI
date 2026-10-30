@@ -165,7 +165,7 @@ jobs:
                 match() { printf '%s\n' "$changed" | grep -qE "$1"; }
                 match '^workflows/build-env/'                            && env=true   || true
                 match '^workflows/bootc-debs-builder/'                   && debs=true  || true
-                match '^(Containerfile|src/|assets/|workflows/image-tests/)' && image=true || true
+                match '^(Containerfile|src/|assets/|workflows/image-tests/|workflows/tests\.yml)' && image=true || true
                 match '^(Containerfile\.iso|workflows/build-iso/)'       && { image=true; iso=true; } || true
                 # Any change to the caller pipeline itself -> full rebuild (safe).
                 # img formats are NOT cascaded by a pipeline.yml push (opt-in
