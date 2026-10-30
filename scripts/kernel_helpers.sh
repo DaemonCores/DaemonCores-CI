@@ -332,7 +332,13 @@ kernel_pve_prepare() {
       fi
   fi
   PVE_SEED_CONFIG=""
-  if [[ -f "${SRCDIR}/.config" ]]; then
+  if [[ -f "${builddir}/.config.pve-seed" ]]; then
+    # Pre-mounted seed (captured from the host: /boot/config-<kernel> of the
+    # running PVE kernel) wins; the PVE packaging deltas are already baked
+    # into a running PVE kernel config. Ported verbatim from the lib.
+    PVE_SEED_CONFIG="${builddir}/.config.pve-seed"
+    echo "seed config: pre-mounted host config"
+  elif [[ -f "${SRCDIR}/.config" ]]; then
     cp "${SRCDIR}/.config" "${builddir}/.config.pve-seed"
     # shellcheck disable=SC2046  # the opts files are word-split on purpose
     "${SRCDIR}/scripts/config" --file "${builddir}/.config.pve-seed" \
@@ -342,6 +348,7 @@ kernel_pve_prepare() {
     PVE_SEED_CONFIG="${builddir}/.config.pve-seed"
     echo "seed config: ubuntu base + PVE packaging deltas"
   else
-    echo "WARN: no base .config in the kernel tree; build starts from defconfig"
+    echo "WARN: no seed and no base .config in the kernel tree; build starts from defconfig"
   fi
+  export PVE_SEED_CONFIG SRCDIR
 }
