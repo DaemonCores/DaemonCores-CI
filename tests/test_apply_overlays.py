@@ -101,3 +101,33 @@ def test_overlay_missing_dirs_fail(tmp_path: Path) -> None:
     result = run(tmp_path / "nope", tmp_path / "also-nope")
     assert result.returncode != 0
     assert "missing" in result.stderr
+
+
+def test_overlay_translates_the_triplet_for_arm64(tmp_path: Path) -> None:
+    # Debian multiarch: the overlay mirror names x86_64-linux-gnu; the arm64
+    # deb tree names aarch64-linux-gnu. With BUILD_ARCH=arm64 the helper
+    # rewrites the triplet in the patch stream before applying.
+    tree = tmp_path / "tree"
+    touch(
+        tree / "usr/lib/aarch64-linux-gnu/perl5/5.40/Template/Provider.pm",
+        "line1\nline2\n",
+    )
+    overlay = tmp_path / "overlay"
+    touch(overlay / "usr/lib/x86_64-linux-gnu/perl5/5.40/Template/Provider.pm.patch", (
+        "diff --git a/usr/lib/x86_64-linux-gnu/perl5/5.40/Template/Provider.pm"
+        " b/usr/lib/x86_64-linux-gnu/perl5/5.40/Template/Provider.pm\n"
+        "--- a/usr/lib/x86_64-linux-gnu/perl5/5.40/Template/Provider.pm\n"
+        "+++ b/usr/lib/x86_64-linux-gnu/perl5/5.40/Template/Provider.pm\n"
+        "@@ -2 +2,2 @@\n"
+        " line2\n"
+        "+line3\n"
+    ))
+    result = subprocess.run(
+        ["bash", str(SCRIPT), str(overlay), str(tree)],
+        capture_output=True, text=True,
+        env={"BUILD_ARCH": "arm64", "PATH": "/usr/bin:/bin:/usr/sbin"},
+    )
+    assert result.returncode == 0, result.stderr
+    assert "line3\n" in (
+        tree / "usr/lib/aarch64-linux-gnu/perl5/5.40/Template/Provider.pm"
+    ).read_text()
