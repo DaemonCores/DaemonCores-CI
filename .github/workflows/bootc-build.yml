@@ -350,6 +350,12 @@ jobs:
             "${ARCH}" "${signing}" \
             | sha256sum | cut -d' ' -f1)
           echo "hash=${hash}" >>"$GITHUB_OUTPUT"
+          # Per-arch fingerprint of the published debs, passed to the image build as a
+          # build arg so its apt layers are not served stale from the layer cache.
+          debs_hash=$(printf '%s' "${debs}" \
+            | jq -cS --arg a "-${ARCH}" 'with_entries(select(.key | endswith($a)))' \
+            | sha256sum | cut -d' ' -f1)
+          echo "debs_hash=${debs_hash}" >>"$GITHUB_OUTPUT"
           # The twin differs from its primary image by the kernel only.
           twin_hash=$(printf '%s\nnosign\n' "${hash}" | sha256sum | cut -d' ' -f1)
           echo "twin_hash=${twin_hash}" >>"$GITHUB_OUTPUT"
@@ -450,6 +456,7 @@ jobs:
           CANONICAL: ${{ steps.tags.outputs.canonical }}
           COSIGN_PUBLIC_KEY: ${{ secrets.COSIGN_PUBLIC_KEY }}
           HASH: ${{ steps.chash.outputs.hash }}
+          DEBS_HASH: ${{ steps.chash.outputs.debs_hash }}
           TWIN_HASH: ${{ steps.chash.outputs.twin_hash }}
         run: |
           set -euo pipefail
@@ -556,6 +563,7 @@ jobs:
               --build-arg "BOOT_PROFILE=${profile}"
               --build-arg "FIRMWARE_PKGS=${firmware_pkgs}"
               --build-arg "APT_HOLD_PKG=${apt_hold_pkg}"
+              --build-arg "DEBS_HASH=${DEBS_HASH}"
               # The GPU usage twins only: ia (EULA-restricted compute) and
               # gaming (public display stack) carry their package lists; the
               # public build keeps both args empty.

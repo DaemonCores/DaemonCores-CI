@@ -48,14 +48,10 @@ SSH_PORT=2222
 # SECURE_BOOT=1 boots the VM with UEFI Secure Boot enforced, using a varstore
 # build_sb_vars generates from scratch (our own PK/KEK + the public Microsoft
 # UEFI CAs so the MS-signed shim validates + our MOK for grub, no revocation
-# dbx). Default 0 (Setup Mode, SB not enforced) BY DESIGN: under OVMF — both the
-# Arch and the Ubuntu builds — SB rejects our valid, unmodified MS-signed shim
-# with a 0x1A Security Violation even with its exact CA in db and no aggressive
-# dbx, a QEMU/OVMF behaviour we could not resolve after a long investigation.
-# The shim is Debian's official signed shim (proven on real Secure Boot
-# hardware), so the boot-test validates the OS boot with SB off and we rely on
-# real hardware for the SB chain. The SB-on path (build_sb_vars) is kept for a
-# future revisit — see the secureboot-boot-test-state memory.
+# dbx). The former 0x1A Security Violation was not a QEMU/OVMF defect: the
+# shim's built-in SBAT policy revoked a grub carrying no (or a too old) .sbat
+# section; the grub is now built with --sbat (see DEBUG.md). Default stays 0
+# until the enforced path is confirmed end to end on a real run.
 SECURE_BOOT="${SECURE_BOOT:-0}"
 # 1 once we know /dev/kvm is present and usable, 0 otherwise (set in
 # install_deps). GitHub's hosted arm64 runners expose no /dev/kvm at all —
@@ -136,16 +132,13 @@ install_deps() {
   fi
 
   if [ "${SECURE_BOOT}" = 1 ]; then
-    # Secure Boot varstore generation is amd64-only: OVMF on arm64 (AAVMF) has
-    # the same Security Violation issue and has not been investigated yet.
-    if [ "${ARCH}" != "amd64" ]; then
-      echo "::error::SECURE_BOOT=1 is only supported on amd64 (arm64 not yet investigated)"
-      exit 1
-    fi
     # virt-firmware builds the Secure Boot varstore (it bundles the Microsoft
     # UEFI CAs); openssl generates our own PK/KEK. Kept in a venv so the runner's
     # system Python is untouched (PEP 668).
-    sudo apt-get install -y --no-install-recommends python3-venv openssl
+    if ! python3 -c 'import ensurepip, venv' 2>/dev/null \
+      || ! command -v openssl >/dev/null 2>&1; then
+      sudo apt-get install -y --no-install-recommends python3-venv openssl
+    fi
     python3 -m venv "${WORK}/sbtool"
     "${WORK}/sbtool/bin/pip" install --quiet virt-firmware
   fi
@@ -221,8 +214,17 @@ build_sb_vars() {
   # shellcheck disable=SC2024
   sudo podman run --rm "${IMAGE}" \
     cat /usr/share/debian-bootc/sb_signing.crt >"${WORK}/sb.crt"
-  base=$(find "${OVMF_DIR}" -name 'OVMF_VARS*.fd' ! -name '*.ms.*' \
-    ! -name '*secboot*' | head -1)
+  if [ "${ARCH}" = "arm64" ]; then
+    base=$(find /usr/share/AAVMF -name 'AAVMF_VARS*.fd' ! -name '*.ms.*' \
+      ! -name '*.snakeoil.*' | sort | head -1)
+  else
+    base=$(find "${OVMF_DIR}" -name 'OVMF_VARS*.fd' ! -name '*.ms.*' \
+      ! -name '*secboot*' | head -1)
+  fi
+  if [ -z "${base}" ]; then
+    echo "::error::no blank UEFI varstore to build the Secure Boot one from"
+    exit 1
+  fi
   "${VIRT_FW}" -i "${base}" -o "${WORK}/OVMF_VARS.fd" \
     --set-pk "${guid}" "${WORK}/PK.pem" \
     --add-kek "${guid}" "${WORK}/KEK.pem" \
@@ -253,23 +255,26 @@ boot_vm() {
   fi
   if [ "${ARCH}" = "arm64" ]; then
     # arm64: QEMU virt machine, AAVMF (arm64 UEFI from qemu-efi-aarch64 package).
-    # SECURE_BOOT is not supported on arm64 yet (see install_deps guard).
     # Ubuntu's package ships several flavours side by side (.secboot, .ms,
-    # .snakeoil, .no-secboot); the first match in directory order may be a
-    # Secure Boot firmware, which rejects the unsigned EFI Shell and the
-    # disk's loader ("Security Violation"/"Access Denied"). Take a plain,
-    # non-enforcing pair, sorted for determinism.
-    code=$(find /usr/share/AAVMF -name 'AAVMF_CODE*.fd' ! -name '*.secboot.*' \
-      ! -name '*.ms.*' ! -name '*.snakeoil.*' | sort | head -1)
-    vars=$(find /usr/share/AAVMF -name 'AAVMF_VARS*.fd' ! -name '*.secboot.*' \
-      ! -name '*.ms.*' ! -name '*.snakeoil.*' | sort | head -1)
+    # .snakeoil, .no-secboot), so the firmware is picked by name, never by
+    # directory order: the enforcing build for SECURE_BOOT=1 (paired with the
+    # varstore from build_sb_vars), the plain one otherwise.
+    if [ "${SECURE_BOOT}" = 1 ]; then
+      code=$(find /usr/share/AAVMF -name 'AAVMF_CODE.secboot.fd' | sort | head -1)
+      vars="${WORK}/OVMF_VARS.fd"
+    else
+      code=$(find /usr/share/AAVMF -name 'AAVMF_CODE*.fd' ! -name '*.secboot.*' \
+        ! -name '*.ms.*' ! -name '*.snakeoil.*' | sort | head -1)
+      vars=$(find /usr/share/AAVMF -name 'AAVMF_VARS*.fd' ! -name '*.secboot.*' \
+        ! -name '*.ms.*' ! -name '*.snakeoil.*' | sort | head -1)
+    fi
     if [ -z "${code}" ] || [ -z "${vars}" ]; then
-      echo "::error::no non-Secure-Boot AAVMF firmware pair under /usr/share/AAVMF"
+      echo "::error::no matching AAVMF firmware pair under /usr/share/AAVMF"
       exit 1
     fi
     echo "AAVMF CODE: ${code}"
     echo "AAVMF VARS: ${vars}"
-    cp "${vars}" "${WORK}/OVMF_VARS.fd"
+    [ "${SECURE_BOOT}" = 1 ] || cp "${vars}" "${WORK}/OVMF_VARS.fd"
     sudo qemu-system-aarch64 \
       ${accel} -m "${MEM:-4096}" -smp "${VCPUS:-2}" \
       -machine virt -cpu "${cpu}" \
@@ -315,7 +320,7 @@ boot_vm() {
       cp "${vars}" "${WORK}/OVMF_VARS.fd"
     fi
     sudo qemu-system-x86_64 \
-      ${accel} -m "${MEM:-4096}" -smp "${VCPUS:-2}" -machine q35 \
+      ${accel} -m "${MEM:-4096}" -smp "${VCPUS:-2}" -machine "q35,smm=${secure}" \
       -global "driver=cfi.pflash01,property=secure,value=${secure}" \
       -drive "if=pflash,format=raw,unit=0,readonly=on,file=${code}" \
       -drive "if=pflash,format=raw,unit=1,file=${WORK}/OVMF_VARS.fd" \
