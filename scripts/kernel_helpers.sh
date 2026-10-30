@@ -247,6 +247,19 @@ kernel_build_debs() {
   local tree="$1" target="$2" kcflags="${3:-}"
   local -a build_cmd=(make -j"$(nproc)")
   [[ -z "${kcflags}" ]] || build_cmd+=(KCFLAGS="${kcflags}")
+  # The deb-pkg source package is built from `git archive` HEAD: without a
+  # commit of the patch set, dpkg-source would have to embed the whole
+  # worktree diff over the unpatched orig tarball (fuzz/refusal — first real
+  # run). Committing makes the source package carry the patch set and keeps
+  # the flavour passes re-runnable over the same tree. Trees without git
+  # linkage (bindeb-pkg mode) are untouched. Ported verbatim from the lib
+  # kernel-pve-build.sh build step.
+  if git -C "${tree}" rev-parse --git-dir >/dev/null 2>&1; then
+    git -C "${tree}" add -A
+    git -C "${tree}" -c user.email="pve-build@debian.local" \
+      -c user.name="pve xanmod build" commit -qam \
+      "patch set ${KERNEL_SERIES:-} over the prepared tree"
+  fi
   cd "${tree}"
   "${build_cmd[@]}" "${target}"
   cd /
@@ -286,8 +299,34 @@ kernel_pve_prepare() {
     || echo "WARN: packaging master is ${pkg_ver}, requested kernel version ${KERNEL_VERSION}"
   SRCDIR="${builddir}/linux-${KERNEL_VERSION}"
   [[ -e "${SRCDIR}" ]] || mv "${builddir}/pkg-src/submodules/ubuntu-kernel" "${SRCDIR}"
-  # git pointer: setlocalversion must not append a suffix
-  rm -f "${SRCDIR}/.git" 2>/dev/null || true
+  # Keep the git worktree linkage: `make deb-pkg` builds the source package
+  # with check-git and refuses to run outside a git repository (first real
+  # run: "creating source package requires git repository"). The pointer is
+  # made absolute because the tree is copied/moved out of pkg-src; the
+  # XanMod setlocalversion patch (0017) drops the git tag suffix, so the
+  # release stays 7.0.14-<LOCALVERSION>. Ported verbatim from the lib
+  # kernel-pve-build.sh prepare step.
+  if [[ -f "${SRCDIR}/.git" ]]; then
+      local gd
+      gd=$(sed 's/^gitdir: *//' "${SRCDIR}/.git")
+      # The relative pointer was written for the ORIGINAL location
+      # (pkg-src/submodules/ubuntu-kernel, base ${builddir}/pkg-src):
+      # ../../.git from there is pkg-src/.git. Map it to its absolute spot;
+      # the module git dir travels with pkg-src, the worktree stays the
+      # moved tree.
+      [[ "${gd:0:1}" == "/" ]] || gd="${builddir}/pkg-src/${gd#../../}"
+      if [[ -d "${gd}" ]]; then
+        echo "gitdir: ${gd}" > "${SRCDIR}/.git"
+        # The module config carries core.worktree pointing at the original
+        # location (check-git needs `rev-parse --show-cdup` empty from the
+        # tree top): repoint it at the moved tree.
+        git --git-dir="${gd}" config core.worktree "${SRCDIR}"
+        git -C "${SRCDIR}" rev-parse --git-dir >/dev/null 2>&1 \
+          || rm -f "${SRCDIR}/.git"   # give up quietly; deb-pkg fails below with the real error
+      else
+        rm -f "${SRCDIR}/.git"
+      fi
+  fi
   PVE_SEED_CONFIG=""
   if [[ -f "${SRCDIR}/.config" ]]; then
     cp "${SRCDIR}/.config" "${builddir}/.config.pve-seed"
