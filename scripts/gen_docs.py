@@ -147,6 +147,17 @@ def main() -> int:
     root = args.root.resolve()
     check = args.check
     out_dir = root / "docs" / "reference"
+    # Product repos fold docs into the sibling wiki clone (docs -> ../*.wiki);
+    # a CI checkout carries the symlink but never the wiki, so the reference
+    # pages cannot be verified there. Skip (the gate runs on full checkouts).
+    docs_dir = out_dir.parent
+    if docs_dir.is_symlink() and not docs_dir.exists():
+        print(
+            f"{docs_dir} does not resolve in this checkout "
+            f"(wiki not checked out): reference check skipped",
+            file=sys.stderr,
+        )
+        return 0
     py_files = [root / p for p in _read_makefile_list(root, "PYTHON_SRCS")]
     sh_files = [
         root / p for p in _read_makefile_list(root, "SHELL_SRCS") +
