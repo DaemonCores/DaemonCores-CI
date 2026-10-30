@@ -257,3 +257,16 @@ image-test action reads by default).
   breakdown work is the uncommitted `ram_gate` block, not mine).
 - `signed` (`latest`/`minimal` x amd64/arm64): unchanged, shim + grub pass under SB and the boot stops at
   `bad shim signature` (unsigned `vmlinuz`), arm64 on `AAVMF_CODE.secboot.fd`.
+
+## Kernel EFI signature: arm64 bench and decision
+
+- Local arm64 bench (SB enforced, shim + grub `g1.efi` + MOK `t.crt`, kernel loaded by grub `linux`):
+  `Image.gz` as published -> `rc=45 bad shim signature`; raw `Image` (zcat of the published vmlinuz, already a
+  PE `MZ`, `CONFIG_EFI_STUB=y`) unsigned -> `rc=45`; raw `Image` signed with `sbsign` -> `rc=0`, `grub>` prompt.
+  A gzip stream cannot carry an Authenticode signature, so arm64 must ship the raw PE `Image`, signed.
+  Cost: the arm64 kernel grows from about 15 MB to about 45 MB.
+- Decision (debian-bootc `0e54237`): `linux-image` always signs the EFI kernel (`kernel_sign_efi`), for every
+  kernel variant. `-nosign` only means no module signature enforcement (`MODULE_SIG_FORCE` off); shim, grub and
+  vmlinuz stay signed for everyone. The `unsigned-kernel` categories now boot with Secure Boot enforced.
+- Real check pending: full run, then read `linux-image` signing, boot tests `signed`/`unsigned-kernel` on
+  amd64+arm64 (no more `bad shim signature`), U-Boot 4k arm64 with the raw `Image` (untested risk).
