@@ -42,10 +42,12 @@ on:
         type: string
         default: 'false'
       # Opt-in -nvidia image twins (EULA-restricted; the bootc-installer only
-      # deploys one after an explicit acceptance). NEVER on a push.
+      # deploys one after an explicit acceptance). NEVER on a push. A string
+      # like the other dispatch knobs so an empty value on push/schedule is
+      # tolerated (a boolean input rejects '' and kills the run at startup).
       gpu_driver_images:
-        type: boolean
-        default: false
+        type: string
+        default: 'false'
       # Opt-in disk-image (.img) build, split per format. NEVER activated by
       # default — only via the workflow_dispatch checkboxes. The img job runs
       # after the container image build and produces flashable .img files.

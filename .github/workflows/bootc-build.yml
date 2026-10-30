@@ -38,10 +38,12 @@ on:
           carrying `LABEL org.daemoncores.gpu-ia-image`: the same image plus
           the NVIDIA compute layer (the linux-modules-nvidia plan deb +
           GPU_IA_PKGS, EULA accepted at install time). Without this input
-          the twin is neither built nor pushed; a push never sets it.
-        type: boolean
+          the twin is neither built nor pushed; a push never sets it. String
+          input: '' on a plain push must stay tolerated (the caller forwards a
+          possibly empty value).
+        type: string
         required: false
-        default: false
+        default: 'false'
 
 jobs:
   # Discover every Containerfile* at the repo root and emit a FLAT build
