@@ -207,8 +207,8 @@ deb_custom() {
   O="/output/${pkg}"
   mkdir -p "$O"
   cp -r "${SAVE_PWD}/workflows/bootc-debs-builder/${tree:?}"/* "$O/"
-  [ -e "$O/usr/sbin/${pkg}" ] && chmod 0755 "$O/usr/sbin/${pkg}"
-  chmod 0755 "$O/DEBIAN/postinst"
+  if [ -e "$O/usr/sbin/${pkg}" ]; then chmod 0755 "$O/usr/sbin/${pkg}"; fi
+  if [ -e "$O/DEBIAN/postinst" ]; then chmod 0755 "$O/DEBIAN/postinst"; fi
 
   sed -i \
     -e "s|{{ VER }}|${ver}|g" \
