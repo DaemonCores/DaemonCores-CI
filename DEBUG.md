@@ -188,3 +188,33 @@ files against `^(Containerfile|src/|assets/|workflows/image-tests/)` and that
 directory does not exist in the product repo, so the manifest was never run.
 Fix: `full-pipeline.yml` also matches `workflows/tests.yml` (the manifest the
 image-test action reads by default).
+
+## linux-image amd64 failed in run 41103751203 at version resolution (open, cause not proven)
+
+- Job log (18:06:00): `patch not available for 7.3.1: .../CachyOS/kernel-patches/master/7.3/sched/0001-bore.patch`
+  (404), the selector falls back to 7.2.14, then
+  `no sha256 for linux-7.2.14.tar.xz in https://cdn.kernel.org/pub/linux/kernel/v7.x/sha256sums.asc`
+  and `KERNEL_VER` stays unset (`track.sh` `resolve_kernel`).
+- Local replay at 18:23 of the same lookup (`curl` of that URL + the `awk '$2 == n'` of
+  `resolve_kernel`) returns `bb1b871e...` for `linux-7.2.14.tar.xz`: the parsing is sound.
+- 7.2.14 was released at 12:32 GMT (`last-modified` of the tarball), 5.5 h before the job, so this is
+  not a release-propagation window.
+- Not proven: why the runner's `sha256sums.asc` lacked the line (stale CDN edge copy is a hypothesis
+  only). No change made.
+- Same run, arm64 `linux-image` job, same second (18:06:00): the identical lookup resolved
+  `upstream linux-image: KERNEL_VER=7.2.14 KERNEL_SHA256=bb1b871e...`. So the amd64 miss was a transient
+  of that one fetch (the response lacked the line), not a deterministic parsing or data error.
+  `curl --retry` does not cover it: the HTTP request succeeded, the content was short.
+
+## Real run 41103751203 (debian-bootc, workflow_dispatch): categories read
+
+- `latest-amd64`, `minimal-amd64`, `latest-arm64`, `minimal-arm64`: `Category: signed (… reference=1, secure_boot=1)`.
+  arm64 logs `AAVMF CODE: /usr/share/AAVMF/AAVMF_CODE.secboot.fd` and `AAVMF VARS: …/OVMF_VARS.fd` (enforcing pair).
+- All four: shim and grub load under Secure Boot (no 0x1A), then
+  `error: kern/efi/sb.c:shim_lock_verifier_write:192:bad shim signature.` x3 and
+  `VM did not become reachable within 60s` (amd64) / `300s` (arm64). This is the unsigned `vmlinuz` measured
+  locally (`rc=45`), now seen on the real images for both architectures. Secure Boot stayed enforced.
+- `latest-4k-arm64`, `minimal-4k-arm64`: no boot test; the image build stops at
+  `apt install`: `linux-modules-rpi3:arm64=7.2.13-1+r1 … Depends daemoncores-kernel-7.2.13 (= 7.2.13-1)
+  but none of the choices are installable`. Separate from Secure Boot; not analysed yet.
+- amd64 `linux-image` had failed at resolution (section above), so the amd64 images used the last published kernel deb.
