@@ -298,7 +298,11 @@ kernel_pve_prepare() {
   [[ "${pkg_ver}" == "${KERNEL_VERSION}-"* ]] \
     || echo "WARN: packaging master is ${pkg_ver}, requested kernel version ${KERNEL_VERSION}"
   SRCDIR="${builddir}/linux-${KERNEL_VERSION}"
-  [[ -e "${SRCDIR}" ]] || mv "${builddir}/pkg-src/submodules/ubuntu-kernel" "${SRCDIR}"
+  # cp -a, NOT mv: the module git config core.worktree stays relative to the
+  # original tree position, and `git config core.worktree` must chdir to it
+  # (through the OLD relative path) before the repoint lands — verbatim from
+  # the lib prepare (which copies for the same reason).
+  [[ -e "${SRCDIR}" ]] || cp -a "${builddir}/pkg-src/submodules/ubuntu-kernel" "${SRCDIR}"
   # Keep the git worktree linkage: `make deb-pkg` builds the source package
   # with check-git and refuses to run outside a git repository (first real
   # run: "creating source package requires git repository"). The pointer is
