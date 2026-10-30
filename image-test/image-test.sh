@@ -30,8 +30,12 @@ SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 # OVMF firmware directory: Debian/Ubuntu ship real files under /usr/share/OVMF;
 # Arch/edk2 puts them under /usr/share/edk2/x64 (on Arch /usr/share/OVMF is a
 # symlink that find does not traverse without -L, so list both paths explicitly).
-OVMF_DIR=""
+# The runner environment may already know the firmware tree (an artefact-only
+# local replay points OVMF_DIR at the unpacked firmware instead of /usr/share).
+OVMF_DIR="${OVMF_DIR:-}"
 for _d in /usr/share/OVMF /usr/share/edk2/x64; do
+  [ -n "${OVMF_DIR}" ] && break
+
   if find "${_d}" -maxdepth 2 -name 'OVMF_CODE*.fd' 2>/dev/null | grep -q .; then
     OVMF_DIR="${_d}"; break
   fi
@@ -147,9 +151,9 @@ install_deps() {
   fi
   # Refresh OVMF_DIR after ovmf may have been installed above: the global
   # detection at the top of the script runs before install_deps, so on a CI
-  # runner where ovmf is not pre-installed OVMF_DIR would be empty.
-  if [ "${ARCH}" != "arm64" ]; then
-    OVMF_DIR=""
+  # runner where ovmf is not pre-installed OVMF_DIR would be empty. An
+  # env-provided OVMF_DIR (artefact-only local replay) always wins.
+  if [ "${ARCH}" != "arm64" ] && [ -z "${OVMF_DIR}" ]; then
     for _d in /usr/share/OVMF /usr/share/edk2/x64; do
       if find "${_d}" -maxdepth 2 -name 'OVMF_CODE*.fd' 2>/dev/null | grep -q .; then
         OVMF_DIR="${_d}"; break
@@ -165,6 +169,9 @@ install_deps() {
 #   IMAGE, DISK, KEY, WORK
 #######################################
 install_disk() {
+  # Overwrite any artefacts of a previous run non-interactively (a stale key
+  # makes ssh-keygen prompt, which hangs the runner).
+  rm -f "${KEY}" "${KEY}.pub"
   ssh-keygen -t ed25519 -N '' -f "${KEY}" -q
   # Sparse: only written blocks consume host space (~3G after install), but 10G
   # of virtual size is already ample for the ~3G deploy + boot + ESP.
@@ -285,6 +292,11 @@ boot_vm() {
         ! -name '*secboot*' ! -name '*snakeoil*' | sort | head -1)
       vars="${vars:-$(find "${OVMF_DIR}" -name 'OVMF_VARS*.fd' ! -name '*.ms.*' \
         ! -name '*secboot*' ! -name '*snakeoil*' | sort | head -1)}"
+      if [ -z "${code}" ] || [ -z "${vars}" ]; then
+        echo "::error::no OVMF firmware found (OVMF_DIR=${OVMF_DIR:-<empty>});" \
+          "install ovmf or point OVMF_DIR at the unpacked firmware files"
+        exit 1
+      fi
       echo "OVMF CODE: ${code}"
       echo "OVMF VARS: ${vars}"
       cp "${vars}" "${WORK}/OVMF_VARS.fd"
