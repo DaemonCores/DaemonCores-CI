@@ -64,11 +64,62 @@ booted on the bench with shim + MOK: `grub>` prompt under Secure Boot.
 (The container needed `--http-proxy=false`: it inherited a local proxy
 `127.0.0.1:8899` and `git clone` failed; bench-only.)
 
+## arm64 Secure Boot: bench result (local, QEMU `virt` TCG)
+
+Firmware: Ubuntu `qemu-efi-aarch64` 2024.02-2ubuntu0.10, `AAVMF_CODE.secboot.fd`
+with a varstore built from the blank `AAVMF_VARS.fd` (own PK/KEK, Microsoft UEFI
+CA 2011 in db, bench cert as MOK). ESP: Debian `shimaa64.efi.signed`
+(sha256 `e5446d2a...`) + the `grubaa64.efi` of the CI-built
+`grub-efi-arm64-signed` package (run 41054040585, carries `.sbat` `grub,5`),
+re-signed with a bench key after `sbattach --remove`.
+
+| # | scenario                                        | result                              |
+|---|-------------------------------------------------|-------------------------------------|
+| 1 | grub signed by bench key, bench cert in MOK     | `GRUB version 2.12`, `grub>` prompt |
+| 2 | same grub, a different cert in MOK              | shim `0x1A Security Violation`      |
+| 3 | unsigned-by-us grub as BOOTAA64.EFI (no shim)   | firmware `Security Violation`       |
+
+Rows 2 and 3 show the enforcement is real (the firmware rejects unsigned code,
+shim rejects a grub whose signer is not in MOK), so row 1 is a genuine Secure
+Boot boot. The arm64 chain therefore works with the same recipe as amd64.
+
+Pitfall met on the bench: the grub inside the package is already signed by the
+image key; signing it again appends a second signature, so a "wrong MOK" control
+still passed. Controls must start from a stripped binary.
+
+## Harness change (this commit)
+
+`image-test.sh`: `SECURE_BOOT=1` is no longer refused on arm64; `build_sb_vars`
+picks the blank varstore per architecture; arm64 boots `AAVMF_CODE.secboot.fd`
+with that varstore; amd64 gets `smm=on` when Secure Boot is enforced (the
+secboot OVMF builds protect the varstore through SMM; it was on in the bench).
+
+## Real run 41062757704 (debian-bootc b358f9f): the image still had the old grub
+
+- The `grub-efi-amd64-signed` deb published on Pages carries `.sbat`
+  (`objdump -h`: section `.sbat`), and the APT index serves that exact file
+  (`Packages` SHA256 `c8671566...` = the downloaded deb).
+- The grub extracted from the pulled image `latest_amd64` has sections
+  `.text .data mods .reloc` only: no `.sbat`, so the shim would still revoke it.
+- Image job log: `STEP 12/33: RUN apt update && apt install ...` is
+  `--> Using cache ...`, 1 minute after the Pages index was republished. The layer
+  comes from the registry layer cache (`--cache-from`), keyed on the instruction
+  text, which did not change. The package version string did not change either.
+- The content hash (`org.daemoncores.content-hash`, built from `hashes.json`) was
+  only stamped as a label, so a rebuilt deb never reached the image.
+- Local proof that a build arg declared before the `RUN` invalidates the layer
+  even when the command does not reference it (`podman build --layers`):
+  `DEBS_HASH=a` twice -> `Using cache` on both steps; `DEBS_HASH=b` -> the `RUN`
+  re-executes.
+
+Fix: the CI computes a per-architecture fingerprint of `hashes.json` and passes it
+as `--build-arg DEBS_HASH`; `Containerfile` and `Containerfile.minimal` declare
+`ARG DEBS_HASH=none` before the first layer that installs from the repository.
+
 ## Open
 
-- Push of the debian-bootc fix done; read the result of the next real run
-  (grub built with `.sbat`, shim accepts it).
+- Read the next real runs of the debian-bootc pipeline (grub `.sbat`, shim accepts it).
 - Whether the Fedora head used by the package carries the fixes behind SBAT
   generation 5 is inherited from the Fedora packaging, not verified here.
-- Re-enable `SECURE_BOOT=1` in CI for amd64, then arm64 (shim + AAVMF varstore),
-  and confirm on a real run.
+- End-to-end with a real image (install-fs.sh disk, SSH reachable) under
+  `SECURE_BOOT=1`, then flip the default to 1 in CI and confirm on a real run.
