@@ -415,3 +415,17 @@ Conclusions (proved by these runs):
 - Hypothesis, NOT proved: under TCG the 30 s unit budget (ExecStartPre probes + `ifup` dhclient) is exhausted before
   the lease is applied. Diagnostic committed (`e8414f6`): the boot diag now dumps `journalctl -u networking` and the
   unit timestamps. No fix before that output is read.
+
+## Secure Boot local e2e: state at 2026-10-31 (tick 1)
+
+- Run 41158439518 (before the lib/patches refactor) was cancelled by the following push; its result is not
+  readable. Run 41159448486 (Full Pipeline, debian-bootc `a015666`) dispatched: it validates the overlay-based
+  rebuild of fisherman/bootc-installer/bootupd and the kernel helpers now hosted here.
+- arm64 SB bench (above, MEASURED): signed 4k and 16k kernels boot to init with AAVMF_CODE.secboot SB enforced,
+  shim -> signed GRUB -> kernel, signing cert as MOK. Not yet done: boot of the REAL installed arm64 image.
+- Blockers for the real-image boot, both root: `image-test.sh` installs with `sudo podman run --privileged`
+  (loop device + bootc install), and arm64 execution needs a `qemu-aarch64` binfmt handler
+  (`/proc/sys/fs/binfmt_misc` has only DOSWin). amd64 has /dev/kvm and a local `latest_amd64` image (6bb0625),
+  so the amd64 SB e2e only needs the root podman step.
+- Next step: read run 41159448486 (arm64 AAVMF CODE/VARS lines, networking journal). No root popup issued while
+  the owner is away.
