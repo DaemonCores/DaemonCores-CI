@@ -39,7 +39,8 @@ The reusable `full-pipeline.yml` workflow coordinates the following stages:
 | --- | --- |
 | `full-pipeline.yml` | Change planning and end-to-end orchestration. |
 | `build-env.yml` | Builds the caller's manifest-defined package build environment for amd64 and arm64. |
-| `bootc-debs-builder.yml` | Reads `packages.yml`, builds or reuses every package of one architecture in a single job (`build-deb/build-all.sh`), and publishes the resulting APT repository. |
+| `bootc-debs-builder.yml` | Reads `packages.yml`, computes dependency waves, and publishes the resulting APT repository. |
+| `build-one-deb.yml` | Builds or reuses one content-addressed Debian package. |
 | `bootc-build.yml` | Discovers image variants, builds them natively, runs QEMU tests, scans images with Trivy (report only), signs images, and publishes manifest lists. |
 | `iso-builder.yml` | Produces online and offline installer ISOs from a Fedora Anaconda environment. |
 | `img-builder.yml` | Produces opt-in raw disk images for supported targets. |
@@ -98,7 +99,7 @@ A package that builds an upstream project can follow its latest GitHub release i
         BOOTC_VENDOR_SHA256: "bootc-{version}-vendor.tar.zstd"
 ```
 
-`build-deb/build-all.sh` resolves `track:` before the build; the resolved values feed the content hash, so a new release rebuilds the package. The asset checksums come from the release API, so downloads stay verified. When the new release does not build, `build-deb` keeps the last-good published deb, opens a broken-build issue and retries on the next run: a bad upstream release never reaches the image. `upstream-check.yml` reports, from a scheduled caller, the packages stuck on an older release.
+`build-one-deb.yml` resolves `track:` before the build; the resolved values feed the content hash, so a new release rebuilds the package. The asset checksums come from the release API, so downloads stay verified. When the new release does not build, `build-deb` keeps the last-good published deb, opens a broken-build issue and retries on the next run: a bad upstream release never reaches the image. `upstream-check.yml` reports, from a scheduled caller, the packages stuck on an older release.
 
 Every runtime test in `workflows/tests.yml` must include a diagnostic command. The harness rejects incomplete test definitions so a failed boot test always provides actionable state.
 
