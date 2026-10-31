@@ -683,3 +683,10 @@ Conclusions (proved by these runs):
 - Not yet validated: run 41246555169 must show `linux-modules-nvidia` green and the `nvidia` image building. `nvidia-persistenced` without candidate (seen in the `nvidia` image build) is unexplained.
 - Secure Boot: untouched this tick, enforced in every image job.
 
+
+## Tick 12: run 41246555169 and the nvidia module build (PROVEN)
+- MEASURED: the patch guard no longer blocks (lock `b471d05`). Run 41246555169 still failed: `linux-modules-nvidia` amd64 (job 124674294961) stops at `make modules` with `/tmp/linux-7.2.14/include/config/auto.conf: No such file or directory` (log line 1085). `Build images` amd64/arm64 failed too (not yet analysed; arm64 idle-RAM check is the earlier unrelated finding).
+- Cause PROVEN locally on the pristine 7.2.14 tarball: `make defconfig`, `rm -rf include/config`, then an external module build (`make M=<dir> modules`) prints the identical `include/config/auto.conf: No such file` error. After `make olddefconfig` the auto.conf error is gone; after `make modules_prepare` the dummy module builds to `d.ko`.
+- Why only nvidia: the device entries run `make olddefconfig` before building in-tree modules (packages.yml, linux-modules-arm-device); the nvidia entry went from `kernel_prepare` (which only copies the seeded `.config`) straight to an out-of-tree `make -C kernel-open`, so the tree was never configured.
+- Fix (debian-bootc packages.yml, linux-modules-nvidia): `make olddefconfig` + `make modules_prepare` after `kernel_signing_setup`. Reproduced and validated on the dummy module only; the full nvidia build is validated by the next CI run.
+- Open: patch guard design (owner asked for a commit-free dynamic variant; awaiting his decision), `Build images` failures, `nvidia-persistenced` without candidate.
