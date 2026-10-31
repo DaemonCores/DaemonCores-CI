@@ -501,3 +501,15 @@ Conclusions (proved by these runs):
 - Hypothesis, NOT proven: `networking.service` ends `Failed with result 'timeout'` and ifupdown2 deconfigures the interface (hostfwd to 10.0.2.15:22 then gets no answer).
   Evidence missing: the guest's `ip addr`/`ip route` printed at boot by `ci-ssh-debug.service` was not shown by `dump_serial` (only filtered lines).
 - Step: `dump_serial` now prints the guest's own `ci-dbg: ip addr` .. `/etc/network/interfaces` block. Read it in the next arm64 run before touching anything.
+
+## 2026-10-31 run 41176049265: arm64 guest has NO IPv4 address (PROVEN) and why is being tested
+
+- PROVEN (job 124465002463 `latest-4k-arm64`, guest block printed by the new `dump_serial` group): at guest 195 s `enp0s1` has only `inet6 fec0::...` (SLAAC) and
+  `fe80::...`; there is NO `inet` address and `ip route` is empty. So the hostfwd to the guest's 10.0.2.15:22 can never answer, which is exactly the banner-exchange timeout.
+  (Not a missing DHCPv4 offer: the same boot's journal shows `DHCPOFFER of 10.0.2.15 from 10.0.2.2` / `bound to 10.0.2.15` for the autoconf PROBE.)
+- The probe (`ifupdown2-autoconf`) runs dhclient with a no-op hook, so it never configures the address. The address only comes from `ifup` (`inet dhcp`), started
+  at 05:36:13 ("networking: Configuring network interfaces") and killed at 05:36:41 by `start operation timed out` (`timeout.conf`: `TimeoutStartSec=30`, counted from 05:36:11).
+  The journal has no ifup/dhclient line in that window.
+- Open: is ifup merely slow under TCG (ifupdown2 is Python, `Consumed 12.857s CPU time`) or blocked (left-over probe `dhclient[550]` still running in the unit's control group)?
+- Experiment (temporary, `install-fs.sh`, marked): CI-only drop-in `TimeoutStartSec=300`. If networking then succeeds and SSH answers: slowness proven; the product fix is a
+  timeout that does not depend on CPU speed (embedded boards are slow too), not a test-only drop-in. If it still fails: blocked ifup, look at the probe dhclient. Remove the drop-in after the run.
