@@ -557,3 +557,7 @@ Conclusions (proved by these runs):
 - `-cpu neoverse-n1`, `neoverse-n2`, `cortex-a76`: boot to INIT-REACHED (`Freeing unused kernel memory` at 1.69 s). `cortex-a72`: stalls early after 10 lines (not analysed; likely no 16k granule).
 - QEMU 11.1.2 with `-cpu max` boots, so it is a QEMU 8.2.x TCG bug; the exact feature inside `max` is NOT isolated.
 - Fix: arm64 TCG now defaults to `neoverse-n1` (TCG_CPU_ARM64 override). Secure Boot stays enforced. To validate: next Full Pipeline run, jobs latest-arm64 / minimal-arm64.
+
+## Timeout scale back to 5 (MEASURED)
+- With `-cpu neoverse-n1` the arm64 4k guest answers SSH after 105 s and after 115 s on reboot (run 41191163442, job latest-4k-arm64), against 298-340 s with `-cpu max`. The x12 scale only compensated for the slow CPU model; it is reverted to the original x5.
+- Open proposal: replace the ceiling by a stall watchdog on the serial console (fail when the console is silent for N s) with SSH expected within seconds of boot end. Needs a boot-complete marker on the serial, not yet verified.

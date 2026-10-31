@@ -62,8 +62,9 @@ SECURE_BOOT="${SECURE_BOOT:-}"
 # (set by select_category).
 CATEGORY=""
 # Multiplier applied to the manifest timeouts (tuned for KVM) when the guest is
-# emulated: a TCG arm64 guest needs about 330 s to boot, 5x of 60 s tripped.
-TCG_TIMEOUT_SCALE="${TCG_TIMEOUT_SCALE:-12}"
+# emulated (TCG). Back to 5: the 330 s boots came from -cpu max, a neoverse-n1
+# arm64 guest reaches SSH in about 105 s (run 41191163442).
+TCG_TIMEOUT_SCALE="${TCG_TIMEOUT_SCALE:-5}"
 REFERENCE=0
 # 1 once we know /dev/kvm is present and usable, 0 otherwise (set in
 # install_deps). GitHub's hosted arm64 runners expose no /dev/kvm at all —
