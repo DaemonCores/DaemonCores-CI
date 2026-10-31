@@ -308,6 +308,12 @@ ExecStart=/bin/sh -c "\
 UNIT
     ln -sf "../ci-ssh-debug.service" \
       "${_deploy_etc}/systemd/system/multi-user.target.wants/ci-ssh-debug.service"
+    # TEMPORARY EXPERIMENT (remove after the arm64 run): the product drop-in has
+    # TimeoutStartSec=30 and networking.service times out on the emulated arm64
+    # guest. A long timeout here tells slow-under-TCG apart from blocked ifup.
+    mkdir -p "${_deploy_etc}/systemd/system/networking.service.d"
+    printf '[Service]\nTimeoutStartSec=300\n' \
+      > "${_deploy_etc}/systemd/system/networking.service.d/zz-ci-experiment.conf"
   done
   # Populate the btrfs var subvol (mounted at ${T}/var) with the content that
   # bootc placed in the stateroot var directory (inside the root subvol).
