@@ -75,7 +75,7 @@ class TestManifestFilter:
     def test_yes_and_empty_keep_everything(self) -> None:
         """``yes`` and an empty value keep every package.
 
-        The build-all path sets no variable at all, so the empty value
+        The build-one-deb path sets no variable at all, so the empty value
         must behave as keep.
         """
         assert _run_filter(_manifest(), GPU_DRIVER='yes') == \

@@ -27,7 +27,7 @@ runs:
   using: 'composite'
   steps:
     - uses: actions/checkout@v7
-    # The build job uploads one artifact debs-all-<arch> (older runs: one debs-<pkg>-<arch> each); merge every debs-* into debs/.
+    # Each package uploads its own artifact debs-<pkg>; merge them all into debs/.
     - uses: actions/download-artifact@v8
       with:
         pattern: debs-*
