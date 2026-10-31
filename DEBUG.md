@@ -399,3 +399,19 @@ Conclusions (proved by these runs):
   silently (root mount on virtio-blk btrfs under TCG) and `wait_ssh` gives up at 300 s.
 - `latest-amd64`: SB enforced PASS; `signed kernel enforces module signatures` fails: no `PAT_SECRETS`.
 - `minimal-*`: `RAM idle budget exceeded: 320 MiB (amd64), 206 MiB (arm64) over the 15 MiB budget` (RAM gate, other work).
+
+## Run 41156912069: arm64 guest boots but never gets IPv4 (MEASURED, cause of the timeout NOT yet proved)
+
+- `latest-4k-arm64`: the guest is alive (QEMU monitor: status running, X00 changes between samples), not hung.
+  `Startup finished in 6.363s (kernel) + 1min 18.663s (initrd) + 2min 16.153s (userspace) = 3min 41.180s`
+  (hosted arm64 runner has no /dev/kvm, so the guest runs under TCG).
+- `networking.service: Failed with result 'timeout'` at 199.85 s; `timeout.conf` sets `TimeoutStartSec=30`.
+- `/etc/network/interfaces` at 201 s contains `iface enp0s1 inet dhcp`, so the `dhclient -4` probe (8 s limit) DID
+  get an answer; `ip addr` at 201 s shows only link-local/SLAAC IPv6 on `enp0s1`, no IPv4 and an empty `ip route`.
+  The harness forwards host :2222 to the guest, which needs the guest IPv4; ssh then dies with
+  `Connection timed out during banner exchange` although sshd listens from 01:57:45.
+- Separate defect, proven: `tty_log` in `ifupdown2-autoconf` writes to a hardcoded `/dev/ttyS0`, which is not the
+  console on arm64 (`tee: /dev/ttyS0: Input/output error`, serial 162.7 s and 163.1 s), so the probe diagnostics are lost.
+- Hypothesis, NOT proved: under TCG the 30 s unit budget (ExecStartPre probes + `ifup` dhclient) is exhausted before
+  the lease is applied. Diagnostic committed (`e8414f6`): the boot diag now dumps `journalctl -u networking` and the
+  unit timestamps. No fix before that output is read.
