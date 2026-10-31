@@ -417,6 +417,15 @@ dump_serial() {
   printf '%s\n' "${clean}" | grep -aE 'FAILED|Failed|error|Error|panic|Kernel panic|Call Trace' \
     | sort -u | head -n 80 || true
   echo "::endgroup::"
+  # The tail alone hides how the guest was started: show the kernel command
+  # line, the first lines and the size of the capture, to tell a guest that
+  # stopped talking from a capture that stopped growing.
+  echo "::group::serial console: kernel command line, first lines, size"
+  printf '%s\n' "${clean}" | grep -a 'Kernel command line' || true
+  printf '%s\n' "${clean}" | head -n 40
+  printf 'serial capture: %s lines, %s bytes\n' \
+    "$(printf '%s\n' "${clean}" | wc -l)" "$(sudo stat -c %s "${SERIAL}" 2>/dev/null || echo 0)"
+  echo "::endgroup::"
   echo "::group::serial console: last 200 lines"
   printf '%s\n' "${clean}" | tail -n 200
   echo "::endgroup::"
