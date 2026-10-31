@@ -630,3 +630,8 @@ Conclusions (proved by these runs):
 - Measured (run 41229165698, cancelled at 48 min): one sequential job per arch serialised the slow independent builds: each `gpu-userspace-*` Mesa variant took about 18.5 min (18:30:43 to 18:49:21, then to 19:07:40), `linux-image-16k` on arm64 39 min. The owner asked to chain only what shares a cache and parallelise the rest, not to put everything in one job.
 - Action: `2b71c21` is reverted for the deb workflow (`bootc-debs-builder.yml` waves, `build-one-deb.yml`, `full-pipeline.yml`, README, `bootc-debs-end/action.yml` comment). `carry_over` is kept and now derives from the wave results. `build-deb/build-all.sh`, `plan.py` and the image-side single-job work are untouched.
 - Next: declared chains (`chain:` key in `packages.yml`) built on top of the waves, so that packages sharing the kernel cache run in one job after their wave dependencies.
+
+## Tick 5: run 41233619804 in progress (waves restored)
+- Secure Boot: nothing to do, still enforced and green on both architectures (run 41199518844). Nothing disabled or weakened.
+- Wave 0 timings read from the jobs API (MEASURED): `linux-image` arm64 52 s (reused), `bootupd` 1 min 39 s, `linux-image-nosign` amd64 4 min 17 s, `linux-image-16k-nosign` arm64 6 min 57 s, `gpu-userspace-*` Mesa variants 11 to 15 min each in parallel (gaming-generic arm64 12 min 47 s, gaming-x64v3 15 min 22 s); `gaming-x64v1`, `gaming-x64v2` and `linux-image-16k` arm64 were still running after 20 min.
+- Still pending the end of the run: arm64 `.pyc` mtime diag line and the AAVMF CODE/VARS lines.
