@@ -429,8 +429,8 @@ guest_state() {
   # the code around the program counter, to be matched against the kernel image.
   sudo python3 -I "${SCRIPT_DIR}/hmp.py" "${MONITOR}" "info registers" 2>&1 \
     | grep -aE '^(X[0-9]+|.* X[0-9]+=)' || true
-  sudo python3 -I "${SCRIPT_DIR}/hmp.py" "${MONITOR}" 'x /32xw $pc' 'x /16xg $sp' 2>&1 \
-    | grep -aE '^[0-9a-f]{16}:' || true
+  sudo python3 -I "${SCRIPT_DIR}/hmp.py" "${MONITOR}" 'gva2gpa $pc' 'gva2gpa $sp' 'x /32xw $pc' 'x /16xg $sp' 2>&1 \
+    | grep -avE '^(>|[xgv]+( |$)|\(qemu\) *$)' | cut -c1-200 || true
   local i
   for i in 1 2; do
     sleep 1
