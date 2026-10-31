@@ -201,4 +201,5 @@ def test_signing_flag_only_hashes_the_packages_that_sign() -> None:
     """MODULE_SIGNING_ACTIVE reaches the hash of the signing packages only."""
     text = (WORKFLOWS / 'build-one-deb.yml').read_text()
     assert "steps.def.outputs.signs == 'yes'" in text
-    assert "grep -q 'kernel_signing_setup'" in text
+    definition = (ROOT / 'pkg-def' / 'pkg-def.sh').read_text()
+    assert "grep -q 'kernel_signing_setup'" in definition
