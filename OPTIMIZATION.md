@@ -239,3 +239,56 @@ Pushed: image-test split, `build-arch.sh`, `plan.py` / `build-all.sh` (one build
 | OCI layer compression tuned (xz/zstd) | MISSING | no compression option in `scripts/image-ci/*.sh` nor `bootc-build.yml` |
 | Boot timeout calibrated on previous runs and persisted | MISSING | still a TODO at `DEBUG.md:565` |
 | `chain:` key in `packages.yml` | MISSING | not present |
+
+## Demand registry and documentation audit (checked by command, 2026-10-31)
+
+This section is the single tracking location for the owner's demands. Do not move it to another file; update the state column in place.
+
+### Documentation archaeology (MEASURED)
+
+- debian-bootc `2570fdc` deleted 56 `docs/*.md`; 44 exist at the same path in `debian-bootc.wiki`, the 12 others (`architecture.md`, `architecture/overview.md`, `decisions.md`, `justifications.md`, `inconsistencies-*.md`) were checked by comparing every backticked token of the old file with the wiki: 100 % found for `decisions`, `justifications`, `inconsistencies-docker`, `architecture`; the only absent tokens are stale `packages.yml:<line>` references. No content lost.
+- DaemonCores-VE `2c78886` deleted 7 `docs/*.md`; same token check against `DaemonCores-VE.wiki`: 100 % except `justifications.md` (paraphrased in `Handoff-Decisions.md:34,55-60`). No content lost.
+- Content that WAS removed from the tracked documents of this repository:
+  - `OPTIMIZATION.md` `5ca4729`/`00217b5`: L1 (one kernel, `module.sig_enforce=1` karg) was rewritten to "not implemented: security regression". The owner's order is to remove the `-nosign` twins, so that rewrite contradicted the order; the L1 design below replaces it.
+  - `OPTIMIZATION.md` `6444735`/`f1b04f5`: L9/L10 changed from "`-gaming`/`-ia` twins carry every vendor" to "ONE image, twins disappear". The owner then ordered two separately compiled, install-time selectable builds (gaming, ia) for every vendor, not Debian packages (`GPU-VARIANTS.md`, `f1b04f5`).
+  - `GPU-VARIANTS.md` `6444735`: the "Direction" list (YAML manifest of per-vendor sets, neutral variable names, runtime brand selection) was removed.
+  - `OPTIMIZATION.md` `07a0d29`: the "Done locally, not pushed" step list was replaced by the plan status.
+  - `README.md` `fb7f93b`/`2b71c21`: wording of `bootc-debs-builder.yml` and `build-one-deb.yml` rows changed with the waves revert.
+
+### Deformed or not followed (each with its proof)
+
+| Demand | What happened | Proof |
+|---|---|---|
+| Remove the `-nosign` twin (L1) | Declared "not implemented, security regression" instead of executing; twins still built | `00217b5`; design only in the L1 section |
+| Chain what shares a cache, parallelise the rest | One job per arch with sequential Mesa builds, run 41229165698 about 48 min, cancelled | `fb7f93b` reverted the deb phase to waves; `build-all.sh`/`plan.py` kept but not called |
+| Optimised GPU builds, two activable | First shipped Debian packages (`33d3ea2`), then a single image | corrected by `38eeb69`, `f1b04f5`; Mesa builds not proven in a full run |
+| No kernel choice at boot | Invented from `kernel-nvidia-pve-host-plan.md:132` (VE, K-04 pending) | corrected, forbidden to the agents |
+| Boot timeout calibrated from previous runs | Only a scale constant (`a85e7c1`); the persisted measurement is a TODO | `DEBUG.md:565` |
+| Reuse unchanged builds | Cache lost when a failed run overwrote `hashes.json`; fix not confirmed by a second run | `80ebca9`, L19 |
+| Installer sources of truth | Installer image selector added beyond the request in `baa89d6` | to re-read |
+
+### Forgotten (recorded, with the owner's message numbers where known)
+
+1. All images of one arch in one job, one apt install, one cache download, grouped push, tests on one re-imaged VM (#12769, #12807): job layout DONE, re-imaged VM NOT FOUND.
+2. Images that passed must be pushed even when another fails (#12667, asked four times): `phase_push` pushes only tested images on main; behaviour with a partial failure to re-verify.
+3. CI wall time 24 min versus the 15 min goal (#12710).
+4. Boot timeout calibrated and persisted (#12428, #12448).
+5. xz/zstd layer compression (#6018, #6306), conditional tests (L6).
+6. MOK enrolment validated end to end on every image (#2967).
+7. Tests 100 % YAML with an `arch:` field, no JSON inside YAML, CI validating every security variant (#3627, #3549).
+8. Two bootloaders in the same image, chosen at install, bootupd/U-Boot auto-detected; upstream request pending (#5295, #5965).
+9. Minimal and arm images in error (#542, #837, #890): the minimal RAM gate and the arm64 `networking.service` timeout are open.
+10. Documentation: state column, raw md links, doc skill (#261, #443).
+11. Optimised rebuild of the drivers (#15226).
+12. Package names to chain (#16240, messages about 12769-12830): NOT FOUND in the truncated transcript extracts; the owner must restate them or they must be recovered from the raw transcript.
+
+### Still to do (order of work)
+
+1. Read run 41233619804: wave1 `linux-modules-nvidia` failed with "a file touched by the patches changed upstream" (`include/linux/sched.h`, `kernel/exit.c`, `kernel/fork.c`, `kernel/sched/{core.c,fair.c,sched.h}` sha256 changed, log 19:44:54Z, no prior deb to fall back to). Cause to prove on the patch set before touching it.
+2. Second run without changes: confirm "unchanged; reused" (L19, L7).
+3. `chain:` key (kernel + modules chained, the rest parallel).
+4. L1: one kernel, `-nosign` removed (design above; risks through a question to the owner).
+5. L12: remove `firstboot-user-setup` after the locale/keyboard answers.
+6. L5, L6, L8, calibrated boot timeout, xz/zstd.
+7. Push order: DaemonCores-CI, then debian-bootc, then the wikis (`main` and `main:master`).
+8. Cleanup of old runs/tags only after confirmation.
