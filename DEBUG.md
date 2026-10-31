@@ -603,3 +603,9 @@ Conclusions (proved by these runs):
 ## Tick 4: waiting for the full run (state)
 - Secure Boot needs no further work: enforced and passing on both architectures in run 41199518844 (see above). Nothing was disabled or weakened.
 - Run 41219400047 (debian-bootc 1b73370, CI f1b04f5+token fix) is the first one exercising the single-job-per-arch pipeline. Next reading: arm64 `.pyc` mtime diag line (proves or refutes the stale-pyc hypothesis), AAVMF CODE/VARS lines, one job per arch.
+
+## build-all.sh: `bootupd` fails with `/build/rust/env: No such file` (run 41219400047)
+
+- Symptom: `bootupd (amd64)` fails right after the vendor tarball check, `bash: line 24: /build/rust/env: No such file or directory`.
+- Proof: the Rust toolchain is baked into the build image at `CARGO_HOME=RUSTUP_HOME=/build/rust` (`debian-bootc/workflows/env.yml:19-20,115`); `build-all.sh` ran `rm -rf "${BUILD_DIR}"/*` after each built package, which deleted it before `bootupd`.
+- Fix: the entries of `BUILD_DIR` are recorded at start and only entries added since are removed; `tests/test_build_all.py::test_cleanup_keeps_what_the_build_image_ships` covers it.
