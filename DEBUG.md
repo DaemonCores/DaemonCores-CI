@@ -513,3 +513,10 @@ Conclusions (proved by these runs):
 - Open: is ifup merely slow under TCG (ifupdown2 is Python, `Consumed 12.857s CPU time`) or blocked (left-over probe `dhclient[550]` still running in the unit's control group)?
 - Experiment (temporary, `install-fs.sh`, marked): CI-only drop-in `TimeoutStartSec=300`. If networking then succeeds and SSH answers: slowness proven; the product fix is a
   timeout that does not depend on CPU speed (embedded boards are slow too), not a test-only drop-in. If it still fails: blocked ifup, look at the probe dhclient. Remove the drop-in after the run.
+
+## arm64 run 41177213666 (TimeoutStartSec=300 experiment) - analysis
+
+- latest-4k (uboot category, SB off): SSH answered at the edge of the 300 s window (wait started 06:44:17, `is-system-running: running` at 06:49:38). The networking timeout was therefore a real factor, and the TCG boot is ~300 s.
+- latest (16k, signed, SB on): still unreachable at 300 s, serial ends at 4.65 s of kernel time (quiet systemd, no console output after) - consistent with "still booting", not with a firmware rejection (no Security Violation, `integrity: secureboot mode enabled`, db certs loaded).
+- Separate defect: test `u-boot-tools present` failed on 4k because no Containerfile sets the embedded profile (generic = GRUB, `libubootenv-tool` only). The test could never pass on a generic arm64 build; changed (debian-bootc cb7c122) to accept the stack of the profile.
+- Next: TCG boot-timeout multiplier 5 -> 12 and print the measured time-to-SSH, to learn the real boot time of 16k instead of guessing.

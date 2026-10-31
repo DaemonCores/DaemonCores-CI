@@ -375,6 +375,7 @@ wait_ssh() {
   # SSH_OPTS expired ("Connection timed out during banner exchange"). Each
   # probe gets a longer ConnectTimeout (first -o wins over SSH_OPTS).
   echo "  … waiting up to ${timeout}s for SSH"
+  local started=${SECONDS}
   deadline=$((SECONDS + timeout))
   _ssh_log=$(mktemp)
   while [ "${SECONDS}" -lt "${deadline}" ]; do
@@ -394,6 +395,7 @@ wait_ssh() {
       cat /proc/sys/kernel/random/boot_id 2>"${_ssh_log}") \
       && [ -n "${boot}" ] && [ "${boot}" != "${old_boot}" ]; then
       rm -f "${_ssh_log}"
+      echo "  … SSH reachable after $((SECONDS - started))s"
       return 0
     fi
     sleep 5
@@ -788,7 +790,7 @@ main() {
   # TCG emulation is an order of magnitude slower than KVM, so the manifest's
   # KVM-tuned boot timeout would trip on a boot that is merely slow. Scale it.
   if [ "${KVM}" != "1" ]; then
-    timeout=$((timeout * 5))
+    timeout=$((timeout * 12))
     echo "TCG emulation: boot timeout scaled to ${timeout}s"
   fi
   if ! wait_ssh "${timeout}"; then
