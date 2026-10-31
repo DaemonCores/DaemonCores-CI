@@ -491,3 +491,13 @@ Conclusions (proved by these runs):
 - Fix: `wait_ssh` polls until the deadline (probe `ConnectTimeout=30`, fail-fast checks kept); after a reboot it requires a boot id different from the previous boot so the
   guest being shut down is not mistaken for the new one. To validate in CI on the arm64 jobs.
 - Still open: `networking.service` timeout and the hardcoded `/dev/ttyS0` in `ifupdown2-autoconf` (arm64 console is ttyAMA0).
+
+## 2026-10-31 run 41174777202 (fc585a9): arm64 still unreachable after SSH polling
+
+- Result: `latest-amd64` SUCCESS (both image-test invocations complete: qemu pidfile fix proven). arm64 `latest`, `latest-4k`, `minimal` still
+  `VM did not become reachable within 300s`, now with polling: `Connection established` to 127.0.0.1:2222 then `Connection timed out during banner exchange`
+  although the guest reports `Startup finished in 3min 33.673s` (guest clock) and sshd listening. The previous explanation (single early probe) was INCOMPLETE:
+  polling did not change the outcome. The guest CPU is parked (same PC over three samples, IRQs masked in idle), so it is not busy.
+- Hypothesis, NOT proven: `networking.service` ends `Failed with result 'timeout'` and ifupdown2 deconfigures the interface (hostfwd to 10.0.2.15:22 then gets no answer).
+  Evidence missing: the guest's `ip addr`/`ip route` printed at boot by `ci-ssh-debug.service` was not shown by `dump_serial` (only filtered lines).
+- Step: `dump_serial` now prints the guest's own `ci-dbg: ip addr` .. `/etc/network/interfaces` block. Read it in the next arm64 run before touching anything.
