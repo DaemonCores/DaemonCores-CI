@@ -79,5 +79,5 @@ module signatures: the karg is what makes `sig_enforce=Y`. The test
 
 ## Results
 
-- Heavy layer cache (finding 3): fixed, awaiting the CI run of `b87ef23` to confirm
-  `Using cache` on STEP 13 in the image jobs.
+- Heavy layer cache (finding 3): fixed, run 41151560841 (`b87ef23`) seeded the cache
+  (`Pushing cache` on STEP 13, new hash formula); `Using cache` on STEP 13 is to be confirmed on the next run.
