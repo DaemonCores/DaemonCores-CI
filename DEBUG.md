@@ -647,3 +647,7 @@ Conclusions (proved by these runs):
 - `linux-modules-nvidia` wave1 failure: see Tick 6.
 - Cause of the `dc-gpu-apply` failure NOT proven: the diag listed the unit but printed no log. `dc-gpu apply` run in a trixie container exits 0 both with and without an installed `gpu-userspace` prefix, so the script alone does not fail; the guest context differs (sysinit ordering, read-only paths). No fix written.
 - Instrumentation (debian-bootc `workflows/tests.yml`, both failed-units diags): status and journal of every failed unit. Local, not pushed; the next run will show the journal.
+
+## Tick 7: conditional rebuild confirmed on a second run (MEASURED, run 41238278585, no package change)
+- Wave 0 of both architectures completed within about 90 s (setup 20:18:47Z, last wave0 job 20:20:28Z). Every `gpu-userspace-*` variant took 30 to 45 s (11 to 15 min in run 41233619804), `linux-image-nosign` amd64 58 s (4 min 17 s), `linux-image-16k-nosign` 48 s (6 min 57 s): the packages were reused, not rebuilt. The `80ebca9` fix holds with an intact cache.
+- Not yet read: the per-package `unchanged; reused` log lines, wave 1 (`linux-modules-nvidia`, rebuilt because it failed last time with no prior deb), image jobs and the `dc-gpu-apply` journal.
