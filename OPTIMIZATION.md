@@ -49,7 +49,7 @@ so no module signing key); with the twins active the cumulated time is about 290
 | # | Lever | Estimated gain (cumulated) | Status |
 |---|---|---|---|
 | L1 | One kernel build for signed and `-nosign`: `MODULE_SIG_FORCE=n` in the kernel, the signed image ships `/usr/lib/bootc/kargs.d/*.toml` with `module.sig_enforce=1`, the `-nosign` image ships none (the twin then differs by one tiny layer, not by a kernel) | kernel builds only: about 45 min of 290 (amd64 about 950 s + arm64-16k about 1770 s); the 4 twin image jobs stay unless the twin is dropped | planned, see constraint below |
-| L2 | Shared `ccache` for all kernel/module builds | modules 985 s to about 250 s each: about 48 min, and about 12 min off the wall clock | to measure locally |
+| L2 | Shared `ccache` for all kernel/module builds (manifest key `ccache: true`, `actions/cache`, compiler masquerade via `/usr/lib/ccache`, `CCACHE_BASEDIR=/tmp`) | local: cold 142 s to warm 10-12 s on 16 cores for the project config (vmlinux + modules, fresh source tree, 2126/2126 second-pass hits, 83 MB cache); CI estimate: kernel/module jobs from 912-1771 s to a few minutes when the cache is warm | implemented, awaiting CI run |
 | L3 | Chain the variants of one Containerfile+arch in one job | already done: `bootc-build.yml:611-625` builds the image, its `-nosign` twin, `-gaming` and `-ia` in one `Build` step on shared local layers; nothing left to gain | closed (no change) |
 | L4 | Skip unchanged debs in the setup job instead of starting a container per package | 22 jobs x 30-50 s, plus shorter waves | planned |
 | L5 | Build without per-layer `--cache-to` inside a chain (push the final layers once) | about 80 s per image job | to measure |
@@ -70,6 +70,15 @@ kernel package). The kernel config has `CONFIG_SECURITY_LOCKDOWN_LSM=y` only
 module signatures: the karg is what makes `sig_enforce=Y`. The test
 "signed kernel enforces module signatures" (`tests.yml:206-213`) and
 "unsigned-kernel variant does not enforce" (`tests.yml:215-221`) stay unchanged.
+
+## L2 local measurement (MEASURED)
+
+Container `debian:trixie`, 16 cores, kernel 7.3.1, `kernel/config` of debian-bootc + `olddefconfig`,
+`make vmlinux modules`, source re-extracted between passes, `PATH=/usr/lib/ccache:$PATH`
+(no change to any make line), `CCACHE_BASEDIR=/tmp`, `CCACHE_COMPILERCHECK=content`:
+cold 142 s, 2105 misses; warm 10 s, 2126 hits on 2126 lookups (100 % direct hits); cache 83 MB.
+Not measured: hit rate across two kernel releases, and between the image config and the device
+modules configs (the CI step `ccache statistics` prints it for each job).
 
 ## Constraints from the owner
 
