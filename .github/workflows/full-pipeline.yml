@@ -41,13 +41,6 @@ on:
       gpu_driver:
         type: string
         default: 'false'
-      # Opt-in -nvidia image twins (EULA-restricted; the bootc-installer only
-      # deploys one after an explicit acceptance). NEVER on a push. A string
-      # like the other dispatch knobs so an empty value on push/schedule is
-      # tolerated (a boolean input rejects '' and kills the run at startup).
-      gpu_driver_images:
-        type: string
-        default: 'false'
       # Opt-in disk-image (.img) build, split per format. NEVER activated by
       # default — only via the workflow_dispatch checkboxes. The img job runs
       # after the container image build and produces flashable .img files.
@@ -569,7 +562,6 @@ jobs:
       apt_url: ${{ needs.apt_key.outputs.url }}
       # both mode: also build the unsigned-kernel twin images (<tag>-nosign).
       nosign_images: ${{ needs.prepare.outputs.unsigned_kernel == 'yes' }}
-      gpu_driver_images: ${{ inputs.gpu_driver_images }}
     secrets: inherit
 
   iso:
