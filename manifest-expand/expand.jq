@@ -2,7 +2,7 @@
 #
 # Reads the manifest as JSON on stdin and writes it back with every template
 # replaced by one plain package per variant. Everything downstream (wave
-# planner, job matrix, build-one-deb lookup) therefore only ever sees ordinary
+# planner, job matrix, package lookup) therefore only ever sees ordinary
 # packages and needs no variant awareness of its own.
 #
 # Template keys, all optional unless noted:

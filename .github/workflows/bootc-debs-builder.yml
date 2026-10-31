@@ -1,22 +1,22 @@
 name: Build & Publish Bootc .deb
 
-# Generic, manifest-driven builder. setup reads workflows/bootc-debs-builder/
-# packages.yml, computes dependency waves (topological levels), and each wave is
-# a matrix that builds its packages in parallel via the build-one-deb reusable
-# workflow. A package with deps lands in a later wave and installs its deps'
-# debs first. Independent packages all run together in wave 0.
+# Generic, manifest-driven builder. One build job per call (the caller is
+# already one call per arch) builds every package of the manifest in the order
+# computed by build-deb/plan.py, so the container pull, the checkout and the
+# manifest expansion are paid once instead of once per package. A package whose
+# content hash is unchanged is restored from the APT repository, not rebuilt.
 
 on:
   workflow_dispatch:
   workflow_call:
     inputs:
       arch:
-        description: 'Target architecture (amd64 or arm64). Forwarded to build-one-deb and to the yq binary download.'
+        description: 'Target architecture (amd64 or arm64). Selects the build-env image and the packages built.'
         required: false
         type: string
         default: amd64
       signing_active:
-        description: 'yes to sign .ko files; empty/no to skip. Forwarded to build-one-deb.'
+        description: 'yes to sign .ko files; empty/no to skip. Forwarded to build-all.'
         required: false
         type: string
         default: 'no'
@@ -41,39 +41,58 @@ on:
         value: ${{ jobs.publish.outputs.any_rebuilt }}
 
 jobs:
-  setup:
+  # Container images must be lowercase and the expression language has no
+  # lowercase function, so the image reference is derived in a one-step job.
+  image:
     runs-on: ubuntu-latest
     outputs:
-      wave0: ${{ steps.waves.outputs.wave0 }}
-      wave1: ${{ steps.waves.outputs.wave1 }}
-      wave2: ${{ steps.waves.outputs.wave2 }}
-      wave3: ${{ steps.waves.outputs.wave3 }}
-      env_image: ${{ steps.waves.outputs.env_image }}
+      env_image: ${{ steps.ref.outputs.env_image }}
     steps:
-      - uses: actions/checkout@v7
-
-      # Arch-aware yq download: pick the binary matching the runner arch.
-      # The setup job runs on the amd64 runner regardless of the target
-      # arch (it only computes the wave plan), so the yq binary must match
-      # the RUNNER arch, not the target build arch. Detect the native arch
-      # via dpkg --print-architecture (fallback to uname -m on non-Debian).
-      - name: Install yq
+      - id: ref
         shell: bash
+        env:
+          ARCH: ${{ inputs.arch }}
         run: |
-          set -euo pipefail
-          yarch="$(dpkg --print-architecture 2>/dev/null || uname -m)"
-          case "$yarch" in
-            aarch64|arm64) yarch=arm64 ;;
-            x86_64|amd64)  yarch=amd64 ;;
-          esac
-          curl -fsSL \
-            "https://github.com/mikefarah/yq/releases/latest/download/yq_linux_${yarch}" \
-            -o /usr/local/bin/yq
-          chmod +x /usr/local/bin/yq
+          echo "env_image=ghcr.io/${GITHUB_REPOSITORY,,}:buildenv-${ARCH:-amd64}" \
+            >>"$GITHUB_OUTPUT"
 
-      # Expand variants (and drop the other arch's packages) once, here. The
-      # wave plan, the job matrix and every downstream build then work on plain
-      # packages, and there is a single place that knows about templates.
+  build:
+    needs: image
+    name: Build all packages (${{ inputs.arch }})
+    runs-on: ${{ inputs.arch == 'arm64' && 'ubuntu-24.04-arm' || 'ubuntu-latest' }}
+    container:
+      image: ${{ needs.image.outputs.env_image }}
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.PAT_PKG || github.token }}
+    permissions:
+      contents: read
+      # Pull the private build-env image with the job token when PAT_PKG is unset.
+      packages: read
+      # The Delete old artifacts step calls gh api DELETE on actions/artifacts,
+      # which requires the actions: write scope on GITHUB_TOKEN.
+      actions: write
+      # Broken builds and guarded repack skips open issues.
+      issues: write
+    outputs:
+      any_built: ${{ steps.build.outputs.any_built }}
+    env:
+      # Secret values a package may pull in via its manifest secret-env. A
+      # secret absent from this repo resolves to an empty string (harmless).
+      SECRETVAL_GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      SECRETVAL_SB_SIGNING_KEY: ${{ secrets.SB_SIGNING_KEY }}
+      SECRETVAL_SB_SIGNING_CERT: ${{ secrets.SB_SIGNING_CERT }}
+      # Module signing key/cert, available to all module build scripts when
+      # signing_active=yes; the build script checks MODULE_SIGNING_ACTIVE.
+      MODULE_SIGNING_KEY: ${{ secrets.MODULE_SIGNING_KEY }}
+      MODULE_SIGNING_CERT: ${{ secrets.MODULE_SIGNING_CERT }}
+      # Target arch propagates to the build-deb action and to deb globbing.
+      BUILD_ARCH: ${{ inputs.arch }}
+    steps:
+      - uses: DaemonCores/DaemonCores-CI/bootc-debs-start@main
+
+      # Expand variants and drop the other arch's packages once; the build
+      # then works on plain packages.
       - name: Expand manifest variants
         id: expand
         uses: DaemonCores/DaemonCores-CI/manifest-expand@main
@@ -82,128 +101,77 @@ jobs:
           unsigned-kernel: ${{ inputs.unsigned_kernel == 'yes' && 'yes' || 'no' }}
           gpu-driver: ${{ inputs.gpu_driver == 'yes' && 'yes' || 'no' }}
 
-      - name: Compute dependency waves
-        id: waves
+      # Compiler cache for the kernel builds (objects overlap heavily between
+      # the image kernel, its variants and the device modules). Restored once
+      # for the whole job; build-all.sh installs and wires ccache only when a
+      # kernel package really builds. The cache is not a build input.
+      - name: Restore ccache
+        uses: actions/cache@v4
+        with:
+          path: /ccache
+          key: ccache-${{ inputs.arch }}-${{ github.run_id }}
+          restore-keys: |
+            ccache-${{ inputs.arch }}-
+
+      # continue-on-error so the artifact upload below still runs and the
+      # last-good debs reach publish; the final step fails the job.
+      - name: Build all packages
+        id: build
+        continue-on-error: true
+        uses: DaemonCores/DaemonCores-CI/build-all@main
+        with:
+          manifest: ${{ steps.expand.outputs.manifest }}
+          source-manifest: workflows/bootc-debs-builder/packages.yml
+          arch: ${{ inputs.arch }}
+          signing-active: ${{ inputs.signing_active }}
+
+      - name: ccache statistics
+        if: always()
+        shell: bash
+        run: |
+          if command -v ccache >/dev/null 2>&1; then
+            ccache -s
+          fi
+
+      # Drop every previous per-package or combined artifact of this arch so
+      # publish merges exactly one set of debs.
+      - name: Delete old artifacts
+        if: always()
         shell: bash
         env:
+          GH_TOKEN: ${{ github.token }}
           ARCH: ${{ inputs.arch }}
-          MAN: ${{ steps.expand.outputs.manifest }}
         run: |
           set -euo pipefail
-          # Per-arch build-env image (built by build-env.yml as
-          # :buildenv-<arch> so each arch's .deb builds on a matching-arch
-          # build-env). Falls back to :buildenv for the default amd64 to keep
-          # zero regression while the per-arch tags roll out.
-          arch="${ARCH:-amd64}"
-          echo "env_image=ghcr.io/${GITHUB_REPOSITORY,,}:buildenv-${arch}" \
-            >>"$GITHUB_OUTPUT"
-          yq -o=json '.' "${MAN}" >/tmp/pkgs.json
-          python3 - <<'PY'
-          import json, os
-          pkgs = json.load(open('/tmp/pkgs.json'))['packages']
-          deps = {p['name']: (p.get('deps') or []) for p in pkgs}
-          memo = {}
-          def wave(name):
-              if name in memo:
-                  return memo[name]
-              d = deps.get(name, [])
-              memo[name] = 0 if not d else 1 + max(wave(x) for x in d)
-              return memo[name]
-          waves = {}
-          for name in deps:
-              waves.setdefault(wave(name), []).append(name)
-          with open(os.environ['GITHUB_OUTPUT'], 'a') as out:
-              for i in range(4):
-                  out.write("wave%d=%s\n" % (i, json.dumps(sorted(waves.get(i, [])))))
-          PY
+          ids=$(gh api --paginate \
+            "repos/${GITHUB_REPOSITORY}/actions/artifacts?per_page=100" \
+            --jq ".artifacts[] | select(.name | startswith(\"debs-\") and endswith(\"-${ARCH}\")) | .id")
+          for id in ${ids}; do
+            gh api --method DELETE "repos/${GITHUB_REPOSITORY}/actions/artifacts/${id}"
+          done
 
-  wave0:
-    needs: setup
-    if: ${{ needs.setup.outputs.wave0 != '[]' }}
-    permissions:
-      actions: write
-      issues: write
-      contents: write
-      packages: read
-    strategy:
-      fail-fast: false
-      matrix:
-        package: ${{ fromJSON(needs.setup.outputs.wave0) }}
-    uses: DaemonCores/DaemonCores-CI/.github/workflows/build-one-deb.yml@main
-    with:
-      package: ${{ matrix.package }}
-      container_image: ${{ needs.setup.outputs.env_image }}
-      arch: ${{ inputs.arch }}
-      signing_active: ${{ inputs.signing_active }}
-    secrets: inherit
+      - name: Upload debs
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: debs-all-${{ inputs.arch }}
+          path: /debs
+          include-hidden-files: true
 
-  wave1:
-    needs: [setup, wave0]
-    if: ${{ always() && !cancelled() && needs.setup.outputs.wave1 != '[]' }}
-    permissions:
-      actions: write
-      issues: write
-      contents: write
-      packages: read
-    strategy:
-      fail-fast: false
-      matrix:
-        package: ${{ fromJSON(needs.setup.outputs.wave1) }}
-    uses: DaemonCores/DaemonCores-CI/.github/workflows/build-one-deb.yml@main
-    with:
-      package: ${{ matrix.package }}
-      container_image: ${{ needs.setup.outputs.env_image }}
-      arch: ${{ inputs.arch }}
-      signing_active: ${{ inputs.signing_active }}
-    secrets: inherit
-
-  wave2:
-    needs: [setup, wave1]
-    # always() lets wave2 run even when wave1 has partial failures (some
-    # packages may still build successfully if their specific deps succeeded).
-    if: ${{ always() && !cancelled() && needs.setup.outputs.wave2 != '[]' }}
-    permissions:
-      actions: write
-      issues: write
-      contents: write
-      packages: read
-    strategy:
-      fail-fast: false
-      matrix:
-        package: ${{ fromJSON(needs.setup.outputs.wave2) }}
-    uses: DaemonCores/DaemonCores-CI/.github/workflows/build-one-deb.yml@main
-    with:
-      package: ${{ matrix.package }}
-      container_image: ${{ needs.setup.outputs.env_image }}
-      arch: ${{ inputs.arch }}
-      signing_active: ${{ inputs.signing_active }}
-    secrets: inherit
-
-  wave3:
-    needs: [setup, wave2]
-    if: ${{ always() && !cancelled() && needs.setup.outputs.wave3 != '[]' }}
-    permissions:
-      actions: write
-      issues: write
-      contents: write
-      packages: read
-    strategy:
-      fail-fast: false
-      matrix:
-        package: ${{ fromJSON(needs.setup.outputs.wave3) }}
-    uses: DaemonCores/DaemonCores-CI/.github/workflows/build-one-deb.yml@main
-    with:
-      package: ${{ matrix.package }}
-      container_image: ${{ needs.setup.outputs.env_image }}
-      arch: ${{ inputs.arch }}
-      signing_active: ${{ inputs.signing_active }}
-    secrets: inherit
+      # A failed package build kept its last-good deb (uploaded above) so the
+      # publication still has an input, but the job must end red.
+      - name: Fail the job on a broken build
+        if: steps.build.outcome == 'failure'
+        shell: bash
+        run: |
+          echo "::error::at least one package build failed; see the Build all packages step log"
+          exit 1
 
   publish:
-    needs: [setup, wave0, wave1, wave2, wave3]
-    # always() && !cancelled(): run even when some wave jobs fail so that
+    needs: [build]
+    # always() && !cancelled(): run even when the build job fails so that
     # hashes.json is updated for packages that succeeded. Without this,
-    # any single failure blocks ALL packages from caching, causing every
+    # a failed build blocks ALL packages from caching, causing every
     # package to rebuild on every run. Packages that failed without a prior
     # deb have no .meta file and are simply retried next run.
     if: ${{ always() && !cancelled() }}
