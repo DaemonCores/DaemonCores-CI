@@ -235,6 +235,9 @@ one_package() {
 main() {
   local man="$1" srcman="$2" pkg result any_built=false failed=0
   mkdir -p "${DEBS_DIR}"
+  # The workflow only exposes the token as SECRETVAL_GITHUB_TOKEN.
+  GITHUB_TOKEN="${GITHUB_TOKEN:-${SECRETVAL_GITHUB_TOKEN:-}}"
+  export GITHUB_TOKEN
   OPEN_ISSUES=$(curl -fsSL -H "Authorization: Bearer ${GITHUB_TOKEN}" \
     -H "Accept: application/vnd.github+json" \
     "${GITHUB_API_URL}/repos/${GITHUB_REPOSITORY}/issues?state=open&per_page=100" \
