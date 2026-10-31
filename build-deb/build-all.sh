@@ -227,6 +227,18 @@ one_package() {
 }
 
 #######################################
+# Remove what a package build added under BUILD_DIR, keeping the baseline
+# entries recorded at start.
+#######################################
+clean_build_tree() {
+  local entry
+  while IFS= read -r entry; do
+    rm -rf -- "${entry}"
+  done < <(find "${BUILD_DIR}" -mindepth 1 -maxdepth 1 -printf '%p\n' \
+    | sort | comm -23 - "${BASELINE_FILE}")
+}
+
+#######################################
 # Build every package in plan order; fail at the end when one failed.
 # Arguments:
 #   $1 - expanded manifest
@@ -235,6 +247,10 @@ one_package() {
 main() {
   local man="$1" srcman="$2" pkg result any_built=false failed=0
   mkdir -p "${DEBS_DIR}"
+  # What the build image already ships under BUILD_DIR (toolchains such as
+  # CARGO_HOME) must survive the per-package cleanup.
+  BASELINE_FILE=$(mktemp)
+  find "${BUILD_DIR}" -mindepth 1 -maxdepth 1 -printf '%p\n' | sort >"${BASELINE_FILE}"
   # The workflow only exposes the token as SECRETVAL_GITHUB_TOKEN.
   GITHUB_TOKEN="${GITHUB_TOKEN:-${SECRETVAL_GITHUB_TOKEN:-}}"
   export GITHUB_TOKEN
@@ -259,7 +275,8 @@ main() {
         issue "${pkg}" close \
           || echo "::warning::${pkg}: could not update its issue (GitHub API)"
         # The build tree and the kernel sources are not needed by the next package.
-        rm -rf "${BUILD_DIR:?}"/* "${TMPDIR:-/tmp}"/linux-*
+        clean_build_tree
+        rm -rf "${TMPDIR:-/tmp}"/linux-*
         ;;
       reused) ;;
       kept)

@@ -53,7 +53,7 @@ BUILD_DEB = """#!/bin/bash
 echo "${PACKAGE} deps=${DEP_DEBS//$'\\n'/,}" >>"${STUB_LOG}"
 case "${PACKAGE}" in
   lib) echo "skipped=true" >>"${GITHUB_OUTPUT}" ;;
-  app) echo "skipped=false" >>"${GITHUB_OUTPUT}" ;;
+  app) echo "skipped=false" >>"${GITHUB_OUTPUT}"; mkdir -p "${BUILD_DIR}/work" ;;
   broken) echo "build_failed=true" >>"${GITHUB_OUTPUT}" ;;
   gone) exit 1 ;;
 esac
@@ -158,3 +158,18 @@ def test_missing_dependency_deb_fails_the_package(tmp_path: Path) -> None:
     done = _run(root)
     assert 'result app: failed' in done.stdout
     assert 'app deps' not in (root / 'log').read_text(encoding='utf-8')
+
+
+def test_cleanup_keeps_what_the_build_image_ships(tmp_path: Path) -> None:
+    """A built package's tree is removed, the image's toolchain is not.
+
+    Args:
+        tmp_path: Scratch directory.
+    """
+    root = _sandbox(tmp_path)
+    (root / 'build' / 'rust').mkdir(parents=True)
+    (root / 'build' / 'rust' / 'env').write_text('', encoding='utf-8')
+    done = _run(root)
+    assert 'result app: built' in done.stdout, done.stderr
+    assert (root / 'build' / 'rust' / 'env').exists()
+    assert not (root / 'build' / 'work').exists()
