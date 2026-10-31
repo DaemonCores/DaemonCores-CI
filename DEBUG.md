@@ -574,3 +574,17 @@ Conclusions (proved by these runs):
 
 ## Experiment removed
 - The `networking.service` TimeoutStartSec=300 drop-in in install-fs.sh is removed. In run 41191163442 no networking.service failure appears in the latest-arm64 log (grep for failed/timed out: no match); the 30 s product timeout is re-exposed to the next run, which will show whether it still trips under neoverse-n1.
+
+## Run 41199518844 (debian-bootc 3f03653): Secure Boot state, tick 2 (MEASURED)
+- Secure Boot is enforced and passing on both architectures, no firmware rejection anywhere:
+  - `latest-arm64` (job 124534011106): `AAVMF CODE: /usr/share/AAVMF/AAVMF_CODE.secboot.fd`, `AAVMF VARS: .../OVMF_VARS.fd`
+    (virt-fw-vars sets `SecureBootEnable: True`), `SSH reachable after 127s`, then PASS on the bootc/ostree/mount tests.
+  - `latest-amd64` (job 124534011158): `PASS booted with UEFI Secure Boot enforced`, `PASS Secure Boot signing cert shipped`, SSH after 19 s.
+- The only arm64 failure left in that run is not Secure Boot: `no failed systemd units` finds `networking.service` failed
+  (`start operation timed out`, `CPU: 25.513s`, 30 s from `timeout.conf`). The journal shows `SyntaxWarning: invalid escape sequence`
+  from `/usr/share/ifupdown2/ifupdown/utils.py:243` at boot, i.e. Python recompiles ifupdown2 on every boot.
+- Image check (MEASURED, published `latest_arm64`, files copied without running it): 63 `.py` and 63 `.pyc` under `/usr/share/ifupdown2`;
+  the pyc header mtime (1598623279) equals the source mtime, so the pycs are valid IN THE IMAGE LAYER.
+- Hypothesis (NOT proven on the guest): ostree stores no file mtime, so the deployed tree has a different mtime and every timestamp-based
+  pyc is stale (ostreedev/ostree#1469). Evidence needed before any fix: print `stat -c %Y` of `utils.py` and its pyc in the diag of the failing test.
+- Candidate fix once proven: hash-based pycs (`python3 -m compileall --invalidation-mode unchecked-hash`) in the ifupdown2 overlay build.
