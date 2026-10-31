@@ -27,7 +27,7 @@
 #   kernel_flavour_kcflags <flavour>                  -> -march=x86-64-vN
 #   kernel_build_debs <tree> <target> [KCFLAGS]       -> make -j <target>
 # Mode pve only (the PVE packaging is a git packaging, not a kernel.org
-# tarball — kernel_pve_prepare ported verbatim from the VE lib):
+# tarball):
 #   kernel_pve_prepare <data-dir> [builddir]          -> SRCDIR/KERNEL_VERSION
 # Module signing (kernel_signing.sh) and the out-of-tree module bootstrap
 # (kernel_prepare.sh) are sourced below:
@@ -291,8 +291,7 @@ kernel_build_debs() {
   # worktree diff over the unpatched orig tarball (fuzz/refusal — first real
   # run). Committing makes the source package carry the patch set and keeps
   # the flavour passes re-runnable over the same tree. Trees without git
-  # linkage (bindeb-pkg mode) are untouched. Ported verbatim from the lib
-  # kernel-pve-build.sh build step.
+  # linkage (bindeb-pkg mode) are untouched.
   if git -C "${tree}" rev-parse --git-dir >/dev/null 2>&1; then
     git -C "${tree}" add -A
     git -C "${tree}" -c user.email="pve-build@debian.local" \
@@ -309,9 +308,7 @@ kernel_build_debs() {
 # repo carries no source index, so the packaging is fetched as the
 # mirror_ubuntu-kernels submodule of git.proxmox.com/git/pve-kernel.git;
 # the seed .config is the Ubuntu mirror tree config plus the PVE packaging
-# deltas (the same scripts/config pass debian/rules runs). Ported verbatim
-# from DaemonCores-VE workflows/bootc-debs-builder/kernel-pve/lib/
-# kernel-pve-build.sh (which is being retired in favour of this helper).
+# deltas (the same scripts/config pass debian/rules runs).
 # Globals:
 #   KERNEL_DATA_DIR: set before the call, the repo's kernel-pve data dir
 #   KERNEL_VERSION: read, resolved from the Proxmox repo when empty
@@ -347,8 +344,7 @@ kernel_pve_prepare() {
   # run: "creating source package requires git repository"). The pointer is
   # made absolute because the tree is copied/moved out of pkg-src; the
   # XanMod setlocalversion patch (0017) drops the git tag suffix, so the
-  # release stays 7.0.14-<LOCALVERSION>. Ported verbatim from the lib
-  # kernel-pve-build.sh prepare step.
+  # release stays 7.0.14-<LOCALVERSION>.
   if [[ -f "${SRCDIR}/.git" ]]; then
       local gd
       gd=$(sed 's/^gitdir: *//' "${SRCDIR}/.git")
