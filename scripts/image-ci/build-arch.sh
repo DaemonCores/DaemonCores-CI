@@ -502,7 +502,15 @@ ram_budget() {
 # end this loop, and a hung VM must not hold the job.
 image_test() {
   local limit="${BOOT_TEST_TIMEOUT:-2700}"
-  timeout "${limit}" "$@"
+  timeout "${limit}" env IMAGE_TEST_STATE="${STATE_DIR}/image-test" "$@"
+}
+
+# Serial log image-test.sh writes for a reference (lib.sh derives the name the
+# same way: every character outside [A-Za-z0-9._-] becomes an underscore).
+serial_log_of() {
+  local ref
+  ref=$(ref_of "$1")
+  echo "${STATE_DIR}/image-test/logs/${ref//[^A-Za-z0-9._-]/_}.serial.log"
 }
 
 ensure_prepared() {
@@ -533,7 +541,6 @@ phase_test() {
     group "Boot test ${tag}"
     rc=0
     image_test env ARCH="${ARCH}" IMAGE="${ref}" \
-      SERIAL="${STATE_DIR}/serial-${tag}.log" \
       bash "${IMAGE_TEST}" test "${ref}" "$(ram_budget "${tag}")" || rc=$?
     if [[ "${rc}" -eq 0 ]]; then
       set_state "${tag}" ok
@@ -657,9 +664,9 @@ report() {
   while IFS= read -r tag; do
     state=$(row_get "${tag}" "${col_state}")
     [[ "${state}" == "test-failed" ]] || continue
-    log="${STATE_DIR}/serial-${tag}.log"
+    log=$(serial_log_of "${tag}")
     [[ -f "${log}" ]] || continue
-    cp -f "${log}" "${STATE_DIR}/failed-logs/"
+    cp -f "${log}" "${STATE_DIR}/failed-logs/serial-${tag}.log"
     {
       echo
       echo "<details><summary>Serial console of ${tag} (last 100 lines)</summary>"

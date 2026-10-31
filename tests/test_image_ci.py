@@ -95,10 +95,12 @@ echo "cosign $*" >>"${STUB_LOG}"
 """
 
 IMAGE_TEST = r"""#!/bin/bash
-echo "image-test $* ARCH=${ARCH} SERIAL=${SERIAL:-}" >>"${STUB_LOG}"
+echo "image-test $* ARCH=${ARCH} STATE=${IMAGE_TEST_STATE:-}" >>"${STUB_LOG}"
+serial="${IMAGE_TEST_STATE}/logs/${2//[^A-Za-z0-9._-]/_}.serial.log"
 if [ "$1" = "test" ]; then
   if [ -n "${FAIL_TEST:-}" ] && [[ "$2" == *"${FAIL_TEST}"* ]]; then
-    echo "boot failed" >"${SERIAL}"
+    mkdir -p "${IMAGE_TEST_STATE}/logs"
+    echo "boot failed" >"${serial}"
     exit 7
   fi
   if [ -n "${HANG_TEST:-}" ] && [[ "$2" == *"${HANG_TEST}"* ]]; then
@@ -668,7 +670,7 @@ def test_boot_tests_use_one_prepare_and_one_child_process_per_image(
         ['test', f'{IMAGE}:latest-nosign_amd64', '0'],
         ['test', f'{IMAGE}:minimal_amd64', '15'],
     ]
-    assert 'SERIAL=' + str(sb.runner_temp / 'image-ci' / 'serial-latest.log') \
+    assert 'STATE=' + str(sb.runner_temp / 'image-ci' / 'image-test') \
         in calls[1]
 
 
