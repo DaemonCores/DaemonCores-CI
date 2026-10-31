@@ -166,3 +166,19 @@ Steps: 1 `content-hash.sh` (hash parity test old vs new against published `hashe
 - Now: `skip=true` when the content hash equals the published image's `org.daemoncores.content-hash` label (except schedule / force_no_cache). Every step from `Build base` to `Sign image` is guarded. The hash also includes the boot-test manifest. The manifest job reuses the already published per-arch tags.
 - First run after the change rebuilds everything once (hash formula changed); the next no-change run is the measurement.
 - Images that fail their boot test are never pushed, so they never become "identical" and run again.
+
+## L17: where the deb phase time goes when nothing changed (MEASURED, run 41199518844)
+- Conditional rebuild at deb level WORKS: `linux-image (arm64) unchanged; reused cached deb(s)`, `cache[linux-image-arm64]: hash=05759f76... prior=05759f76...` (same hash as the published one). The reuse step itself takes about 1 s.
+- The deb phase still took 7 min (12:05:27-12:12:41) because each of the ~28 per-package jobs pays its own setup: container pull about 25 s, `Enable ccache` (apt install) about 33 s, ccache restore (871 MB) about 8 s, checkout, manifest-expand, pkg-def. Kernel job `linux-image` arm64: 115 s, of which about 1 s was the actual decision.
+- Billing is the sum over jobs: about 36 job-minutes spent to reuse unchanged debs.
+- Fix (designed, steps 6-8 of the single-job plan): one `build` job per arch running `build-deb/build-all.sh` over `build-deb/plan.py` order; hash decision first, ccache install/restore only when a package really builds; kernel tarball cached (`KERNEL_TARBALL_CACHE`, sha256 verified on every use; done, commit b3fb61d). Expected: a no-change run in about 2 min per arch (ESTIMATED).
+
+## L18: Containerfile layer order for cache reuse (implemented in debian-bootc, awaiting CI evidence)
+- Rule: put the layers that differ between tags and twins last. Kernel and device modules (they differ per `-nosign`, `-16k`, `-4k`) are now the last heavy layer; the GPU gaming layer, the grub cmdline / service masking, and `ostree-layout` all come before it, so every twin of an image shares them.
+- `-ia` cannot precede the kernel: `linux-modules-nvidia` depends on the exact kernel package. Device modules also pin the kernel (`Depends: daemoncores-kernel-<kver> (= <ver>)`), so modules and kernel stay in one transaction unless `dpkg --force-depends` is used (not done).
+- `install-signature-policy` is last: `IMAGE_REF` differs per tag, so it must not sit above the kernel layer.
+- Removed `rm` lines that duplicated work done elsewhere: the apt lists are wiped by `99-apt-clean` after every apt run, and `ostree-layout` already empties `/tmp`, `/var/tmp`, `/run` and removes `policy-rc.d`.
+- Not proven yet: kernel postinst (dracut) running after `ostree-layout`; the boot test and `bootc container lint` of the next run decide.
+
+## Single-job-per-arch plan status
+Done locally, not pushed: step 2 `sign-image/sign.sh` (04d9d08), step 6 kernel tarball cache (b3fb61d). Open: 1 image-test split, 3 `build-arch.sh`, 4 `Containerfile.iso` ARG, 5 workflow wiring, 7 `plan.py`/`build-all.sh`, 8 `bootc-debs-builder.yml`, 9 docs.
