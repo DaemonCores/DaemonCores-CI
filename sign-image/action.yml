@@ -33,17 +33,4 @@ runs:
         REFS: ${{ inputs.refs }}
         COSIGN_PRIVATE_KEY: ${{ inputs.private-key }}
         COSIGN_PASSWORD: ${{ inputs.password }}
-      run: |
-        set -euo pipefail
-        args=(--yes)
-        if [ -n "${COSIGN_PRIVATE_KEY}" ]; then
-          args+=(--key env://COSIGN_PRIVATE_KEY)
-        else
-          echo "::warning::no COSIGN_PRIVATE_KEY secret: signing keyless." \
-            "Hosts cannot enforce a keyless signature with containers-image."
-        fi
-        while IFS= read -r ref; do
-          [ -n "${ref}" ] || continue
-          # Registry references are lowercase; repository names may not be.
-          cosign sign "${args[@]}" "${ref,,}"
-        done <<< "${REFS}"
+      run: ${{ github.action_path }}/sign.sh
