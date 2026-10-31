@@ -30,8 +30,13 @@ so no module signing key); with the twins active the cumulated time is about 290
    (`packages.yml:418-`), about 985 s, although its objects are nearly identical to `linux-image`.
 3. **Image layer cache does not cross jobs.** The heavy `RUN apt update && apt install`
    (STEP 13/34) ran for real in every image job: 103 s amd64, 142 s arm64. Within one job the
-   second build pass logged 25 `Using cache`. Cause of the registry-cache miss: UNKNOWN
-   (`ARG DEBS_HASH` is placed right before that `RUN`).
+   second build pass logged 25 `Using cache`. Cause of the registry-cache miss (read in
+   `bootc-build.yml` `chash` step): `DEBS_HASH` fingerprinted every deb of the arch, kernels
+   included, and is declared before that `RUN` (`Containerfile:71`). Any kernel rebuild changed
+   it and re-ran the heavy layer, which does not install a kernel. Fixed in `f3e89d5` (CI) and
+   `b87ef23` (Containerfiles): `DEBS_HASH` now excludes `linux-image-*`/`linux-modules-*`, a new
+   `KERNEL_DEBS_HASH` sits before the kernel layer. Local proof: a 2-layer build where only the
+   second ARG changes reuses layer 1 and rebuilds layer 2; changing the first ARG rebuilds both.
 4. **`--cache-to` pushes every layer**: each trivial step (`LABEL`, `ARG`) takes 2-3 s.
    About 80 s of the 285 s `Build` step (ESTIMATED).
 5. **Boot test dominates per-image time** on arm64 (367-388 s, TCG), amd64 146 s.
@@ -74,4 +79,5 @@ module signatures: the karg is what makes `sig_enforce=Y`. The test
 
 ## Results
 
-(Filled as each lever is measured/applied.)
+- Heavy layer cache (finding 3): fixed, awaiting the CI run of `b87ef23` to confirm
+  `Using cache` on STEP 13 in the image jobs.
