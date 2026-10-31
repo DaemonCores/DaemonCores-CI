@@ -229,3 +229,13 @@ Pushed: image-test split, `build-arch.sh`, `plan.py` / `build-all.sh` (one build
 | L12 installer steps, remove `firstboot-user-setup` | in progress (worker); service still in `Containerfile` and `packages.yml` |
 | `chain:` in `packages.yml` | not started; to build on top of the waves (kernel + its modules share ccache and source) |
 | Images in one job per arch, one push, tests on one re-imaged VM | being audited (scout) |
+
+## Audit of the image-side demands (checked by command, 2026-10-31)
+| Demand | State | Proof |
+|---|---|---|
+| All images of one arch in one job, phases hash build lint test wave2 scan push sign in order | DONE | `bootc-build.yml:196-212` (one `build-test-push` job per arch), `build-arch.sh:2-9,723` |
+| All images pushed together after the tests | DONE | `build-arch.sh:607-635` (`phase_push`, only on the main branch; an image whose test failed is `blocked`) |
+| Boot tests chained on one re-imaged VM | NOT FOUND | no reimage / snapshot logic in `image-test/*.sh` (grep empty); to be checked in `image-test.sh` before concluding |
+| OCI layer compression tuned (xz/zstd) | MISSING | no compression option in `scripts/image-ci/*.sh` nor `bootc-build.yml` |
+| Boot timeout calibrated on previous runs and persisted | MISSING | still a TODO at `DEBUG.md:565` |
+| `chain:` key in `packages.yml` | MISSING | not present |
