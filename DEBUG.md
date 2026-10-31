@@ -537,3 +537,10 @@ Conclusions (proved by these runs):
 
 - The `x /32xw $pc` dump printed nothing again when sent in the same hmp.py invocation as `info registers` (whose reply is large). Run alone, the same two `x` commands print the memory locally (qemu, `ffffce423ff409b0: 0x14000002 …`). They now go in their own invocation.
 - Re-measured 16k stall: PC alternates ffffd56efa57ef54 / ef6c, X30=ffffd56efa57eac4, SP=fff00000fe988da0 (same low bits as the previous run, new KASLR base).
+
+## Run 41183530336 - 16k stall, second sampling (MEASURED + one inference)
+
+- Serial identical: stops at `[4.726790] PM: genpd: Disabling unused power domains`, single boot, no panic/oops text.
+- Registers this time: PC=ffffe2aab1e10a00 on all 3 samples, SP=X29=ffffc0008002be00, X30=ffffe2aab21292e8, PSTATE=004003c5 (EL1h, DAIF masked). A 2 MB-aligned base fits PC - 0x10a00 = ffffe2aab1e00000; with that base PC = `vectors+0x200` and LR = `memblock_find_in_range_node+0x1c` in the System.map of the 16k kernel found in the scratchpad (same version 7.2.14-16k; the CI build itself is not verified identical).
+- Inference (NOT proven): `vectors+0x200` is the EL1h synchronous entry; SP=ffffc0008002be00 is the link-time (unrelocated) address of init_stack, so the vector entry faults on its own stack push and loops. This would be an exception taken with an SP that was not relocated.
+- The memory dump is still empty in CI. The monitor reply is now printed unfiltered (plus gva2gpa for PC and SP) to see whether the address is unreadable.
