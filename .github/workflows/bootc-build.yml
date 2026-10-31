@@ -34,9 +34,11 @@ on:
         default: false
 
 jobs:
-  # Discover every Containerfile* at the repo root and emit a FLAT build
-  # matrix where each entry is { file, tag, arch, kernel_suffix, twin_suffix }. Both arches
-  # (amd64, arm64) are always included. There is one image per tag: automatic
+  # Discover every Containerfile* at the repo root and emit the build matrix
+  # grouped by architecture: arch_matrix is a list of { arch, runner, entries },
+  # where entries lists, in build order, the images of that architecture as
+  # { file, tag, arch, kernel_suffix, twin_suffix }. Both arches (amd64, arm64)
+  # are always included; one job per architecture builds all its images. There is one image per tag: automatic
   # updates are a run-time choice (the bootc-fetch-apply-updates.timer, masked
   # through a symlink in /etc), not an image variant.
   # A Containerfile that carries `LABEL org.daemoncores.arm64-4k-image` ships two
@@ -47,8 +49,11 @@ jobs:
   # cores have no 16 KB granule. Without the LABEL, arm64 builds the 4 KB kernel.
   # Containerfile.base is the shared base every other Containerfile builds on: it is
   # not an image of its own (no matrix entry, never pushed) but it takes part in the
-  # global hash. Each build job builds it once, then the image and its -nosign twin
+  # global hash. Each build job builds it once, then each image and its -nosign twin
   # (`twin_suffix`, the kernel suffix of the twin, empty when none is requested).
+  # An image whose Containerfile starts FROM another image of this repository (the
+  # installer) is recognised by the build job, which builds it after the tests of
+  # its parent.
   # Also computes a global hash over all Containerfiles so any variant change
   # invalidates every variant's "identical to previous" cache.
   #
@@ -59,9 +64,7 @@ jobs:
     name: Discover Containerfiles
     runs-on: ubuntu-latest
     outputs:
-      matrix_wave1: ${{ steps.list.outputs.matrix_wave1 }}
-      matrix_wave2: ${{ steps.list.outputs.matrix_wave2 }}
-      has_derived: ${{ steps.list.outputs.has_derived }}
+      arch_matrix: ${{ steps.list.outputs.arch_matrix }}
       manifest_matrix: ${{ steps.list.outputs.manifest_matrix }}
       global_hash: ${{ steps.list.outputs.global_hash }}
     steps:
@@ -147,42 +150,36 @@ jobs:
             global_inputs+="${name} $(sha256sum "$name" | cut -d' ' -f1)"$'\n'
           done
           global_hash=$(printf '%s' "$global_inputs" | sha256sum | cut -d' ' -f1)
-          # Split into wave1 (FROM external) and wave2 (FROM our own registry).
-          # Containerfiles that pull a previously-built image from this run
-          # (e.g. Containerfile.iso: FROM ghcr.io/daemoncores/debian-bootc:latest-*)
-          # must run AFTER wave1 pushes, not concurrently with it.
-          owner="${GITHUB_REPOSITORY%%/*}"
-          matrix_wave1='[]'
-          matrix_wave2='[]'
-          while IFS= read -r entry; do
-            [ -z "$entry" ] && continue
-            file=$(printf '%s' "$entry" | jq -r '.file')
-            from_line=$(grep -m1 -iE '^FROM ' "$file" | awk '{print $2}' || true)
-            if printf '%s' "$from_line" | grep -qi "ghcr\.io/${owner}/"; then
-              matrix_wave2=$(printf '%s' "$matrix_wave2" | jq -c --argjson e "$entry" '. += [$e]')
-            else
-              matrix_wave1=$(printf '%s' "$matrix_wave1" | jq -c --argjson e "$entry" '. += [$e]')
-            fi
-          done < <(printf '%s' "$matrix" | jq -c '.[]')
-          has_derived="false"
-          [ "$matrix_wave2" != '[]' ] && has_derived="true"
-          echo "matrix_wave1=$(printf '%s' "$matrix_wave1" | jq -c .)" >>"$GITHUB_OUTPUT"
-          echo "matrix_wave2=$(printf '%s' "$matrix_wave2" | jq -c .)" >>"$GITHUB_OUTPUT"
-          echo "has_derived=${has_derived}" >>"$GITHUB_OUTPUT"
+          # Group the entries by architecture, keeping the order of the matrix
+          # (Containerfiles by name, the -4k image right after its parent). The
+          # runner of an architecture is the native one: no QEMU cross-build.
+          arch_matrix=$(printf '%s' "$matrix" | jq -c '
+            . as $m
+            | [([.[].arch] | unique)[] as $a | {
+                arch: $a,
+                runner: (if $a == "arm64" then "ubuntu-24.04-arm" else "ubuntu-latest" end),
+                entries: [$m[] | select(.arch == $a)]
+              }]')
+          echo "arch_matrix=${arch_matrix}" >>"$GITHUB_OUTPUT"
           echo "manifest_matrix=$(printf '%s' "$manifest_matrix" | jq -c .)" >>"$GITHUB_OUTPUT"
           echo "global_hash=${global_hash}" >>"$GITHUB_OUTPUT"
-          echo "Wave 1 matrix (external FROM):"
-          printf '%s' "$matrix_wave1" | jq .
-          echo "Wave 2 matrix (derived FROM our registry):"
-          printf '%s' "$matrix_wave2" | jq .
+          echo "Architecture matrix:"
+          printf '%s' "$arch_matrix" | jq .
           echo "Manifest matrix:"
           printf '%s' "$manifest_matrix" | jq .
           echo "Global Containerfiles hash: ${global_hash}"
 
+  # One job per architecture builds, checks, tests, scans, pushes and signs ALL the
+  # images of that architecture on one shared local layer store: the setup (disk
+  # cleanup, checkout, login, package install, cache download) is paid once per
+  # architecture instead of once per image. scripts/image-ci/build-arch.sh holds
+  # the logic; a failing image is recorded and the others go on. The images built
+  # on another image of this run (the installer) are built after the tests of
+  # their parent, in the same job.
   build-test-push:
-    name: Build ${{ matrix.entry.tag }}-${{ matrix.entry.arch }}
+    name: Build images (${{ matrix.group.arch }})
     needs: discover
-    runs-on: ${{ matrix.entry.arch == 'arm64' && 'ubuntu-24.04-arm' || 'ubuntu-latest' }}
+    runs-on: ${{ matrix.group.runner }}
     permissions:
       contents: read
       packages: write
@@ -192,11 +189,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Flat matrix: each entry is { file, tag, arch, kernel_suffix, twin_suffix }. The
-        # arch dimension (amd64/arm64) is folded in by the discover job. Both
-        # arches always build natively on their matching runner (no QEMU
+        # { arch, runner, entries } per architecture, from the discover job.
+        # Both arches always build natively on their matching runner (no QEMU
         # cross-build).
-        entry: ${{ fromJSON(needs.discover.outputs.matrix_wave1) }}
+        group: ${{ fromJSON(needs.discover.outputs.arch_matrix) }}
 
     steps:
       - name: Free disk space
@@ -208,34 +204,18 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
-      - name: Set image name and tags
-        id: tags
+      - name: Fetch the shared tooling
+        uses: actions/checkout@v7
+        with:
+          repository: DaemonCores/DaemonCores-CI
+          ref: main
+          path: .ci-tooling
+          persist-credentials: false
+
+      - name: Install the tools
         env:
-          CF_FILE: ${{ matrix.entry.file }}
-          CF_TAG: ${{ matrix.entry.tag }}
-          ARCH: ${{ matrix.entry.arch }}
-          TWIN_SUFFIX: ${{ matrix.entry.twin_suffix }}
-        run: |
-          set -euo pipefail
-          echo "IMAGE=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_ENV"
-          # Per-arch tag <tag>_<arch>. No device segment (the kernel modules
-          # are selected per-arch inside the Containerfile instead of being a
-          # build dimension).
-          primary="${CF_TAG}_${ARCH}"
-          echo "primary=${primary}" >>"$GITHUB_OUTPUT"
-          # The unsigned-kernel twin of this image, when one is requested.
-          if [[ -n "${TWIN_SUFFIX}" ]]; then
-            echo "twin_tag=${CF_TAG}-nosign" >>"$GITHUB_OUTPUT"
-            echo "twin_primary=${CF_TAG}-nosign_${ARCH}" >>"$GITHUB_OUTPUT"
-          fi
-          # Canonical combo = amd64. Only this one keeps the
-          # historical tags (:latest / :<sha> / :monthly-*) for retrocompat
-          # with the single-arch era, so existing amd64 pulls/tags keep
-          # working.
-          canonical=false
-          if [ "$ARCH" = "amd64" ]; then canonical=true; fi
-          echo "canonical=${canonical}" >>"$GITHUB_OUTPUT"
-          echo "ARCH=${ARCH}" >>"$GITHUB_ENV"
+          ARCH: ${{ matrix.group.arch }}
+        run: bash .ci-tooling/scripts/image-ci/prepare.sh
 
       - name: Log in to GHCR
         env:
@@ -252,559 +232,46 @@ jobs:
             --username "${{ github.actor }}" \
             --password-stdin <<< "${PAT_PKG}"
 
-      # Deterministic content id of what actually goes into the image: the
-      # published deb hashes + the base image digest (per-arch) + this variant's
-      # Containerfile + the global Containerfiles hash + the arch + the
-      # Stamped as a label so the next run can tell whether a rebuild changed
-      # anything. The arch is part of the id so cross-arch images get distinct
-      # cache identities.
-      - name: Compute content hash
-        id: chash
-        env:
-          CF_FILE: ${{ matrix.entry.file }}
-          CF_TAG: ${{ matrix.entry.tag }}
-          GLOBAL_HASH: ${{ needs.discover.outputs.global_hash }}
-          ARCH: ${{ matrix.entry.arch }}
-          PRIMARY: ${{ steps.tags.outputs.primary }}
-          BOOTC_GPG_SHA256: ${{ inputs.bootc_gpg_sha256 }}
-          COSIGN_PUBLIC_KEY: ${{ secrets.COSIGN_PUBLIC_KEY }}
-        run: |
-          set -euo pipefail
-          command -v skopeo >/dev/null 2>&1 \
-            || { sudo apt-get update -qq; sudo apt-get install -y skopeo; }
-          owner="${GITHUB_REPOSITORY%%/*}"
-          repo="${GITHUB_REPOSITORY#*/}"
-          pages="https://${owner,,}.github.io/${repo}"
-          debs=$(curl -fsSL "${pages}/debs-cache/hashes.json" 2>/dev/null \
-            | jq -cS . 2>/dev/null || echo '{}')
-          # The external base image is the one Containerfile.base starts from.
-          base=$(grep -m1 -iE '^FROM ' Containerfile.base | awk '{ print $2 }')
-          # Resolve the base image's per-arch digest (--override-arch) so amd64
-          # and arm64 get distinct, correct digests even when the base is a
-          # multi-arch manifest list.
-          base_digest=$(sudo skopeo inspect --override-arch "${ARCH}" \
-            --format '{{.Digest}}' "docker://${base}" 2>/dev/null || echo none)
-          cf=$(sha256sum "$CF_FILE" | cut -d' ' -f1)
-          # The APT key hash and the signing public key are build inputs too:
-          # a rotation must not be mistaken for an identical image.
-          signing=$(printf '%s\n%s' "${BOOTC_GPG_SHA256}" "${COSIGN_PUBLIC_KEY}" \
-            | sha256sum | cut -d' ' -f1)
-          # The boot-test manifest is an input too: an image must be re-tested
-          # when its tests change, even if its bytes do not.
-          tests_hash=$(sha256sum "${TESTS_FILE:-workflows/tests.yml}" 2>/dev/null \
-            | cut -d' ' -f1 || echo none)
-          hash=$(printf '%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n' \
-            "${debs}" "${base_digest}" "${cf}" "${GLOBAL_HASH}" "${CF_TAG}" \
-            "${ARCH}" "${signing}" "${tests_hash}" \
-            | sha256sum | cut -d' ' -f1)
-          echo "hash=${hash}" >>"$GITHUB_OUTPUT"
-          # Per-arch fingerprints of the published debs, passed to the image build as
-          # build args so its apt layers are not served stale from the layer cache.
-          # Kernels and device modules are fingerprinted apart: a kernel rebuild
-          # must re-run the kernel layer only, not the heavy package layer before it.
-          debs_hash=$(printf '%s' "${debs}" \
-            | jq -cS --arg a "-${ARCH}" 'with_entries(select((.key | endswith($a)) and (.key | test("^linux-(image|modules)-") | not)))' \
-            | sha256sum | cut -d' ' -f1)
-          echo "debs_hash=${debs_hash}" >>"$GITHUB_OUTPUT"
-          kernel_debs_hash=$(printf '%s' "${debs}" \
-            | jq -cS --arg a "-${ARCH}" 'with_entries(select((.key | endswith($a)) and (.key | test("^linux-(image|modules)-"))))' \
-            | sha256sum | cut -d' ' -f1)
-          echo "kernel_debs_hash=${kernel_debs_hash}" >>"$GITHUB_OUTPUT"
-          # The twin differs from its primary image by the kernel only.
-          twin_hash=$(printf '%s\nnosign\n' "${hash}" | sha256sum | cut -d' ' -f1)
-          echo "twin_hash=${twin_hash}" >>"$GITHUB_OUTPUT"
-          # Content-hash label of the currently published per-arch image.
-          prior=$(sudo skopeo inspect --override-arch "${ARCH}" \
-            --format '{{ index .Labels "org.daemoncores.content-hash" }}' \
-            "docker://${IMAGE}:${PRIMARY}" 2>/dev/null || echo '')
-          if [[ -n "${prior}" && "${prior}" == "${hash}" ]]; then
-            echo "identical=true" >>"$GITHUB_OUTPUT"
-            # A refresh run (schedule, force_no_cache) must rebuild anyway.
-            if [[ "${{ github.event_name }}" == "schedule" \
-              || "${{ inputs.force_no_cache }}" == "true" ]]; then
-              echo "skip=false" >>"$GITHUB_OUTPUT"
-            else
-              echo "skip=true" >>"$GITHUB_OUTPUT"
-            fi
-          else
-            echo "identical=false" >>"$GITHUB_OUTPUT"
-            echo "skip=false" >>"$GITHUB_OUTPUT"
-          fi
-          echo "content-hash=${hash} prior=${prior:-none} tag=${PRIMARY}"
+      # Key-based signatures are stored as `.sig` tags, the format read by
+      # containers-image (`sigstoreSigned`); pinned to cosign 2.x which writes it.
+      - name: Install cosign
+        if: github.ref == 'refs/heads/main'
+        uses: sigstore/cosign-installer@v3
+        with:
+          cosign-release: v2.6.5
+          install-dir: /usr/local/bin
+          use-sudo: true
 
-      # The shared base (SSL prerequisites, trusted bootc APT repository) is built
-      # once per job. It stays local to the runner: it is never pushed. The image and
-      # its -nosign twin are built on it, so they share every layer before the kernel.
-      - name: Build base
-        if: steps.chash.outputs.skip != 'true'
+      - name: Install trivy
+        uses: aquasecurity/setup-trivy@v0.2.3
+
+      # Content hash, build, lint, boot test, scan, push and signature of every
+      # image of the architecture. The results table goes to the job summary, the
+      # serial console of a failed boot test to the artifact below; the step fails
+      # when any image failed to build, pass its checks, boot, or be pushed.
+      - name: Build, test, push and sign the images
         env:
-          ARCH: ${{ matrix.entry.arch }}
+          ARCH: ${{ matrix.group.arch }}
+          ENTRIES: ${{ toJSON(matrix.group.entries) }}
+          GLOBAL_HASH: ${{ needs.discover.outputs.global_hash }}
+          FORCE_NO_CACHE: ${{ inputs.force_no_cache }}
           BOOTC_GPG_SHA256: ${{ inputs.bootc_gpg_sha256 }}
           APT_URL: ${{ inputs.apt_url }}
-        run: |
-          set -euo pipefail
-          flags=()
-          if [[ "${{ github.event_name }}" == "schedule" \
-            || "${{ inputs.force_no_cache }}" == "true" ]]; then
-            flags+=(--no-cache)
-          fi
-          # APT repository trust: the key hash is derived by the pipeline from
-          # the APT_GPG_KEY secret; when absent the Containerfile defaults apply.
-          apt_args=()
-          [[ -z "${BOOTC_GPG_SHA256}" ]] \
-            || apt_args+=(--build-arg "BOOTC_GPG_SHA256=${BOOTC_GPG_SHA256}")
-          [[ -z "${APT_URL}" ]] \
-            || apt_args+=(--build-arg "BOOTC_APT_URL=${APT_URL}")
-          # Product display name, derived automatically from the repo name (same
-          # rule as the ISO branding: repo tail, dashes -> spaces). The image
-          # brands its UEFI boot-entry label with it instead of a hardcoded
-          # distro name.
-          product_name="${GITHUB_REPOSITORY##*/}"
-          product_name="${product_name//-/ }"
-          # Layer cache in the registry: read on every run, rewritten only on main.
-          # --no-cache (monthly cron or force_no_cache) skips the lookup so the
-          # packages are refreshed, and the fresh layers still replace the cache.
-          cache=(--layers "--cache-from=${IMAGE}-cache-${ARCH}")
-          if [[ "${GITHUB_REF}" == "refs/heads/main" ]]; then
-            cache+=("--cache-to=${IMAGE}-cache-${ARCH}")
-          fi
-          _bld_log=$(mktemp /tmp/podman-base-XXXXXX.log)
-          if ! sudo podman build \
-              "${flags[@]}" "${cache[@]}" \
-              --build-arg "ARCH=${ARCH}" \
-              --build-arg "PRODUCT_NAME=${product_name}" \
-              "${apt_args[@]}" \
-              --tag localhost/debian-bootc-base \
-              -f Containerfile.base \
-              --format docker \
-              . 2>&1 | tee "${_bld_log}"; then
-            if grep -qE "image not known|locating image with ID" "${_bld_log}"; then
-              echo "::warning::buildah cache push failed (stale storage blob), retrying base build without --cache-to"
-              local_cache_ro=(--layers "--cache-from=${IMAGE}-cache-${ARCH}")
-              sudo podman build \
-                "${flags[@]}" "${local_cache_ro[@]}" \
-                --build-arg "ARCH=${ARCH}" \
-                --build-arg "PRODUCT_NAME=${product_name}" \
-                "${apt_args[@]}" \
-                --tag localhost/debian-bootc-base \
-                -f Containerfile.base \
-                --format docker \
-                .
-            else
-              exit 1
-            fi
-          fi
-          rm -f "${_bld_log}"
-
-      - name: Build
-        if: steps.chash.outputs.skip != 'true'
-        env:
-          CF_FILE: ${{ matrix.entry.file }}
-          CF_TAG: ${{ matrix.entry.tag }}
-          ARCH: ${{ matrix.entry.arch }}
-          KERNEL_SUFFIX: ${{ matrix.entry.kernel_suffix }}
-          TWIN_SUFFIX: ${{ matrix.entry.twin_suffix }}
-          CANONICAL: ${{ steps.tags.outputs.canonical }}
           COSIGN_PUBLIC_KEY: ${{ secrets.COSIGN_PUBLIC_KEY }}
-          HASH: ${{ steps.chash.outputs.hash }}
-          DEBS_HASH: ${{ steps.chash.outputs.debs_hash }}
-          KERNEL_DEBS_HASH: ${{ steps.chash.outputs.kernel_debs_hash }}
-          TWIN_HASH: ${{ steps.chash.outputs.twin_hash }}
-        run: |
-          set -euo pipefail
-          nocache=()
-          if [[ "${{ github.event_name }}" == "schedule" \
-            || "${{ inputs.force_no_cache }}" == "true" ]]; then
-            nocache+=(--no-cache)
-          fi
+          COSIGN_PRIVATE_KEY: ${{ secrets.COSIGN_PRIVATE_KEY }}
+          COSIGN_PASSWORD: ${{ secrets.COSIGN_PASSWORD }}
+        run: bash .ci-tooling/scripts/image-ci/build-arch.sh
 
-          # Build one image: $1 = tag (the Containerfile tag, or `<tag>-nosign` for the
-          # twin), $2 = kernel suffix, $3 = content hash, then the build flags.
-          build_one() {
-            local tag="$1" kernel_suffix="$2" hash="$3"
-            shift 3
-            local flags=("$@")
-            # Layer cache in the registry: read on every run, rewritten only on main.
-            # --no-cache (monthly cron or force_no_cache) skips the lookup so the
-            # packages are refreshed, and the fresh layers still replace the cache.
-            local cache=(--layers "--cache-from=${IMAGE}-cache-${ARCH}")
-            if [[ "${GITHUB_REF}" == "refs/heads/main" ]]; then
-              cache+=("--cache-to=${IMAGE}-cache-${ARCH}")
-            fi
-
-            # Monthly tag: 'monthly-YYYYMMDD' for the canonical latest combo only
-            # (preserves the historical amd64-only monthly tag).
-            if [[ "${{ github.event_name }}" == "schedule" && "$CANONICAL" == "true" ]]; then
-              if [[ "$tag" == "latest" ]]; then
-                flags+=(--tag "${IMAGE}:monthly-$(date -u +%Y%m%d)")
-              else
-                flags+=(--tag "${IMAGE}:${tag}-monthly-$(date -u +%Y%m%d)")
-              fi
-            fi
-
-            # SHA tag (retrocompat with the single-Containerfile era): bare '<sha>'
-            # for latest canonical, '<tag>-<sha>' for non-latest canonical. Only the
-            # canonical combo (amd64) produces a SHA tag to preserve
-            # the historical amd64 sha tag as a single-arch artifact.
-            if [[ "$CANONICAL" == "true" ]]; then
-              local sha
-              sha=$(git rev-parse --short HEAD)
-              if [[ "$tag" == "latest" ]]; then
-                flags+=(--tag "${IMAGE}:${sha}")
-              else
-                flags+=(--tag "${IMAGE}:${tag}-${sha}")
-              fi
-              # Canonical combo also keeps the bare :latest / :<variant> tag pointing
-              # at the amd64 image (retrocompat: an amd64 pull of :latest
-              # gets the amd64 image directly, before the manifest list job promotes
-              # it to a multi-arch manifest).
-              flags+=(--tag "${IMAGE}:${tag}")
-            fi
-
-            # Pass ARCH so the Containerfile selects the right kernel metapackage
-            # (linux-image-${ARCH}), boot stack, firmware set, and module path.
-            # The boot stack follows the architecture AND the boot profile, which
-            # a Containerfile declares with `LABEL org.daemoncores.boot-profile`
-            # (generic when absent):
-            #   amd64            grub-efi-amd64-signed (Fedora GRUB)
-            #   arm64 generic    grub-efi-arm64-signed (Fedora GRUB): PCs, servers
-            #                    and VMs booting through UEFI
-            #   arm64 embedded   u-boot-tools, no GRUB: boards and phones whose
-            #                    firmware loads U-Boot (Raspberry Pi, SBCs)
-            # FIRMWARE_PKGS for arm64 drops the x86 microcode blobs.
-            local profile=generic boot_pkg apt_hold_pkg firmware_pkgs
-            if grep -qE '^[[:space:]]*LABEL[[:space:]]+org\.daemoncores\.boot-profile=.?embedded' "$CF_FILE"; then
-              profile=embedded
-            fi
-            if [[ "${ARCH}" == "arm64" ]]; then
-              firmware_pkgs="firmware-linux-free firmware-linux firmware-misc-nonfree"
-              if [[ "${profile}" == "embedded" ]]; then
-                boot_pkg="u-boot-tools"
-                apt_hold_pkg=""
-              else
-                boot_pkg="grub-efi-arm64-signed"
-                apt_hold_pkg="grub-efi-arm64-signed"
-              fi
-            else
-              boot_pkg="grub-efi-amd64-signed"
-              firmware_pkgs="intel-microcode amd64-microcode firmware-linux-free firmware-linux firmware-misc-nonfree"
-              apt_hold_pkg="grub-efi-amd64-signed"
-            fi
-            # arm64 ships two kernels (debian-bootc wiki docs/Handoff-Decisions.md,
-            # "Two arm64 kernels"): the
-            # 16 KB one on the plain tag for recent hardware (Raspberry Pi 5,
-            # RK3588), the 4 KB one (`-4k` image) for the older devices (Raspberry
-            # Pi 3 and 4). The
-            # suffix completes the kernel package name; ARM_DEVICES lists the
-            # device module packages built against that kernel. Both mirror the
-            # variants of linux-modules-arm-device in the package manifest.
-            local arm_devices="rpi3 rpi4"
-            if [[ "${kernel_suffix}" == -16k* ]]; then
-              arm_devices="rpi5 rk3588"
-            fi
-            # Version stamp for the aleph metadata (see the build args below):
-            # the pushed commit hash of this run.
-            local sha_stamp
-            sha_stamp=$(git rev-parse --short HEAD)
-            local build_args=(
-              --build-arg "BASE_IMAGE=localhost/debian-bootc-base"
-              --build-arg "ARCH=${ARCH}"
-              --build-arg "KERNEL_SUFFIX=${kernel_suffix}"
-              --build-arg "ARM_DEVICES=${arm_devices}"
-              --build-arg "BOOT_PKG=${boot_pkg}"
-              --build-arg "BOOT_PROFILE=${profile}"
-              --build-arg "FIRMWARE_PKGS=${firmware_pkgs}"
-              --build-arg "APT_HOLD_PKG=${apt_hold_pkg}"
-              --build-arg "DEBS_HASH=${DEBS_HASH}"
-              --build-arg "KERNEL_DEBS_HASH=${KERNEL_DEBS_HASH}"
-              --build-arg "COSIGN_PUBKEY_B64=$(printf '%s' "${COSIGN_PUBLIC_KEY}" | base64 -w0)"
-              --build-arg "IMAGE_REF=${IMAGE,,}"
-              # Version stamp: bootc writes the OCI metadata into
-              # /sysroot/.bootc-aleph.json at install and Debian bootupd's
-              # bootupctl parses it with a strict string schema — unset, the
-              # nulls fail bootloader-update.service on every boot (replayed
-              # 2026-10-30). Stamped tag + sha + the current run timestamp.
-              --build-arg "IMAGE_VERSION=${CF_TAG}-${sha_stamp}"
-              --build-arg "IMAGE_CREATED=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-              --label "org.daemoncores.content-hash=${hash}"
-              --tag "${IMAGE}:${tag}_${ARCH}"
-              -f "$CF_FILE"
-              --format docker
-              .
-            )
-            local _bld_log
-            _bld_log=$(mktemp /tmp/podman-build-XXXXXX.log)
-            if ! sudo podman build "${flags[@]}" "${cache[@]}" "${build_args[@]}" \
-                2>&1 | tee "${_bld_log}"; then
-              if grep -qE "image not known|locating image with ID" "${_bld_log}"; then
-                echo "::warning::buildah cache push failed (stale storage blob), retrying without --cache-to"
-                local cache_ro=(--layers "--cache-from=${IMAGE}-cache-${ARCH}")
-                sudo podman build "${flags[@]}" "${cache_ro[@]}" "${build_args[@]}"
-              else
-                exit 1
-              fi
-            fi
-            rm -f "${_bld_log}"
-          }
-
-          build_one "${CF_TAG}" "${KERNEL_SUFFIX}" "${HASH}" "${nocache[@]}"
-          # The twin reuses the layers the image just built, up to the kernel: no
-          # --no-cache here, or the sharing would be thrown away.
-          if [[ -n "${TWIN_SUFFIX}" ]]; then
-            build_one "${CF_TAG}-nosign" "${TWIN_SUFFIX}" "${TWIN_HASH}"
-          fi
-
-      - name: Check runtime deps
-        if: steps.chash.outputs.skip != 'true'
-        env:
-          PRIMARY: ${{ steps.tags.outputs.primary }}
-        run: |
-          set -euo pipefail
-          sudo podman run --rm "${IMAGE}:${PRIMARY}" \
-            sh -c "ldd /usr/bin/bootc && ldd /usr/lib/libostree-1.so*"
-
-      - name: Smoke test
-        if: steps.chash.outputs.skip != 'true'
-        env:
-          PRIMARY: ${{ steps.tags.outputs.primary }}
-        run: |
-          set -euo pipefail
-          sudo podman run --rm "${IMAGE}:${PRIMARY}" bootc container lint
-
-      - name: Smoke test the unsigned-kernel twin
-        if: steps.chash.outputs.skip != 'true' && (steps.tags.outputs.twin_primary != '')
-        env:
-          TWIN: ${{ steps.tags.outputs.twin_primary }}
-        run: |
-          set -euo pipefail
-          sudo podman run --rm "${IMAGE}:${TWIN}" bootc container lint
-
-      # Real boot test: install to a disk, boot under QEMU/KVM, run the repo's
-      # image-tests over SSH. A failure fails this job, so Push never runs.
-      # Skipped for the installer image (tag=iso): it is a live graphical
-      # installer with no SSH server, so the boot-test infrastructure cannot
-      # connect. The installer image is validated by bootc container lint only.
-      # RAM idle budget: Gabriel's 10-15 MiB target holds ONLY for the minimal
-      # lane. Replayed boot-test 2026-10-30 (artefact-only, PVE host): the main
-      # image idles at ~305-320 MiB boot-fresh (systemd + journald + udevd +
-      # logind + netavark + wpa_supplicant alone carry it) — a 15 MiB budget on
-      # the main lane would block every build. The gate stays on for minimal
-      # and is disabled (0) for the main lanes until a real budget is decided.
-      - name: Boot-test the image
-        if: steps.chash.outputs.skip != 'true' && (matrix.entry.tag != 'iso')
-        uses: DaemonCores/DaemonCores-CI/image-test@main
+      - name: Upload the logs of the failed images
+        if: always()
+        uses: actions/upload-artifact@v4
         with:
-          image: ${{ env.IMAGE }}:${{ steps.tags.outputs.primary }}
-          arch: ${{ matrix.entry.arch }}
-          ram-idle-max-mb: ${{ startsWith(matrix.entry.tag, 'minimal') && '15' || '0' }}
+          name: image-logs-${{ matrix.group.arch }}
+          path: ${{ runner.temp }}/image-ci/failed-logs
+          if-no-files-found: ignore
 
-      - name: Boot-test the unsigned-kernel twin
-        if: steps.chash.outputs.skip != 'true' && (steps.tags.outputs.twin_primary != '')
-        uses: DaemonCores/DaemonCores-CI/image-test@main
-        with:
-          image: ${{ env.IMAGE }}:${{ steps.tags.outputs.twin_primary }}
-          arch: ${{ matrix.entry.arch }}
-          ram-idle-max-mb: ${{ startsWith(matrix.entry.tag, 'minimal') && '15' || '0' }}
-
-      # Report-only vulnerability scan (exit-code 0: never fails the build).
-      # Output goes to the job summary only, no artifact. Switch exit-code to 1
-      # with severity CRITICAL once the baseline is known to be clean.
-      - name: Save image for vulnerability scan
-        if: steps.chash.outputs.skip != 'true'
-        env:
-          PRIMARY: ${{ steps.tags.outputs.primary }}
-        run: |
-          set -euo pipefail
-          sudo podman save --format docker-archive -o /tmp/scan-image.tar "${IMAGE}:${PRIMARY}"
-          sudo chmod 644 /tmp/scan-image.tar
-
-      - name: Scan image for vulnerabilities (report only)
-        if: steps.chash.outputs.skip != 'true'
-        uses: aquasecurity/trivy-action@v0.36.0
-        with:
-          input: /tmp/scan-image.tar
-          format: table
-          severity: CRITICAL,HIGH
-          ignore-unfixed: true
-          exit-code: '0'
-
-      - name: Remove scan archive
-        if: steps.chash.outputs.skip != 'true' && (always())
-        run: sudo rm -f /tmp/scan-image.tar
-
-      # Only the images this run asked for are pushed: the image and, when requested,
-      # its unsigned-kernel twin. The shared base is never pushed.
-      - name: Push
-        if: steps.chash.outputs.skip != 'true' && (github.ref == 'refs/heads/main')
-        id: push
-        env:
-          CF_TAG: ${{ matrix.entry.tag }}
-          TWIN_TAG: ${{ steps.tags.outputs.twin_tag }}
-          ARCH: ${{ matrix.entry.arch }}
-          CANONICAL: ${{ steps.tags.outputs.canonical }}
-        run: |
-          set -euo pipefail
-          push_one() {
-            local tag="$1" primary="${1}_${ARCH}" sha
-            # Per-arch tag (always).
-            sudo podman push --digestfile /tmp/digest_primary.txt "${IMAGE}:${primary}"
-            echo "${IMAGE,,}@$(cat /tmp/digest_primary.txt)" >> /tmp/push_refs.txt
-            # Canonical combo preserves the historical tags.
-            if [[ "$CANONICAL" == "true" ]]; then
-              sudo podman push "${IMAGE}:${tag}"
-              sha=$(git rev-parse --short HEAD)
-              if [[ "$tag" == "latest" ]]; then
-                sudo podman push "${IMAGE}:${sha}"
-              else
-                sudo podman push "${IMAGE}:${tag}-${sha}"
-              fi
-              if [[ "${{ github.event_name }}" == "schedule" ]]; then
-                if [[ "$tag" == "latest" ]]; then
-                  sudo podman push "${IMAGE}:monthly-$(date -u +%Y%m%d)"
-                else
-                  sudo podman push "${IMAGE}:${tag}-monthly-$(date -u +%Y%m%d)"
-                fi
-              fi
-            fi
-          }
-          : > /tmp/push_refs.txt
-          push_one "${CF_TAG}"
-          [[ -z "${TWIN_TAG}" ]] || push_one "${TWIN_TAG}"
-          {
-            echo "refs<<EOF"
-            cat /tmp/push_refs.txt
-            echo "EOF"
-          } >> "$GITHUB_OUTPUT"
-
-      - name: Sign image
-        if: steps.chash.outputs.skip != 'true' && (github.ref == 'refs/heads/main')
-        uses: DaemonCores/DaemonCores-CI/sign-image@main
-        with:
-          refs: ${{ steps.push.outputs.refs }}
-          private-key: ${{ secrets.COSIGN_PRIVATE_KEY }}
-          password: ${{ secrets.COSIGN_PASSWORD }}
-
-      # The image was built, pushed and signed but its content is byte-identical
-      # to what was already published (same debs + base + Containerfiles + arch).
-      # Report it as a suspicious/wasteful run without failing
-      # the pipeline. One issue per variant-arch combo (title keyed by
-      # the primary tag) so each combo's status is visible.
-      # An image whose content hash equals the published one (same debs, base,
-      # Containerfiles, tests manifest, arch) is neither rebuilt, tested nor
-      # pushed. Scheduled and force_no_cache runs bypass this on purpose: their
-      # job is to refresh packages.
-      - name: Skipped unchanged image
-        if: steps.chash.outputs.skip == 'true'
-        env:
-          PRIMARY: ${{ steps.tags.outputs.primary }}
-        run: |
-          {
-            echo "### Image unchanged (\`${PRIMARY}\`)"
-            echo
-            echo "Content hash \`${{ steps.chash.outputs.hash }}\` equals the published one:"
-            echo "build, boot test, push and signature were skipped."
-          } >>"$GITHUB_STEP_SUMMARY"
-
-  build-iso:
-    name: Build ${{ matrix.entry.tag }}-${{ matrix.entry.arch }} (wave 2)
-    needs: [discover, build-test-push]
-    if: ${{ !cancelled() && needs.discover.outputs.has_derived == 'true' && needs.build-test-push.result == 'success' }}
-    runs-on: ${{ matrix.entry.arch == 'arm64' && 'ubuntu-24.04-arm' || 'ubuntu-latest' }}
-    permissions:
-      contents: read
-      packages: write
-      id-token: write
-      issues: write
-    strategy:
-      fail-fast: false
-      matrix:
-        entry: ${{ fromJSON(needs.discover.outputs.matrix_wave2) }}
-    steps:
-      - name: Free disk space
-        run: |
-          sudo rm -rf /usr/share/dotnet /usr/local/lib/android \
-            /opt/ghc /opt/hostedtoolcache/CodeQL /usr/local/share/boost
-          df -h
-      - name: Checkout
-        uses: actions/checkout@v7
-      - name: Set image name and tags
-        id: tags
-        env:
-          CF_FILE: ${{ matrix.entry.file }}
-          CF_TAG: ${{ matrix.entry.tag }}
-          ARCH: ${{ matrix.entry.arch }}
-        run: |
-          set -euo pipefail
-          echo "IMAGE=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_ENV"
-          primary="${CF_TAG}_${ARCH}"
-          echo "primary=${primary}" >>"$GITHUB_OUTPUT"
-          canonical=false
-          if [ "$ARCH" = "amd64" ]; then canonical=true; fi
-          echo "canonical=${canonical}" >>"$GITHUB_OUTPUT"
-          echo "ARCH=${ARCH}" >>"$GITHUB_ENV"
-      - name: Log in to GHCR
-        env:
-          PAT_PKG: ${{ secrets.PAT_PKG || github.token }}
-        run: |
-          set -euo pipefail
-          sudo podman login ghcr.io \
-            --username "${{ github.actor }}" \
-            --password-stdin <<< "${PAT_PKG}"
-          docker login ghcr.io \
-            --username "${{ github.actor }}" \
-            --password-stdin <<< "${PAT_PKG}"
-      - name: Build
-        env:
-          CF_FILE: ${{ matrix.entry.file }}
-          CF_TAG: ${{ matrix.entry.tag }}
-          ARCH: ${{ matrix.entry.arch }}
-          PRIMARY: ${{ steps.tags.outputs.primary }}
-          CANONICAL: ${{ steps.tags.outputs.canonical }}
-          COSIGN_PUBLIC_KEY: ${{ secrets.COSIGN_PUBLIC_KEY }}
-        run: |
-          set -euo pipefail
-          flags=()
-          if [[ "${{ github.event_name }}" == "schedule" \
-            || "${{ inputs.force_no_cache }}" == "true" ]]; then
-            flags+=(--no-cache)
-          fi
-          product_name="${GITHUB_REPOSITORY##*/}"
-          product_name="${product_name//-/ }"
-          # Layer cache: same rules as the wave 1 builds.
-          cache=(--layers "--cache-from=${IMAGE}-cache-${ARCH}")
-          if [[ "${GITHUB_REF}" == "refs/heads/main" ]]; then
-            cache+=("--cache-to=${IMAGE}-cache-${ARCH}")
-          fi
-          sudo podman build \
-            --arch "${ARCH}" \
-            --build-arg ARCH="${ARCH}" \
-            --build-arg COSIGN_PUBKEY_B64="$(printf '%s' "${COSIGN_PUBLIC_KEY}" | base64 -w0)" \
-            --build-arg IMAGE_REF="${IMAGE,,}" \
-            --build-arg PRODUCT_NAME="${product_name}" \
-            --label "org.daemoncores.content-hash=wave2-${PRIMARY}" \
-            --tag "${IMAGE}:${PRIMARY}" \
-            "${flags[@]}" \
-            "${cache[@]}" \
-            --file "${CF_FILE}" .
-      - name: Push
-        if: github.ref == 'refs/heads/main'
-        id: push
-        env:
-          PRIMARY: ${{ steps.tags.outputs.primary }}
-        run: |
-          set -euo pipefail
-          sudo podman push --digestfile /tmp/digest_primary.txt "${IMAGE}:${PRIMARY}"
-          echo "digest=$(cat /tmp/digest_primary.txt)" >> "$GITHUB_OUTPUT"
-      - name: Sign image
-        if: github.ref == 'refs/heads/main'
-        uses: DaemonCores/DaemonCores-CI/sign-image@main
-        with:
-          refs: ghcr.io/${{ github.repository }}@${{ steps.push.outputs.digest }}
-          private-key: ${{ secrets.COSIGN_PRIVATE_KEY }}
-          password: ${{ secrets.COSIGN_PASSWORD }}
-
-  # Promote per-arch images into multi-arch manifest lists. Runs once all
-  # build-test-push combos (variant x arch) are green.
+  # Promote per-arch images into multi-arch manifest lists. Runs once every
+  # build-test-push job (one per architecture) is green.
   # For each variant tag V (a `-4k` tag covers arm64 only), the manifest job
   # creates :V -> :V_amd64 + :V_arm64, so `podman pull :latest` resolves to the
   # right arch on each host. The canonical amd64 image was also pushed on :latest
@@ -813,7 +280,7 @@ jobs:
   # are unchanged).
   manifest:
     name: Manifest lists ${{ matrix.entry.tag }}
-    needs: [discover, build-test-push, build-iso]
+    needs: [discover, build-test-push]
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
