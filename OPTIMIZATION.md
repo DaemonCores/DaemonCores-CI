@@ -153,3 +153,10 @@ Source: architect-opus report, files read in `build-deb/build-deb.sh`, `build-on
 Steps: 1 `content-hash.sh` (hash parity test old vs new against published `hashes.json`),
 2 `pkg-def.sh` + `dep-debs.sh` (diff of `GITHUB_OUTPUT` old vs new), 3 `deb-plan/` action,
 4 `wait_for` in `build-one-deb.yml`, 5 `bootc-debs-builder.yml`, 6 `full-pipeline.yml` gates, 7 docs.
+
+## Run 41191163442 timing breakdown (MEASURED)
+- Wall clock 24 min (10:03:17-10:27:27). The deb phase ended about 10:06: the kernel jobs took 47-85 s each (`unchanged; reused cached deb(s)`), so conditional rebuild at deb level worked on this run. The run is dominated by the image jobs (about 18 min, `latest-arm64` 10:09:45-10:27:26).
+- `latest-arm64` job: Build 115 s; `Boot-test the image` 585 s; `Boot-test the unsigned-kernel twin` 280 s; scan+push+sign 37 s.
+- Inside the 585 s boot test: install about 90 s, boot 110 s, one test (`kernel modules are all signed or none is`) 118 s, reboot 145 s.
+- L13 (done): that test forked `modinfo` per module (1667 modules). Replaced by one `grep -L` over the plain `.ko` files (local: 0.13 s vs forks; same verdict on the real 16k kernel modules: 1667 signed, 0 unsigned; mixed set fails). Saves about 2 min per boot test, twice per arm64 image (twin).
+- Next measured candidates: the unsigned twin repeats the whole boot test (L1/L6), install about 90 s, and calibrated timeouts do not shorten a passing run.
