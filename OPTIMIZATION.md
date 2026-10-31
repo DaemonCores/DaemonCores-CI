@@ -205,3 +205,27 @@ Pushed: image-test split, `build-arch.sh`, `plan.py` / `build-all.sh` (one build
 - arm64 job: `linux-image-16k` rebuilt in **39 min** (18:25:31 to 19:04:39) before anything else could start.
 - Conclusion: one sequential job per arch serialises the slow independent builds (Mesa variants, arm64 kernel). Wall clock went from about 16 min (previous amd64 job, no Mesa) to more than 48 min. The saving of the single-job layout is the shared setup (one pull, one apt install, one cache download), which only pays when it does not serialise independent heavy builds.
 - Direction: chain only packages that share a cache (the kernel and its modules share the ccache and the kernel source), run independent heavy builds in parallel jobs, group the small packages in one job. Chains declared in `packages.yml` so the grouping is data, not code.
+
+## Run 41233619804: wave 0 with the waves restored (MEASURED so far, run still in progress)
+- Conditional rebuild at deb level works: `linux-image` arm64 52 s (19:19:21 to 19:20:13), `libcomposefs`, `fisherman`, `firstboot-user-setup`, `grub-efi-*-signed` about 30 s each (reuse).
+- Rebuilt: `bootupd` 1 min 39 s, `linux-image-nosign` amd64 4 min 17 s, `linux-image-16k-nosign` arm64 6 min 57 s.
+- The Mesa variants (`gpu-userspace-*`) run in parallel in wave 0 and take 11 to 15 min each (gaming-generic arm64 12 min 47 s, ia-generic arm64 8 min 19 s, gaming-x64v3 15 min 22 s, ia-x64v1 13 min 48 s, ia-x64v2 15 min 9 s, ia-x64v3 11 min 35 s). Wall clock of wave 0 is bounded by the slowest Mesa variant or `linux-image-16k`, not by the sum.
+- Billing (sum of jobs) is unchanged by parallelism: the Mesa variants alone are about 70 job-minutes. Reducing that needs a shared ccache across the profile x level variants (to be measured) or fewer variants, not more chaining.
+
+## L1 design: remove the `-nosign` twins (DESIGNED, not yet coded)
+- One kernel per (arch, page size), built with `MODULE_SIG_FORCE=n` (`KERNEL_SIGNING_ENFORCE: "no"` set once in the `linux-image` package `env:`; `scripts/kernel_signing.sh` is untouched). Enforcement is the install-time karg `module.sig_enforce=1`, added by the installer (switch on by default, `default-gpu-security.blp:74`), never shipped in the image (bootc: removing a shipped karg is undefined behaviour).
+- CI: each category of `tests.yml` gets a `kargs:` list; the harness installs and boots the same tag once per matching category. The `signed` category carries `module.sig_enforce=1`, the `unsigned-kernel` category carries none. The sig_enforce Y/N assertions (`tests.yml:205-325`) stay byte-identical.
+- Steps: 1 harness (`kargs`, one boot per category; additive), 2 debian-bootc (remove the variants, repack branches, `both` mode, twin wording), 3 DaemonCores-CI (remove `nosign_images`, `unsigned_kernel`, twin rows, tests).
+- Known cost: a karg is weaker than a compiled-in `MODULE_SIG_FORCE` (root or the GRUB command line can drop it; no lockdown). Existing signed installs without the karg boot with `sig_enforce=N` after the upgrade: migration decision pending with the owner. U-Boot images: install path to confirm.
+- Status: step 1 in progress (worker), steps 2 and 3 pending.
+
+## Status of the other ordered levers (checked 2026-10-31)
+| Lever | State |
+|---|---|
+| L5 no per-layer `--cache-to` in a chain | not done (`build-arch.sh:199` still pushes every layer) |
+| L6 smoke test for package-only variants | not done |
+| L8 per-package dependencies | not done; waves restored on the owner's order |
+| L11 `dc-gpu set/status` | script and service exist (`src/basepostinstall/usr/sbin/dc-gpu`); behaviour not verified |
+| L12 installer steps, remove `firstboot-user-setup` | in progress (worker); service still in `Containerfile` and `packages.yml` |
+| `chain:` in `packages.yml` | not started; to build on top of the waves (kernel + its modules share ccache and source) |
+| Images in one job per arch, one push, tests on one re-imaged VM | being audited (scout) |
