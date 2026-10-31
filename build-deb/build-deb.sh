@@ -19,6 +19,9 @@
 #   EXTRA_ENV   - KEY=VALUE lines exported for the build (e.g. a package
 #                 version, GH_TOKEN). Non-secret keys also feed the hash so a
 #                 version bump rebuilds; secret-looking keys are excluded.
+#   PRE_BUILD_CMD - optional command run (bash -c) just before the build script,
+#                 only when the package is really built; a failure fails the
+#                 build. Used to install dependencies lazily.
 #   CI_SCRIPTS  - (exported) directory of the shared DaemonCores-CI scripts.
 #   PAGES_URL   - APT repo base URL; derived from GITHUB_REPOSITORY if empty.
 #   GITHUB_REPOSITORY, GITHUB_WORKSPACE, GITHUB_OUTPUT - provided by Actions.
@@ -80,6 +83,9 @@ run_build() {
   # where errexit is suppressed (a command substitution in an `if`/`||`), a
   # failing build must still return non-zero rather than falling through to the
   # deb listing and reporting success with no artifact.
+  if [[ -n "${PRE_BUILD_CMD:-}" ]]; then
+    bash --noprofile --norc -eo pipefail -c "${PRE_BUILD_CMD}" >&2 || return 1
+  fi
   if ! (
     cd "${GITHUB_WORKSPACE:-.}" || exit 1
     bash --noprofile --norc -eo pipefail -c '. "${CI_SCRIPTS}/deb_helpers.sh"
