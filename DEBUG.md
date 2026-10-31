@@ -690,3 +690,9 @@ Conclusions (proved by these runs):
 - Why only nvidia: the device entries run `make olddefconfig` before building in-tree modules (packages.yml, linux-modules-arm-device); the nvidia entry went from `kernel_prepare` (which only copies the seeded `.config`) straight to an out-of-tree `make -C kernel-open`, so the tree was never configured.
 - Fix (debian-bootc packages.yml, linux-modules-nvidia): `make olddefconfig` + `make modules_prepare` after `kernel_signing_setup`. Reproduced and validated on the dummy module only; the full nvidia build is validated by the next CI run.
 - Open: patch guard design (owner asked for a commit-free dynamic variant; awaiting his decision), `Build images` failures, `nvidia-persistenced` without candidate.
+
+## Tick 13: Secure Boot check, nothing to fix (MEASURED)
+- Run 41249914654, job 124677197190 (`ia2.log` lines 3132-3133): `set variable SecureBootEnable: True`, and the signed image booted to the test stage under enforced Secure Boot; the only failing test was `no failed systemd units` (`dc-gpu-apply`, `ldconfig: Renaming of /etc/ld.so.cache~ ... No such file or directory`).
+- No local Secure Boot reproduction is needed: no boot failure exists to reproduce. Nothing disabled or weakened.
+- Open: the `dc-gpu-apply` cause is not proven. The failed-units diag now prints `ld.so.cache` state, every `ldconfig` run of the boot and the unit ordering; run 41250424265 should show them. A local concurrent-`ldconfig` loop reproduces the same message, which proves the mechanism is possible, not that it is the cause.
+- Fixes pushed since the last run: nvidia `olddefconfig` + `modules_prepare` (`dbd3dfe`), nvidia `Module.symvers` in the kernel output tree (`660399e`).
