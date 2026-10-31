@@ -789,24 +789,24 @@ jobs:
           set -euo pipefail
           hash="${{ steps.chash.outputs.hash }}"
           {
-            echo "### ⚠️ Image identique à la précédente (\`${PRIMARY}\`)"
+            echo "### ⚠️ Image identical to the previous one (\`${PRIMARY}\`)"
             echo
-            echo "Le pipeline a reconstruit, poussé **et signé** une image dont le"
-            echo "content-hash \`${hash}\` est identique à celle déjà publiée (tag \`${PRIMARY}\`) :"
-            echo "ni les .deb, ni l'image de base, ni les Containerfiles, ni l'arch n'ont changé."
-            echo "Le rebuild/push/signature était probablement inutile."
+            echo "The pipeline rebuilt, pushed **and signed** an image whose"
+            echo "content hash \`${hash}\` equals the one already published (tag \`${PRIMARY}\`):"
+            echo "neither the .deb files, the base image, the Containerfiles nor the arch changed."
+            echo "The rebuild, push and signature were probably unnecessary."
           } >>"$GITHUB_STEP_SUMMARY"
-          title="⚠️ Pipeline douteuse : image identique poussée (${PRIMARY})"
+          title="⚠️ Suspicious pipeline: identical image pushed (${PRIMARY})"
           num=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open \
             --search "in:title \"$title\"" --json number -q '.[0].number' \
             2>/dev/null || true)
           if [ -n "$num" ]; then
             gh issue comment "$num" --repo "$GITHUB_REPOSITORY" \
-              --body "Run \`${GITHUB_RUN_ID}\` : image identique (tag \`${PRIMARY}\`, hash \`${hash}\`)." \
+              --body "Run \`${GITHUB_RUN_ID}\`: identical image (tag \`${PRIMARY}\`, hash \`${hash}\`)." \
               2>/dev/null || true
           else
             gh issue create --repo "$GITHUB_REPOSITORY" --title "$title" \
-              --body "Content-hash \`${hash}\` inchangé pour le tag \`${PRIMARY}\` mais image reconstruite, poussée et signée (run \`${GITHUB_RUN_ID}\`)." \
+              --body "Content hash \`${hash}\` unchanged for tag \`${PRIMARY}\` but the image was rebuilt, pushed and signed (run \`${GITHUB_RUN_ID}\`)." \
               2>/dev/null || true
           fi
 

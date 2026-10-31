@@ -38,7 +38,7 @@ trap 'umount "$WORKDIR/iso-mnt"    2>/dev/null || true
       umount "$WORKDIR/rootfs-mount" 2>/dev/null || true
       rm -rf "$WORKDIR"' EXIT
 
-# AFTER (loop mount — kernel, pas de dépendance au format ISO)
+# AFTER (loop mount — kernel, no dependency on the ISO format)
 echo "[banners] Extracting ISO..."
 mkdir -p "$WORKDIR/iso-mnt" "$WORKDIR/iso-root"
 mount -o loop,ro "$SRC_ISO" "$WORKDIR/iso-mnt"
@@ -95,7 +95,7 @@ _replace() {
   echo "[banners]   → $target"
 }
 
-# Génère un PNG transparent 1×1 si sidebar remplacée mais pas le logo
+# Generate a 1×1 transparent PNG if the sidebar is replaced but not the logo
 # (pour masquer le logo Fedora qui s'affiche par-dessus le fond)
 TRANSPARENT=""
 if [[ -f "$SIDEBAR" && ! -f "$LOGO" ]]; then
@@ -105,7 +105,7 @@ if [[ -f "$SIDEBAR" && ! -f "$LOGO" ]]; then
  with transparent PNG"
 fi
 
-# Remplace dans toutes les variantes trouvées
+# Replace in every variant found
 VARIANTS=("" "server" "workstation" "silverblue" "atomic" "cloud")
 
 for variant in "${VARIANTS[@]}"; do
@@ -130,7 +130,7 @@ for variant in "${VARIANTS[@]}"; do
   fi
 done
 
-# anaconda_header.png n'existe qu'à la racine
+# anaconda_header.png only exists at the root
 if [[ -f "$HEADER" ]]; then
   echo "[banners] anaconda_header.png (root):"
   _replace "$HEADER" "anaconda_header.png"
