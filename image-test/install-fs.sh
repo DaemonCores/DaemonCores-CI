@@ -296,6 +296,10 @@ ExecStart=/bin/sh -c "\
   ls -la /usr/sbin/ifupdown2-autoconf 2>&1 | sed 's/^/| /'; \
   echo '| ci-dbg: systemctl cat networking.service'; \
   systemctl cat networking.service 2>&1 | sed 's/^/| /'; \
+  echo '| ci-dbg: journalctl -u networking'; \
+  journalctl -u networking -b --no-pager -o short-precise 2>&1 | tail -40 | sed 's/^/| /'; \
+  echo '| ci-dbg: networking.service timings'; \
+  systemctl show networking.service -p ExecMainStartTimestampMonotonic -p ExecMainExitTimestampMonotonic -p TimeoutStartUSec -p Result 2>&1 | sed 's/^/| /'; \
   echo '| ci-dbg: /root/.ssh/authorized_keys'; \
   ls -la /root/.ssh/ 2>&1 | sed 's/^/| /'; \
   cat /root/.ssh/authorized_keys 2>&1 | head -3 | sed 's/^/| /'; \
