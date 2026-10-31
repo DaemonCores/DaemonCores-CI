@@ -448,6 +448,12 @@ dump_serial() {
   printf '%s\n' "${clean}" | grep -aE 'FAILED|Failed|error|Error|panic|Kernel panic|Call Trace' \
     | sort -u | head -n 80 || true
   echo "::endgroup::"
+  # Network state the guest printed about itself at boot (ci-ssh-debug.service):
+  # tells a guest without an address or route from a sshd that does not answer.
+  echo "::group::serial console: guest network state (ip addr, ip route)"
+  printf '%s\n' "${clean}" | sed -n '/ci-dbg: ip addr/,/ci-dbg: \/etc\/network\/interfaces/p' \
+    | head -n 60 || true
+  echo "::endgroup::"
   # The tail alone hides how the guest was started: show the kernel command
   # line, the first lines and the size of the capture, to tell a guest that
   # stopped talking from a capture that stopped growing.
