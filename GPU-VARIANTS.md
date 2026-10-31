@@ -29,6 +29,6 @@ Gap to close for Intel compute: the compute-runtime has to come from a plan deb 
 
 1. One YAML manifest of per-vendor package sets per usage; `-gaming` and `-ia` derive their lists
    from it for all vendors; the vendor-named variables and matrix fields become neutral.
-2. EULA consent applies to the packages that carry an EULA (NVIDIA user-space), not to the variant.
+2. Proprietary NVIDIA (EULA user-space, CUDA) is its own `-nvidia` variant, like the other twins; `-gaming` and `-ia` carry the open/free stacks of every vendor.
 3. Brand selection stays at runtime (detection), never in the image.
 4. Per-variant build configuration and optimisation: list to be provided by the owner.

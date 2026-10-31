@@ -48,13 +48,18 @@ so no module signing key); with the twins active the cumulated time is about 290
 
 | # | Lever | Estimated gain (cumulated) | Status |
 |---|---|---|---|
-| L1 | One kernel build for signed and `-nosign`: `MODULE_SIG_FORCE=n` in the kernel, the signed image ships `/usr/lib/bootc/kargs.d/*.toml` with `module.sig_enforce=1`, the `-nosign` image ships none (the twin then differs by one tiny layer, not by a kernel) | kernel builds only: about 45 min of 290 (amd64 about 950 s + arm64-16k about 1770 s); the 4 twin image jobs stay unless the twin is dropped | not implemented: `module.sig_enforce=1` as a karg is editable at the GRUB command line, unlike a compiled-in `MODULE_SIG_FORCE`, so it would weaken the signed image; superseded by L2 (the `-nosign` twin gets near 100 % ccache hits). Owner decision if wanted anyway; constraint below |
+| L1 | One kernel build for signed and `-nosign`: `MODULE_SIG_FORCE=n` in the kernel; module-signature enforcement becomes an INSTALL-TIME variable of the bootc-installer (it writes `module.sig_enforce=1` as an install karg, default on), so the `-nosign` twin disappears (no twin kernel, no twin image). Adding the karg at install avoids the bootc rule that forbids removing a shipped karg | kernel builds only: about 45 min of 290 (amd64 about 950 s + arm64-16k about 1770 s) plus the 4 twin image jobs | ORDERED by the owner: to develop. Recorded trade-off: a karg is editable on the GRUB command line, a compiled-in `MODULE_SIG_FORCE` is not; whether lockdown or a GRUB password closes this is UNVERIFIED |
 | L2 | Shared `ccache` for all kernel/module builds (enabled for the packages built with `lib/kernel-signing.sh`, i.e. the kernel compilers, `actions/cache`, compiler masquerade via `/usr/lib/ccache`, `CCACHE_BASEDIR=/tmp`) | local: cold 142 s to warm 10-12 s on 16 cores for the project config (vmlinux + modules, fresh source tree, 2126/2126 second-pass hits, 83 MB cache); CI estimate: kernel/module jobs from 912-1771 s to a few minutes when the cache is warm | implemented, awaiting CI run |
 | L3 | Chain the variants of one Containerfile+arch in one job | already done: `bootc-build.yml:611-625` builds the image, its `-nosign` twin, `-gaming` and `-ia` in one `Build` step on shared local layers; nothing left to gain | closed (no change) |
-| L4 | Skip unchanged debs in the setup job instead of starting a container per package | 22 jobs x 30-50 s, plus shorter waves | planned |
-| L5 | Build without per-layer `--cache-to` inside a chain (push the final layers once) | about 80 s per image job | to measure |
-| L6 | Smoke test only for package-only variants (gaming/ia); full boot test per (arch, kernel) | up to 6 min per variant on arm64 | to decide |
-| L7 | Conditional rebuild of kernels on upstream version + our sources only (already hashed); stop invalidating the kernels for edits that do not change them | wall clock below 15 min on a no-change push | verify |
+| L4 | Skip unchanged debs in the setup job instead of starting a container per package | 22 jobs x 30-50 s, plus shorter waves | ORDERED: to develop |
+| L5 | Build without per-layer `--cache-to` inside a chain (push the final layers once) | about 80 s per image job | ORDERED: to develop (measure first) |
+| L6 | Smoke test only for package-only variants (gaming/ia); full boot test per (arch, kernel) | up to 6 min per variant on arm64 | ORDERED: to develop |
+| L7 | Conditional rebuild of kernels on upstream version + our sources only (already hashed); stop invalidating the kernels for edits that do not change them | wall clock below 15 min on a no-change push | measured: run 41155245822 took 15 min 46 s with every deb reused; ORDERED: to finish |
+| L8 | Per-package dependencies for the waves (wave1 modules wait for wave0 kernels, wave2 `bootc` waits for all of wave1) instead of whole-wave barriers | shorter critical path | ORDERED: to develop |
+| L9 | GPU usage twins: `-gaming` and `-ia` carry the drivers of EVERY vendor; proprietary NVIDIA (EULA) is its own `-nvidia` variant; what differs between variants is build configuration and optimisation, not the vendor list. See `GPU-VARIANTS.md` | removes a vendor hardcode | ORDERED: to develop |
+| L10 | Gaming/IA GPU drivers are kernel modules: ship them in the same image and let the installer select at install time (variable of the bootc-installer, modules-load.d / blacklist) | fewer twin images | discussed; depends on L9 and on the EULA scope of `-nvidia` |
+
+One-kernel scope (answer given to the owner): signed vs `-nosign` can share one kernel (L1). amd64 vs arm64 cannot (instruction set); 4K vs 16K pages on arm64 cannot (compile-time `CONFIG_ARM64_4K_PAGES`/16K); a per-device trimmed config is a different kernel, so the device `linux-modules-*` packages stay. Minimum: one kernel per (arch, page size).
 
 Target (ESTIMATED): about 290 to 150 min cumulated with L1+L2, wall clock from 64 to about
 45 min; below 15 min only for pushes that rebuild nothing heavy (L4+L7).
@@ -94,3 +99,6 @@ modules configs (the CI step `ccache statistics` prints it for each job).
   kernel job runs until a kernel input changes. The first kernel rebuild seeds the cache (cold), the
   next one is the measurement (`ccache statistics` step prints the hit rate per job). Open risk:
   `actions/cache` inside the `container:` job needs `tar` in the build-env image (UNVERIFIED).
+- Run 41155245822 (`cb39aff`): wall clock 15 min 46 s (01:25:02 to 01:40:48), every deb reused (kernel jobs about 1 min,
+  `linux-image (amd64) unchanged; reused cached deb(s)`), the 6 image jobs still fail. This is the first measured
+  figure for the 15 min target on a push that rebuilds no deb.
