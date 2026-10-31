@@ -667,3 +667,9 @@ Conclusions (proved by these runs):
 - Validated locally on the real artifacts: merge keeps the intact amd64 copy (sha256 `c2b62518...`); the real corrupt pool file placed in an input directory is refused (`does not unpack`, rc=1). Tests: `tests/test_merge_artifacts.py` (2 passed) and `tests/test_carry_over.py`.
 - Not yet validated in CI: the next full run must show the `duplicate bootc-installer_...` line in the end job and a sound `iso` image build.
 - Secure Boot: no change this tick; enforced and green in run 41238278585 (nothing disabled or weakened).
+
+## Tick 10: run 41241640416 (MEASURED): the unpack gate caught a reused corrupt deb
+- Jobs `publish` (amd64/arm64) and `Publish .deb packages (APT repo)` failed at `ERROR: debs/bootc-installer_..._all.deb does not unpack` (logs 21:07:44Z-21:08:19Z). The new merge worked: `duplicate bootc-installer_...: kept the copy of an earlier artifact, dropped debs-bootc-installer-arm64`.
+- Cause of the kept copy being corrupt, PROVEN: the artifact `debs-bootc-installer-amd64` of this run has `.meta` `"skipped": true` and sha256 `4e7947b6...` = the corrupt pool file of run 41238278585. The conditional rebuild restored the published deb (`restore_cached`, `build-deb/content-hash.sh`) without checking it, so the corrupt file would be republished forever.
+- Fix: `restore_cached` now runs `dpkg-deb --contents` on every restored deb; a deb that does not unpack is deleted and counts as a cache miss, so the package is rebuilt (the last-good fallback fails the job honestly if the published copy is corrupt). Tests: `tests/test_restore_cached.py` (sound deb reused, corrupt deb is a miss), real corrupt pool file -> rc=1 with the warning.
+- Not yet validated in CI: next full run must show `cached bootc-installer_... does not unpack; discarding it`, then a fresh build of `bootc-installer`, a sound publish and a sound `iso` image.

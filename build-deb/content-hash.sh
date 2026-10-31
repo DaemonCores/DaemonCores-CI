@@ -162,7 +162,7 @@ write_meta() {
 #   $1 - base URL
 #   $2 - JSON array of deb filenames to fetch
 # Returns:
-#   0 if every deb downloaded, 1 otherwise.
+#   0 if every deb downloaded and unpacks, 1 otherwise.
 #######################################
 restore_cached() {
   local base="$1" files f
@@ -171,6 +171,14 @@ restore_cached() {
   while IFS= read -r f; do
     [[ -n "${f}" ]] || continue
     curl -fsSL "${base}/debs-cache/${f}" -o "${DEBS_DIR}/${f}" || return 1
+    # A published deb that does not unpack must never be reused: reusing it
+    # would republish the same corrupt file forever. Treat it as a cache miss
+    # so the package is rebuilt.
+    if ! dpkg-deb --contents "${DEBS_DIR}/${f}" >/dev/null 2>&1; then
+      echo "::warning::cached ${f} does not unpack; discarding it" >&2
+      rm -f -- "${DEBS_DIR}/${f}"
+      return 1
+    fi
   done <<<"${files}"
   return 0
 }
