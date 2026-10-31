@@ -427,8 +427,10 @@ guest_state() {
     "info status" "info cpus" "info registers" 2>&1 | grep -aE '^(>|VM status|\*? ?CPU|.*PC=|PSTATE)' || true
   # A stalled guest: the whole register file (LR, SP give the call chain) and
   # the code around the program counter, to be matched against the kernel image.
-  sudo python3 -I "${SCRIPT_DIR}/hmp.py" "${MONITOR}" \
-    "info registers" 'x /32xw $pc' 'x /16xg $sp' 2>&1 | grep -aE '^(X[0-9]+|.* X[0-9]+=|[0-9a-f]{16}:|SP|ELR|ESR)' || true
+  sudo python3 -I "${SCRIPT_DIR}/hmp.py" "${MONITOR}" "info registers" 2>&1 \
+    | grep -aE '^(X[0-9]+|.* X[0-9]+=)' || true
+  sudo python3 -I "${SCRIPT_DIR}/hmp.py" "${MONITOR}" 'x /32xw $pc' 'x /16xg $sp' 2>&1 \
+    | grep -aE '^[0-9a-f]{16}:' || true
   local i
   for i in 1 2; do
     sleep 1

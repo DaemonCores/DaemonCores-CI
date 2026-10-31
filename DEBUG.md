@@ -532,3 +532,8 @@ Conclusions (proved by these runs):
 - latest-4k now passes (SSH after 331 s, reboot test included). latest-arm64 / minimal-arm64 (16k): unreachable at 720 s again, same as at 300 s: not a speed problem.
 - Monitor snapshot of the stalled 16k guest: PC alternates ffffe06e1397ef54 / ef6c (a 6-instruction loop), PSTATE=004003c5 (EL1h, DAIF all masked), X30=ffffe06e1397eac4, SP=fff00000fe988da0. The KASLR slide is unknown, so symbols cannot be resolved yet.
 - The code dump requested in the previous run printed nothing: the monitor rejects `$pc-48` (checked locally with qemu: `x /8xw $pc` and `x /4xg $sp` work). guest_state now dumps `x /32xw $pc` and `x /16xg $sp`; the instruction words are searched in the kernel Image to get the slide.
+
+## Run 41181984579 - instrumentation still empty
+
+- The `x /32xw $pc` dump printed nothing again when sent in the same hmp.py invocation as `info registers` (whose reply is large). Run alone, the same two `x` commands print the memory locally (qemu, `ffffce423ff409b0: 0x14000002 …`). They now go in their own invocation.
+- Re-measured 16k stall: PC alternates ffffd56efa57ef54 / ef6c, X30=ffffd56efa57eac4, SP=fff00000fe988da0 (same low bits as the previous run, new KASLR base).
