@@ -693,6 +693,7 @@ jobs:
         with:
           image: ${{ env.IMAGE }}:${{ steps.tags.outputs.twin_primary }}
           arch: ${{ matrix.entry.arch }}
+          ram-idle-max-mb: ${{ startsWith(matrix.entry.tag, 'minimal') && '15' || '0' }}
 
       # Report-only vulnerability scan (exit-code 0: never fails the build).
       # Output goes to the job summary only, no artifact. Switch exit-code to 1

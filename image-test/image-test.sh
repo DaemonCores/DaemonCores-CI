@@ -489,6 +489,20 @@ ram_gate() {
   used=$(( (used + 1023) / 1024 ))
   echo "RAM idle (boot-fresh): ${used} MiB MemTotal-MemAvailable used; budget: ${RAM_IDLE_MAX_MB} MiB"
   if [ "${used}" -gt "${RAM_IDLE_MAX_MB}" ]; then
+    # Self-explaining failure: dump what actually holds the memory before the
+    # gate blocks the push. Everything runs on the guest over SSH and must not
+    # assume extra packages (minimal image: awk+coreutils only).
+    echo "----- ram gate breakdown (guest) -----"
+    ssh "${SSH_OPTS[@]}" root@localhost '
+      echo "[meminfo]"; grep -E "^(MemTotal|MemFree|MemAvailable|Buffers|Cached|SwapTotal|SwapFree|Slab|SReclaimable|SUnreclaim|KernelStack|PageTables|VmallocUsed|AnonPages|Mapped|Shmem):" /proc/meminfo;
+      echo "[top process RSS (KiB, name)]";
+      awk "/^Name:/{name=\$2} /^VmRSS:/{print \$2, name}" /proc/[0-9]*/status 2>/dev/null | sort -rn | head -15;
+      echo "[top kernel slabs (bytes)]";
+      awk "NR>2{print \$3*\$4, \$1}" /proc/slabinfo 2>/dev/null | sort -rn | head -15;
+      echo "[loaded modules (size KiB, name)]";
+      awk "{print \$2, \$1}" /proc/modules 2>/dev/null | sort -rn | head -15
+    ' 2>/dev/null | sed 's/^/  | /' || echo "  | breakdown unavailable (SSH read failed)"
+    echo "----- end ram gate breakdown -----"
     echo "::error::RAM idle budget exceeded: ${used} MiB at idle over the ${RAM_IDLE_MAX_MB} MiB budget"
     exit 1
   fi
