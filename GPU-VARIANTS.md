@@ -25,10 +25,13 @@ them is the build configuration and optimisation, never the vendor list.
 Gap to close for Intel compute: the compute-runtime has to come from a plan deb built in CI
 (like `linux-modules-nvidia`) or from an upstream repository; not decided.
 
-## Direction
+## Direction (owner clarification)
 
-1. One YAML manifest of per-vendor package sets per usage; `-gaming` and `-ia` derive their lists
-   from it for all vendors; the vendor-named variables and matrix fields become neutral.
-2. Proprietary NVIDIA (EULA user-space, CUDA) is its own `-nvidia` variant, like the other twins; `-gaming` and `-ia` carry the open/free stacks of every vendor.
-3. Brand selection stays at runtime (detection), never in the image.
+1. ONE image per generic amd64 variant carries every vendor; no `-gaming`/`-ia`/`-nvidia` twins.
+   In-tree drivers (AMD, Intel, nouveau) are `=m`; NVIDIA open modules are the plan deb `linux-modules-nvidia`
+   built against the same kernel.
+2. What gets loaded is an install-time variable of the bootc-installer (modules-load.d, blacklist, user-space
+   activation), frozen after install. Brand detection stays at runtime (`lspci`).
+3. Open: image size cost (UNMEASURED); EULA scope of the NVIDIA user-space when it ships inside the image
+   (UNVERIFIED, owner decision).
 4. Per-variant build configuration and optimisation: list to be provided by the owner.
