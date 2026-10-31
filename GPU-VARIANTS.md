@@ -46,3 +46,41 @@ Gap to close for Intel compute: the compute-runtime has to come from a plan deb 
    the NVIDIA module is chosen for it, while the other GPUs keep their in-tree driver (per-device binding, not a global
    `blacklist`), to be tested on real multi-GPU hardware.
 
+
+## Implementation: `gpu-userspace` builds (debian-bootc)
+
+Two Mesa builds, `gaming` and `ia`, compiled in CI by the `gpu-userspace` class of
+`workflows/bootc-debs-builder/packages.yml`, both inside the same image. The vendor list never appears in
+the logic: Mesa is configured with `-Dgallium-drivers=auto -Dvulkan-drivers=auto`, so every driver the
+build host can compile (AMD, Intel, nouveau/NVK, software) is in both profiles. They differ only in build
+configuration:
+
+| Profile | Optimisation | Notes |
+|---|---|---|
+| `gaming` | `-O3`, LTO, all video codecs, VA-API and VDPAU, Vulkan overlay/screenshot layers | no rusticl |
+| `ia` | `-O2`, shared LLVM, rusticl OpenCL | no VA-API/VDPAU |
+
+The `-O3`/LTO versus `-O2` split is a design choice of this lane, not ported from VE (VE only defines the
+microarchitecture levels).
+
+CPU levels reuse the mapping of `scripts/kernel_helpers.sh` (`kernel_flavour_kcflags`: x64v2/x64v3 give
+`-march=x86-64-v2|v3`, x64v1 and arm64 give no flag), driven by the `variant-env` mechanism of the VE
+`kernel-pve` entry (one matrix entry per profile and level). The `x64v2`/`x64v3` debs contain only the
+libraries, placed in `glibc-hwcaps/x86-64-v2|v3` under the profile prefix, so `ld.so` selects the best
+level the CPU supports. This is userspace only; there is no boot-time selection and no kernel choice (one
+kernel per image).
+
+Layout: `/usr/lib/dc-gpu/<profile>` and `/usr/share/dc-gpu/<profile>`. `dc-gpu set gaming|ia|auto`
+(and `dc-gpu-apply.service` at boot) writes `/etc/ld.so.conf.d/dc-gpu.conf` and
+`/etc/environment.d/50-dc-gpu.conf`, merging the profile's ICD, EGL, VA-API and OpenCL entries with the
+host's, so vendor stacks installed from Debian remain visible. ICD files carry bare sonames so that
+`ld.so` (and hwcaps) resolves them.
+
+Limits:
+
+- NVIDIA proprietary user-space is binary only and cannot be recompiled: it stays the Debian packages.
+- ROCm, Level Zero and Intel media remain Debian packages; no source build exists yet.
+- UNVERIFIED until the first CI run: the Mesa meson options on the pinned Mesa version, `apt-get build-dep mesa`
+  in the build container, `dpkg-shlibdeps` results, and whether libraries opened by absolute path (the
+  megadriver under `lib/dri`) benefit from the hwcaps levels.
+- Image size cost and any speed gain are UNMEASURED (gains ESTIMATED only).
