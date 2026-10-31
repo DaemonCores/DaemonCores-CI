@@ -450,3 +450,23 @@ Conclusions (proved by these runs):
   one `ip addr` sample at 201 s). The cause of the 300 s timeout is open.
 - Run 41166078848 dispatched to see whether `PAT_SECRETS` is now seen (expect `Prepare signing secrets` to generate
   MODULE_SIGNING_KEY/CERT and the kernel to be rebuilt signed).
+
+## Run 41168339038 (debian-bootc e10bd0f): signing now active (MEASURED)
+
+- `Prepare signing secrets` generated MODULE_SIGNING_* and COSIGN_* from `PAT_SECRETS` (secrets created 03:50 UTC).
+- `publish` (amd64) failed first on run 41166113688: reprepro `md5 expected e34cda96..., got 155a3d43...` for
+  `linux-headers-7.2.14_7.2.14-1_amd64.deb`; the signed and -nosign kernels produce different headers debs under the same
+  package name. Fixed in debian-bootc `e10bd0f` (-nosign headers get their own name, Conflicts/Replaces the signed
+  one); validated on a mock deb locally, then publish passed in run 41168339038.
+- `latest-amd64` there: `PASS signed kernel enforces module signatures` (sig_enforce=Y). Two test-logic defects then
+  surfaced, both previously masked by unsigned modules:
+  1. `signature enforcement follows the installed kernel` printed `unsigned kernel, sig_enforce=Y`:
+     `dpkg-query -W 'daemoncores-kernel-*'` lists `daemoncores-kernel-7.2.14-nosign` with an empty version (known only
+     through Conflicts). Reproduced in a debian:trixie container: `un zzfoo-nosign` is listed for a package that only
+     appears in a Conflicts field. Fix: match `${db:Status-Abbrev}` `^ii `.
+  2. `a signed module loads on either kernel`: `insmod ... ecdh_generic.ko: Unknown symbol in module`. insmod does not
+     resolve dependencies and the fallback picked a module that has some; the signature was already accepted (module
+     signature check precedes symbol resolution). Fix: pick a module whose `modinfo -F depends` is empty.
+  Neither change relaxes an assertion: the enforcement and load checks are unchanged.
+- arm64 (`latest-arm64` secboot 16k, `latest-4k-arm64`, `minimal-arm64`): still `VM did not become reachable within
+  300s`; cause open (owner: not an IPv4 problem). `minimal-*` amd64/4k: RAM gate.
