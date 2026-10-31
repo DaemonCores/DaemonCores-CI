@@ -639,3 +639,11 @@ Conclusions (proved by these runs):
 ## Tick 6: Secure Boot unchanged, run 41233619804 still in progress
 - Secure Boot: no action, state of tick 2 stands (enforced and green on amd64 and arm64, run 41199518844); nothing disabled or weakened. The AAVMF CODE/VARS lines of run 41233619804 are not available yet (image jobs not started).
 - New failure in the run (MEASURED, wave1 `linux-modules-nvidia` amd64, log 19:44:54Z): `ERROR: a file touched by the patches changed upstream`, sha256 changed for `include/linux/sched.h`, `kernel/exit.c`, `kernel/fork.c`, `kernel/sched/core.c`, `kernel/sched/fair.c`, `kernel/sched/sched.h`, then `no prior deb to fall back to`. Cause not yet proven (which patch set and which kernel version produced the drift); no fix written.
+
+## Run 41233619804 result (MEASURED, failed after 57 min)
+- Secure Boot still green: arm64 `AAVMF CODE: /usr/share/AAVMF/AAVMF_CODE.secboot.fd`, `AAVMF VARS: .../OVMF_VARS.fd`; amd64 `SecureBootEnable: True`, SSH after 18 s, all bootc/ostree/mount tests PASS.
+- amd64 image test fails `no failed systemd units`: the only failed unit is `dc-gpu-apply.service` (`failed failed`, job 124642365724 log 20:13:00Z). `networking.service` is fine there (`Finished`, DHCPACK).
+- arm64 fails the RAM idle gate (510 MiB over 15 MiB), the other party's work, not Secure Boot.
+- `linux-modules-nvidia` wave1 failure: see Tick 6.
+- Cause of the `dc-gpu-apply` failure NOT proven: the diag listed the unit but printed no log. `dc-gpu apply` run in a trixie container exits 0 both with and without an installed `gpu-userspace` prefix, so the script alone does not fail; the guest context differs (sysinit ordering, read-only paths). No fix written.
+- Instrumentation (debian-bootc `workflows/tests.yml`, both failed-units diags): status and journal of every failed unit. Local, not pushed; the next run will show the journal.
