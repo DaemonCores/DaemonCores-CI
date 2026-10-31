@@ -383,3 +383,19 @@ Conclusions (proved by these runs):
 - Proposed diagnostic for `image-test.sh` (diag only, no behaviour change): print the first 40 serial lines
   (kernel command line) in `dump_serial`.
 - Diagnostic committed (`cb39aff`, diag only): `dump_serial` now prints the kernel command line, the first 40 serial lines and the capture size. Read from run 41155245822 (dispatched, queued at this tick).
+
+## Run 41155245822 (`cb39aff`): first read of the real arm64 command line (MEASURED)
+
+- Wall clock 15 min 46 s (01:25:02 to 01:40:48); every deb reused; the 6 image jobs fail.
+- Heavy layer cache confirmed: `latest-amd64` STEP 13/35 logs `Cache pulled from remote
+  ghcr.io/daemoncores/debian-bootc-cache-amd64` then `Using cache`.
+- `latest-arm64` (16k): the serial capture is 329 lines / 27175 bytes. Kernel command line:
+  `BOOT_IMAGE=(hd0,gpt2)/boot/ostree/default-…/vmlinuz-7.2.14-16k root=UUID=… rootflags=subvol=/root rw boot=UUID=…
+  console=tty0 console=ttyAMA0 ostree=/ostree/boot.0/default/…`. GRUB 2.12 shows two entries
+  (`ostree:0`, `ostree:1`) and boots the first. The kernel is the signed 16k one, ACPI boot, ttyAMA0 last (so
+  `/dev/console` is the serial port).
+- Open: the capture still stops after `genpd` while the bench reaches init; what the real initramfs does between
+  the two is not visible in the 40-line head nor the tail. Hypothesis, NOT proved: the guest keeps running
+  silently (root mount on virtio-blk btrfs under TCG) and `wait_ssh` gives up at 300 s.
+- `latest-amd64`: SB enforced PASS; `signed kernel enforces module signatures` fails: no `PAT_SECRETS`.
+- `minimal-*`: `RAM idle budget exceeded: 320 MiB (amd64), 206 MiB (arm64) over the 15 MiB budget` (RAM gate, other work).
