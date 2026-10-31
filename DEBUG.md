@@ -479,3 +479,15 @@ Conclusions (proved by these runs):
 - Cause (PROVEN from the log + `image-test.sh:313,735`): QEMU is started with `sudo ... -pidfile ${WORK}/qemu.pid`, so the pidfile is root-owned;
   `cleanup()` ran `sudo kill "$(cat pidfile)"` with an unprivileged `cat`, which failed, `|| true` swallowed it, the VM survived and held the pidfile lock.
 - Fix: `cleanup()` reads the pidfile with sudo, kills, and waits for the process to exit. To validate in the next CI run (amd64 job: both invocations must complete).
+
+## 2026-10-31 arm64 "VM did not become reachable within 300s" (run 41173677216, latest-4k-arm64)
+
+- Observed (job log): the guest DOES boot under TCG: `Startup finished in 5.890s (kernel) + 1min 15.022s (initrd) + 2min 33.194s (userspace) = 3min 54.108s`,
+  `sshd[627]: Server listening on 0.0.0.0 port 22` at guest 221 s, `Reached target multi-user.target`. The runner then logs `port 2222 open` and the single SSH
+  attempt fails with `Connection timed out during banner exchange` (ConnectTimeout=3 from `SSH_OPTS`, `image-test.sh:74`).
+  `networking.service` also ends `Failed with result 'timeout'` (about 40 s, DHCPv4 had bound 10.0.2.15, DHCPv6 solicits unanswered): a separate defect, not what blocked SSH.
+- Cause (PROVEN for the failing step, the log shows the exact message): `wait_ssh` slept the whole grace period then made ONE probe with a 3 s banner budget,
+  on a TCG guest still busy with `console-setup`. amd64 (KVM) never hit it. Secure Boot is not involved (no `Security Violation`, init reached).
+- Fix: `wait_ssh` polls until the deadline (probe `ConnectTimeout=30`, fail-fast checks kept); after a reboot it requires a boot id different from the previous boot so the
+  guest being shut down is not mistaken for the new one. To validate in CI on the arm64 jobs.
+- Still open: `networking.service` timeout and the hardcoded `/dev/ttyS0` in `ifupdown2-autoconf` (arm64 console is ttyAMA0).
