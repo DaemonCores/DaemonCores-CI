@@ -131,6 +131,13 @@ jobs:
             # workspace-relative for build-deb.
             echo "sources=$(yq "${sel} | .sources[]" "${MAN}" \
               | sed 's#^#workflows/bootc-debs-builder/#' | paste -sd' ' -)"
+            # A package compiling the kernel declares `ccache: true`: its object
+            # cache is restored/saved across runs (see "Enable ccache").
+            if [ "$(yq "${sel} | .ccache // false" "${MAN}")" = true ]; then
+              echo "ccache=yes"
+            else
+              echo "ccache=no"
+            fi
             # Only a package built with lib/kernel-signing.sh depends on the
             # signing flag, so only its content hash may carry it.
             if yq "${sel} | .sources[]" "${MAN}" \
@@ -176,6 +183,38 @@ jobs:
             yq "${sel} | .build" "${MAN}"
             echo "BUILD_EOF"
           } >>"$GITHUB_OUTPUT"
+
+      # Compiler cache for the kernel builds: the objects of the image, its
+      # -16k variant and the device modules overlap heavily, and a new kernel
+      # release changes few files. The compiler is masqueraded through
+      # /usr/lib/ccache so no make line changes. CCACHE_BASEDIR makes the hash
+      # independent of the versioned source directory (/tmp/linux-<version>).
+      # The cache is not a build input: it never enters the content hash.
+      - name: Enable ccache
+        if: steps.def.outputs.ccache == 'yes'
+        shell: bash
+        run: |
+          set -euo pipefail
+          apt-get update -qq
+          apt-get install -y -qq --no-install-recommends ccache
+          mkdir -p /ccache
+          echo /usr/lib/ccache >>"$GITHUB_PATH"
+          {
+            echo "CCACHE_DIR=/ccache"
+            echo "CCACHE_BASEDIR=/tmp"
+            echo "CCACHE_COMPILERCHECK=content"
+            echo "CCACHE_MAXSIZE=2G"
+          } >>"$GITHUB_ENV"
+
+      - name: Restore ccache
+        if: steps.def.outputs.ccache == 'yes'
+        uses: actions/cache@v4
+        with:
+          path: /ccache
+          key: ccache-${{ inputs.arch }}-${{ inputs.package }}-${{ github.run_id }}
+          restore-keys: |
+            ccache-${{ inputs.arch }}-${{ inputs.package }}-
+            ccache-${{ inputs.arch }}-
 
       - name: Fetch dependency debs
         if: steps.def.outputs.deps != ''
@@ -273,6 +312,11 @@ jobs:
           build: ${{ steps.def.outputs.build }}
           arch: ${{ inputs.arch }}
           extra-env: ${{ steps.hashenv.outputs.lines }}
+
+      - name: ccache statistics
+        if: always() && steps.def.outputs.ccache == 'yes'
+        shell: bash
+        run: ccache -s
 
       # The build failed but the last-good published deb was kept, so the
       # pipeline is not blocked. Record the breakage as an issue (deduped by
