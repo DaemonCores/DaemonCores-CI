@@ -13,6 +13,11 @@ inputs:
     required: false
     default: 'false'
 
+  carry_over:
+    description: 'Set to true when the build job did not finish cleanly: packages absent from the artifact are kept from the published site instead of dropped.'
+    required: false
+    default: 'false'
+
 outputs:
   any_rebuilt:
     description: 'true if at least one package was rebuilt (not cache-reused).'
@@ -28,6 +33,14 @@ runs:
         pattern: debs-*
         merge-multiple: true
         path: debs/
+
+    - name: Keep the packages this run did not refresh
+      if: ${{ inputs.carry_over == 'true' }}
+      shell: bash
+      run: |
+        command -v jq >/dev/null 2>&1 \
+          || { sudo apt-get update >/dev/null; sudo apt-get install -y jq >/dev/null; }
+        bash "${GITHUB_ACTION_PATH}/carry-over.sh"
 
     - name: Compute any_rebuilt
       id: rebuilt
