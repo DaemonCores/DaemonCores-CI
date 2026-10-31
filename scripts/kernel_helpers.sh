@@ -46,10 +46,22 @@ KERNEL_HELPERS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 KERNEL_CDN="${KERNEL_CDN:-https://cdn.kernel.org/pub/linux/kernel}"
 
+# Download one URL to a file; exits 1 on failure.
+kernel_download_tarball() {
+  curl --retry 3 -fsSL "$1" -o "$2" \
+    || {
+      echo "ERROR: cannot download $1" >&2
+      rm -f "$2"
+      exit 1
+    }
+}
+
 #######################################
 # Download, verify and extract the kernel.org tarball of one release.
 # Globals:
 #   KERNEL_CDN: read, root of the kernel.org archive
+#   KERNEL_TARBALL_CACHE: read, optional directory keeping the tarball
+#     between builds of one job; its sha256 is verified on every use
 #   SRCDIR: set, the extracted source tree
 # Arguments:
 #   $1 - kernel version, e.g. 6.12 or 6.1.90
@@ -58,28 +70,47 @@ KERNEL_CDN="${KERNEL_CDN:-https://cdn.kernel.org/pub/linux/kernel}"
 #   Exits 1 when the download fails or the checksum does not match.
 #######################################
 kernel_fetch_source() {
-  local version="$1" want="${2:-}" dir tarball got
+  local version="$1" want="${2:-}" dir tarball got cache fresh=1
   dir="${KERNEL_CDN}/v${version%%.*}.x"
   tarball="linux-${version}.tar.xz"
-  cd /tmp || return 1
-  curl --retry 3 -fsSLO "${dir}/${tarball}" \
-    || {
-      echo "ERROR: cannot download ${dir}/${tarball}" >&2
-      exit 1
-    }
+  cache="${KERNEL_TARBALL_CACHE:-}"
+  if [[ -n "${cache}" ]]; then
+    mkdir -p "${cache}" || return 1
+    cd "${cache}" || return 1
+  else
+    cd /tmp || return 1
+  fi
   if [[ -z "${want}" ]]; then
     want=$(curl --retry 3 -fsSL "${dir}/sha256sums.asc" \
       | awk -v n="${tarball}" '$2 == n { print $1 }')
   fi
+  [[ "${want}" =~ ^[0-9a-f]{64}$ ]] \
+    || {
+      echo "ERROR: no valid sha256 for ${tarball} (got '${want}')" >&2
+      exit 1
+    }
+  if [[ -s "${tarball}" ]]; then
+    fresh=0
+  else
+    kernel_download_tarball "${dir}/${tarball}" "${tarball}"
+  fi
   got=$(sha256sum "${tarball}" | cut -d' ' -f1)
-  [[ "${want}" =~ ^[0-9a-f]{64}$ && "${got}" == "${want}" ]] \
+  if [[ "${got}" != "${want}" && "${fresh}" == 0 ]]; then
+    # A cached copy that no longer matches is discarded, fetched once more.
+    echo "WARNING: cached ${tarball} has sha256 ${got}; downloading again" >&2
+    rm -f "${tarball}"
+    kernel_download_tarball "${dir}/${tarball}" "${tarball}"
+    got=$(sha256sum "${tarball}" | cut -d' ' -f1)
+  fi
+  [[ "${got}" == "${want}" ]] \
     || {
       echo "ERROR: sha256 of ${tarball} is ${got}, expected '${want}'" >&2
+      rm -f "${tarball}"
       exit 1
     }
   rm -rf "/tmp/linux-${version}"
-  tar -xf "${tarball}"
-  rm -f "${tarball}"
+  tar -C /tmp -xf "${tarball}"
+  [[ -n "${cache}" ]] || rm -f "${tarball}"
   SRCDIR="/tmp/linux-${version}"
   test -d "${SRCDIR}" \
     || {

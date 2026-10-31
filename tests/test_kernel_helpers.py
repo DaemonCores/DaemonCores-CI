@@ -97,3 +97,62 @@ def test_flavour_kcflags():
     assert r.stdout.strip() == "-march=x86-64-v3"
     r = run_helper('kernel_flavour_kcflags x64v1')
     assert r.stdout.strip() == ""
+
+def _make_cdn(tmp_path, version):
+    """A file:// kernel.org mirror holding a tiny linux-<version> tarball."""
+    import hashlib
+    import shutil
+    import tarfile
+
+    cdn = tmp_path / "cdn" / f"v{version.split('.')[0]}.x"
+    cdn.mkdir(parents=True)
+    src = tmp_path / f"linux-{version}"
+    src.mkdir()
+    (src / "Makefile").write_text("x\n")
+    tarball = cdn / f"linux-{version}.tar.xz"
+    with tarfile.open(tarball, "w:xz") as t:
+        t.add(src, arcname=f"linux-{version}")
+    shutil.rmtree(src)
+    return tmp_path / "cdn", tarball, hashlib.sha256(tarball.read_bytes()).hexdigest()
+
+
+def _fetch(cdn, version, want, cache):
+    return run_helper(
+        f'kernel_fetch_source {version} {want} && echo "SRC=$SRCDIR"',
+        KERNEL_CDN=f"file://{cdn}",
+        KERNEL_TARBALL_CACHE=str(cache),
+    )
+
+
+def test_tarball_cache_miss_then_hit(tmp_path):
+    version = "9.97.1"
+    cdn, tarball, want = _make_cdn(tmp_path, version)
+    cache = tmp_path / "cache"
+    r = _fetch(cdn, version, want, cache)
+    assert r.returncode == 0, r.stderr
+    assert (cache / tarball.name).is_file()
+    tarball.unlink()  # a second use must not need the network
+    r = _fetch(cdn, version, want, cache)
+    assert r.returncode == 0, r.stderr
+    assert f"SRC=/tmp/linux-{version}" in r.stdout
+
+
+def test_tarball_cache_corrupted_is_redownloaded(tmp_path):
+    version = "9.97.2"
+    cdn, tarball, want = _make_cdn(tmp_path, version)
+    cache = tmp_path / "cache"
+    cache.mkdir()
+    (cache / tarball.name).write_text("corrupted")
+    r = _fetch(cdn, version, want, cache)
+    assert r.returncode == 0, r.stderr
+    assert "downloading again" in r.stderr
+
+
+def test_tarball_checksum_mismatch_fails(tmp_path):
+    version = "9.97.3"
+    cdn, tarball, _ = _make_cdn(tmp_path, version)
+    cache = tmp_path / "cache"
+    r = _fetch(cdn, version, "0" * 64, cache)
+    assert r.returncode == 1
+    assert "expected" in r.stderr
+    assert not (cache / tarball.name).exists()
