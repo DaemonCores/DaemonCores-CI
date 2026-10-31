@@ -27,12 +27,18 @@ runs:
   using: 'composite'
   steps:
     - uses: actions/checkout@v7
-    # Each package uploads its own artifact debs-<pkg>; merge them all into debs/.
+    # Each package uploads its own artifact debs-<pkg>-<arch>. They are kept in
+    # separate directories: an arch-independent package is uploaded by both
+    # architectures under one file name, and merging at download time mixes the
+    # two builds into one corrupt file.
     - uses: actions/download-artifact@v8
       with:
         pattern: debs-*
-        merge-multiple: true
-        path: debs/
+        path: debs-in/
+
+    - name: Merge the artifacts and verify every deb
+      shell: bash
+      run: bash "${GITHUB_ACTION_PATH}/merge-artifacts.sh"
 
     - name: Keep the packages this run did not refresh
       if: ${{ inputs.carry_over == 'true' }}
