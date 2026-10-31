@@ -90,3 +90,7 @@ modules configs (the CI step `ccache statistics` prints it for each job).
 
 - Heavy layer cache (finding 3): fixed, run 41151560841 (`b87ef23`) seeded the cache
   (`Pushing cache` on STEP 13, new hash formula); `Using cache` on STEP 13 is to be confirmed on the next run.
+- ccache (L2): armed in `d3b61bb`. No CI evidence yet: the kernel content hashes are unchanged, so no
+  kernel job runs until a kernel input changes. The first kernel rebuild seeds the cache (cold), the
+  next one is the measurement (`ccache statistics` step prints the hit rate per job). Open risk:
+  `actions/cache` inside the `container:` job needs `tar` in the build-env image (UNVERIFIED).
