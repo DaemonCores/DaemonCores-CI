@@ -635,3 +635,7 @@ Conclusions (proved by these runs):
 - Secure Boot: nothing to do, still enforced and green on both architectures (run 41199518844). Nothing disabled or weakened.
 - Wave 0 timings read from the jobs API (MEASURED): `linux-image` arm64 52 s (reused), `bootupd` 1 min 39 s, `linux-image-nosign` amd64 4 min 17 s, `linux-image-16k-nosign` arm64 6 min 57 s, `gpu-userspace-*` Mesa variants 11 to 15 min each in parallel (gaming-generic arm64 12 min 47 s, gaming-x64v3 15 min 22 s); `gaming-x64v1`, `gaming-x64v2` and `linux-image-16k` arm64 were still running after 20 min.
 - Still pending the end of the run: arm64 `.pyc` mtime diag line and the AAVMF CODE/VARS lines.
+
+## Tick 6: Secure Boot unchanged, run 41233619804 still in progress
+- Secure Boot: no action, state of tick 2 stands (enforced and green on amd64 and arm64, run 41199518844); nothing disabled or weakened. The AAVMF CODE/VARS lines of run 41233619804 are not available yet (image jobs not started).
+- New failure in the run (MEASURED, wave1 `linux-modules-nvidia` amd64, log 19:44:54Z): `ERROR: a file touched by the patches changed upstream`, sha256 changed for `include/linux/sched.h`, `kernel/exit.c`, `kernel/fork.c`, `kernel/sched/core.c`, `kernel/sched/fair.c`, `kernel/sched/sched.h`, then `no prior deb to fall back to`. Cause not yet proven (which patch set and which kernel version produced the drift); no fix written.
