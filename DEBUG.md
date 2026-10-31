@@ -550,3 +550,10 @@ Conclusions (proved by these runs):
 - This CI QEMU monitor answers `unknown register` for `$pc`/`$sp` (the local QEMU accepts them), which is why every memory dump was empty. The dump now takes the numbers from `info registers`; the same extraction was run locally against a booting 16k kernel (`gpa:` and `ffff…: 0x…` lines printed).
 - 16k registers this time: PC=ffffe2fb8ac10a00 (again the EL1h synchronous vector entry, vectors+0x200 if the base is 2 MB aligned), SP=ffe00001fd30ff10 (not a linear-map address), X20=X01=0x96000005 (ESR: data abort, translation fault level 1), X30=0b9fe2fb8ac112b0 (high bits set: a pointer-authentication signature). So SP differs between samples (earlier ffffc0008002be00), the stall is an exception loop on an unusable stack.
 - 4k: `SSH reachable after 340s`, then `VM did not come back after reboot within 300s`: reboot_timeout was still multiplied by 5. Both timeouts now use TCG_TIMEOUT_SCALE (default 12, overridable).
+
+## arm64 16k stall: reproduced locally, cause = `-cpu max` under QEMU 8.2.2 TCG
+- MEASURED: ubuntu:24.04 container (qemu-system-arm 8.2.2, same as the CI runner), AAVMF secboot, CI-identical 16k kernel (7.2.14-16k, built 2026-10-31 04:26:53), 26 MiB initramfs.
+- `-cpu max` (also `max,pauth=off`, `sve=off`, `sme=off`, `lpa2=off`, and all four combined): stalls after `PM: genpd: Disabling unused power domains`, no `Freeing unused kernel memory`.
+- `-cpu neoverse-n1`, `neoverse-n2`, `cortex-a76`: boot to INIT-REACHED (`Freeing unused kernel memory` at 1.69 s). `cortex-a72`: stalls early after 10 lines (not analysed; likely no 16k granule).
+- QEMU 11.1.2 with `-cpu max` boots, so it is a QEMU 8.2.x TCG bug; the exact feature inside `max` is NOT isolated.
+- Fix: arm64 TCG now defaults to `neoverse-n1` (TCG_CPU_ARM64 override). Secure Boot stays enforced. To validate: next Full Pipeline run, jobs latest-arm64 / minimal-arm64.

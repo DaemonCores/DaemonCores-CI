@@ -281,6 +281,12 @@ boot_vm() {
     # CPU instead (-cpu max is the aarch64 spelling of the same idea).
     accel=""
     cpu="max"
+    # arm64 + QEMU 8.2.x TCG: -cpu max stalls the 16k kernel right after
+    # "PM: genpd: Disabling unused power domains" (reproduced with that exact
+    # QEMU; pauth/sve/sme/lpa2 off does not help, neoverse-n1/n2 and
+    # cortex-a76 boot). Use a real server core model there; override with
+    # TCG_CPU_ARM64 (set it to "max" to get the old behaviour).
+    [ "${ARCH}" = "arm64" ] && cpu="${TCG_CPU_ARM64:-neoverse-n1}"
   fi
   if [ "${ARCH}" = "arm64" ]; then
     # arm64: QEMU virt machine, AAVMF (arm64 UEFI from qemu-efi-aarch64 package).
