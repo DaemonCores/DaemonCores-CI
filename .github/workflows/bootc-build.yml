@@ -345,9 +345,13 @@ jobs:
           # a rotation must not be mistaken for an identical image.
           signing=$(printf '%s\n%s' "${BOOTC_GPG_SHA256}" "${COSIGN_PUBLIC_KEY}" \
             | sha256sum | cut -d' ' -f1)
-          hash=$(printf '%s\n%s\n%s\n%s\n%s\n%s\n%s\n' \
+          # The boot-test manifest is an input too: an image must be re-tested
+          # when its tests change, even if its bytes do not.
+          tests_hash=$(sha256sum "${TESTS_FILE:-workflows/tests.yml}" 2>/dev/null \
+            | cut -d' ' -f1 || echo none)
+          hash=$(printf '%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n' \
             "${debs}" "${base_digest}" "${cf}" "${GLOBAL_HASH}" "${CF_TAG}" \
-            "${ARCH}" "${signing}" \
+            "${ARCH}" "${signing}" "${tests_hash}" \
             | sha256sum | cut -d' ' -f1)
           echo "hash=${hash}" >>"$GITHUB_OUTPUT"
           # Per-arch fingerprints of the published debs, passed to the image build as
@@ -378,8 +382,16 @@ jobs:
             "docker://${IMAGE}:${PRIMARY}" 2>/dev/null || echo '')
           if [[ -n "${prior}" && "${prior}" == "${hash}" ]]; then
             echo "identical=true" >>"$GITHUB_OUTPUT"
+            # A refresh run (schedule, force_no_cache) must rebuild anyway.
+            if [[ "${{ github.event_name }}" == "schedule" \
+              || "${{ inputs.force_no_cache }}" == "true" ]]; then
+              echo "skip=false" >>"$GITHUB_OUTPUT"
+            else
+              echo "skip=true" >>"$GITHUB_OUTPUT"
+            fi
           else
             echo "identical=false" >>"$GITHUB_OUTPUT"
+            echo "skip=false" >>"$GITHUB_OUTPUT"
           fi
           echo "content-hash=${hash} prior=${prior:-none} tag=${PRIMARY}"
 
@@ -387,6 +399,7 @@ jobs:
       # once per job. It stays local to the runner: it is never pushed. The image and
       # its -nosign twin are built on it, so they share every layer before the kernel.
       - name: Build base
+        if: steps.chash.outputs.skip != 'true'
         env:
           ARCH: ${{ matrix.entry.arch }}
           BOOTC_GPG_SHA256: ${{ inputs.bootc_gpg_sha256 }}
@@ -447,6 +460,7 @@ jobs:
           rm -f "${_bld_log}"
 
       - name: Build
+        if: steps.chash.outputs.skip != 'true'
         env:
           CF_FILE: ${{ matrix.entry.file }}
           CF_TAG: ${{ matrix.entry.tag }}
@@ -623,6 +637,7 @@ jobs:
           fi
 
       - name: Check runtime deps
+        if: steps.chash.outputs.skip != 'true'
         env:
           PRIMARY: ${{ steps.tags.outputs.primary }}
         run: |
@@ -631,6 +646,7 @@ jobs:
             sh -c "ldd /usr/bin/bootc && ldd /usr/lib/libostree-1.so*"
 
       - name: Smoke test
+        if: steps.chash.outputs.skip != 'true'
         env:
           PRIMARY: ${{ steps.tags.outputs.primary }}
         run: |
@@ -638,7 +654,7 @@ jobs:
           sudo podman run --rm "${IMAGE}:${PRIMARY}" bootc container lint
 
       - name: Smoke test the unsigned-kernel twin
-        if: steps.tags.outputs.twin_primary != ''
+        if: steps.chash.outputs.skip != 'true' && (steps.tags.outputs.twin_primary != '')
         env:
           TWIN: ${{ steps.tags.outputs.twin_primary }}
         run: |
@@ -653,7 +669,7 @@ jobs:
       # Skipped for the installer image: the installer is a live graphical
       # image with no GPU twins planned (no GPU labels on Containerfile.iso).
       - name: Smoke test the -gaming twin
-        if: steps.tags.outputs.gaming_primary != '' && matrix.entry.tag != 'iso'
+        if: steps.chash.outputs.skip != 'true' && (steps.tags.outputs.gaming_primary != '' && matrix.entry.tag != 'iso')
         env:
           TWIN: ${{ steps.tags.outputs.gaming_primary }}
         run: |
@@ -661,7 +677,7 @@ jobs:
           sudo podman run --rm "${IMAGE}:${TWIN}" bootc container lint
 
       - name: Smoke test the -ia twin
-        if: steps.tags.outputs.ia_primary != '' && matrix.entry.tag != 'iso'
+        if: steps.chash.outputs.skip != 'true' && (steps.tags.outputs.ia_primary != '' && matrix.entry.tag != 'iso')
         env:
           TWIN: ${{ steps.tags.outputs.ia_primary }}
         run: |
@@ -680,7 +696,7 @@ jobs:
       # the main lane would block every build. The gate stays on for minimal
       # and is disabled (0) for the main lanes until a real budget is decided.
       - name: Boot-test the image
-        if: matrix.entry.tag != 'iso'
+        if: steps.chash.outputs.skip != 'true' && (matrix.entry.tag != 'iso')
         uses: DaemonCores/DaemonCores-CI/image-test@main
         with:
           image: ${{ env.IMAGE }}:${{ steps.tags.outputs.primary }}
@@ -688,7 +704,7 @@ jobs:
           ram-idle-max-mb: ${{ startsWith(matrix.entry.tag, 'minimal') && '15' || '0' }}
 
       - name: Boot-test the unsigned-kernel twin
-        if: steps.tags.outputs.twin_primary != ''
+        if: steps.chash.outputs.skip != 'true' && (steps.tags.outputs.twin_primary != '')
         uses: DaemonCores/DaemonCores-CI/image-test@main
         with:
           image: ${{ env.IMAGE }}:${{ steps.tags.outputs.twin_primary }}
@@ -699,6 +715,7 @@ jobs:
       # Output goes to the job summary only, no artifact. Switch exit-code to 1
       # with severity CRITICAL once the baseline is known to be clean.
       - name: Save image for vulnerability scan
+        if: steps.chash.outputs.skip != 'true'
         env:
           PRIMARY: ${{ steps.tags.outputs.primary }}
         run: |
@@ -707,6 +724,7 @@ jobs:
           sudo chmod 644 /tmp/scan-image.tar
 
       - name: Scan image for vulnerabilities (report only)
+        if: steps.chash.outputs.skip != 'true'
         uses: aquasecurity/trivy-action@v0.36.0
         with:
           input: /tmp/scan-image.tar
@@ -716,13 +734,13 @@ jobs:
           exit-code: '0'
 
       - name: Remove scan archive
-        if: always()
+        if: steps.chash.outputs.skip != 'true' && (always())
         run: sudo rm -f /tmp/scan-image.tar
 
       # Only the images this run asked for are pushed: the image and, when requested,
       # its unsigned-kernel twin. The shared base is never pushed.
       - name: Push
-        if: github.ref == 'refs/heads/main'
+        if: steps.chash.outputs.skip != 'true' && (github.ref == 'refs/heads/main')
         id: push
         env:
           CF_TAG: ${{ matrix.entry.tag }}
@@ -768,7 +786,7 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - name: Sign image
-        if: github.ref == 'refs/heads/main'
+        if: steps.chash.outputs.skip != 'true' && (github.ref == 'refs/heads/main')
         uses: DaemonCores/DaemonCores-CI/sign-image@main
         with:
           refs: ${{ steps.push.outputs.refs }}
@@ -780,39 +798,22 @@ jobs:
       # Report it as a suspicious/wasteful run without failing
       # the pipeline. One issue per variant-arch combo (title keyed by
       # the primary tag) so each combo's status is visible.
-      - name: Flag identical image
-        if: github.ref == 'refs/heads/main' && steps.chash.outputs.identical == 'true'
+      # An image whose content hash equals the published one (same debs, base,
+      # Containerfiles, tests manifest, arch) is neither rebuilt, tested nor
+      # pushed. Scheduled and force_no_cache runs bypass this on purpose: their
+      # job is to refresh packages.
+      - name: Skipped unchanged image
+        if: steps.chash.outputs.skip == 'true'
         env:
-          GH_TOKEN: ${{ github.token }}
           PRIMARY: ${{ steps.tags.outputs.primary }}
         run: |
-          set -euo pipefail
-          hash="${{ steps.chash.outputs.hash }}"
           {
-            echo "### ⚠️ Image identical to the previous one (\`${PRIMARY}\`)"
+            echo "### Image unchanged (\`${PRIMARY}\`)"
             echo
-            echo "The pipeline rebuilt, pushed **and signed** an image whose"
-            echo "content hash \`${hash}\` equals the one already published (tag \`${PRIMARY}\`):"
-            echo "neither the .deb files, the base image, the Containerfiles nor the arch changed."
-            echo "The rebuild, push and signature were probably unnecessary."
+            echo "Content hash \`${{ steps.chash.outputs.hash }}\` equals the published one:"
+            echo "build, boot test, push and signature were skipped."
           } >>"$GITHUB_STEP_SUMMARY"
-          title="⚠️ Suspicious pipeline: identical image pushed (${PRIMARY})"
-          num=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open \
-            --search "in:title \"$title\"" --json number -q '.[0].number' \
-            2>/dev/null || true)
-          if [ -n "$num" ]; then
-            gh issue comment "$num" --repo "$GITHUB_REPOSITORY" \
-              --body "Run \`${GITHUB_RUN_ID}\`: identical image (tag \`${PRIMARY}\`, hash \`${hash}\`)." \
-              2>/dev/null || true
-          else
-            gh issue create --repo "$GITHUB_REPOSITORY" --title "$title" \
-              --body "Content hash \`${hash}\` unchanged for tag \`${PRIMARY}\` but the image was rebuilt, pushed and signed (run \`${GITHUB_RUN_ID}\`)." \
-              2>/dev/null || true
-          fi
 
-  # Wave 2: Containerfiles whose FROM references an image built in wave 1
-  # (e.g. Containerfile.iso pulls latest_<arch> which wave 1 just
-  # pushed). Runs only after build-test-push succeeds so the base image exists.
   build-iso:
     name: Build ${{ matrix.entry.tag }}-${{ matrix.entry.arch }} (wave 2)
     needs: [discover, build-test-push]
