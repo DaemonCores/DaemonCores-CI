@@ -382,3 +382,4 @@ Conclusions (proved by these runs):
   image is never pushed (push runs after the boot test), so its layers cannot be fetched either.
 - Proposed diagnostic for `image-test.sh` (diag only, no behaviour change): print the first 40 serial lines
   (kernel command line) in `dump_serial`.
+- Diagnostic committed (`cb39aff`, diag only): `dump_serial` now prints the kernel command line, the first 40 serial lines and the capture size. Read from run 41155245822 (dispatched, queued at this tick).
