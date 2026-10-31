@@ -593,3 +593,9 @@ Conclusions (proved by these runs):
 - No local reproduction is possible without root (installing the image needs `podman --privileged`; no new pkexec while the owner is away), and the deployed mtimes only exist on the installed guest.
 - debian-bootc `workflows/tests.yml` diag of `no failed systemd units` now prints the source mtime and the pyc header mtime of `ifupdown/utils.py` on the guest (diag only, the assertion is unchanged). The edit is in the debian-bootc working tree, NOT committed: the pre-commit `make docs-check` fails on citations in `docs/testing-quality.md` (packages.yml:1072/1122) caused by another agent's uncommitted packages.yml edits, not by this hunk. Commit once that work lands (no `--no-verify`); the push also waits for the other pending work, since a partial push breaks the pipelines.
 - Expected reading in the next run: equal values = hypothesis false (look elsewhere); different values = hypothesis proven, then switch the ifupdown2 overlay to hash-based pycs.
+
+## build-all.sh: `GITHUB_TOKEN: unbound variable` (run 41218539531)
+
+- Symptom: both `Build all packages` jobs fail in 67 ms, `build-all.sh: line 241: GITHUB_TOKEN: unbound variable`.
+- Proof: the step env lists `SECRETVAL_GITHUB_TOKEN` but no `GITHUB_TOKEN`; the workflow maps the secret only under that name (`bootc-debs-builder.yml:82`). The unit test exported `GITHUB_TOKEN` itself, which masked the gap.
+- Fix: the script derives `GITHUB_TOKEN` from `SECRETVAL_GITHUB_TOKEN`; the test now supplies only the workflow's variable and drops `GITHUB_TOKEN`.

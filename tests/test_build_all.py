@@ -93,7 +93,8 @@ def _run(root: Path) -> subprocess.CompletedProcess:
     Returns:
         The completed process.
     """
-    env = dict(os.environ,
+    base = {k: v for k, v in os.environ.items() if k != 'GITHUB_TOKEN'}
+    env = dict(base,
                DEBS_DIR=str(root / 'debs'),
                BUILD_DIR=str(root / 'build'),
                TMPDIR=str(root / 'tmp'),
@@ -103,7 +104,7 @@ def _run(root: Path) -> subprocess.CompletedProcess:
                GITHUB_REPOSITORY='o/r',
                GITHUB_SERVER_URL='http://127.0.0.1:9',
                GITHUB_RUN_ID='1',
-               GITHUB_TOKEN='t')
+               SECRETVAL_GITHUB_TOKEN='t')
     (root / 'build').mkdir(exist_ok=True)
     (root / 'tmp').mkdir(exist_ok=True)
     return subprocess.run(
