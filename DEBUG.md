@@ -526,3 +526,9 @@ Conclusions (proved by these runs):
 - latest-4k: `SSH reachable after 298s` (MEASURED). My new test failed: `grub-efi-arm64-signed` is `hi` (held on purpose via APT_HOLD_PKG), not `ii`; the check now accepts `^[ih]i`.
 - latest-arm64 / minimal-arm64 (16k, SB enforced): still `VM did not become reachable within 720s`, so slowness is NOT the cause (720 s vs ~300 s for 4k). QEMU monitor: VM running, CPU executing in EL1h with DAIF masked (PSTATE=...3c5), PC alternating, X01=0x96000005 (an ESR value, data abort at EL1). Serial stops at `PM: genpd: Disabling unused power domains` (kernel 4.65 s), `Freeing unused kernel memory` never printed. The local bench with a tiny initramfs prints it 0.3 s after genpd, so the stall depends on what the real image adds (25 MB initramfs, cmdline, disk).
 - Next: dump the full register file and the code around PC from the monitor (image-test `guest_state`), match the instruction bytes against the 16k kernel Image to find the KASLR slide, resolve LR/PC with System.map.
+
+## Run 41180405930 - 16k stall data (MEASURED) and instrumentation fix
+
+- latest-4k now passes (SSH after 331 s, reboot test included). latest-arm64 / minimal-arm64 (16k): unreachable at 720 s again, same as at 300 s: not a speed problem.
+- Monitor snapshot of the stalled 16k guest: PC alternates ffffe06e1397ef54 / ef6c (a 6-instruction loop), PSTATE=004003c5 (EL1h, DAIF all masked), X30=ffffe06e1397eac4, SP=fff00000fe988da0. The KASLR slide is unknown, so symbols cannot be resolved yet.
+- The code dump requested in the previous run printed nothing: the monitor rejects `$pc-48` (checked locally with qemu: `x /8xw $pc` and `x /4xg $sp` work). guest_state now dumps `x /32xw $pc` and `x /16xg $sp`; the instruction words are searched in the kernel Image to get the slide.
