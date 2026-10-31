@@ -571,3 +571,6 @@ Conclusions (proved by these runs):
 - `latest-arm64` (16k, AAVMF_CODE.secboot.fd, SB enforced): success; SSH after 110 s (boot) and 145 s / 111 s / 93 s on the following boots/reboots. `latest-4k-arm64` and `latest-amd64`: success. The 16k stall is closed.
 - `minimal-arm64`, `minimal-4k-arm64`, `minimal-amd64`: boot OK (SSH after 80 s, 81 s, 18 s) then fail on the RAM gate only: 508 / 208 / 348 MiB used over the 15 MiB budget. Not a boot or Secure Boot failure; the gate is separate work.
 - Wall clock of the run: 10:03:17 to 10:27:27 (24 min), with the kernels rebuilt.
+
+## Experiment removed
+- The `networking.service` TimeoutStartSec=300 drop-in in install-fs.sh is removed. In run 41191163442 no networking.service failure appears in the latest-arm64 log (grep for failed/timed out: no match); the 30 s product timeout is re-exposed to the next run, which will show whether it still trips under neoverse-n1.
