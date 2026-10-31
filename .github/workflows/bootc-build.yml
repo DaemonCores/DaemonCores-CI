@@ -243,7 +243,7 @@ jobs:
           use-sudo: true
 
       - name: Install trivy
-        uses: aquasecurity/setup-trivy@v0.2.3
+        uses: aquasecurity/setup-trivy@v0.2.6
 
       # Content hash, build, lint, boot test, scan, push and signature of every
       # image of the architecture. The results table goes to the job summary, the
