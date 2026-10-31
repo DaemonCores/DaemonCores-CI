@@ -28,6 +28,8 @@ MANIFEST = textwrap.dedent(
       - {name: plain, arch: amd64, suffix: "", secure_boot: 1, reference: true}
       - {name: nosign, arch: amd64, suffix: "-nosign", secure_boot: 1}
       - {name: k4, arch: amd64, suffix: "-4k", secure_boot: 0}
+      - {name: enforce, arch: amd64, suffix: "-enf", secure_boot: 1, kargs: ["module.sig_enforce=1", "quiet"]}
+      - {name: lax, arch: amd64, suffix: "-enf", secure_boot: 1}
     tests:
       - {name: a, run: "true", diag: "echo a"}
     """
@@ -335,6 +337,81 @@ def test_no_secure_boot_category_for_arch(stubs: Path) -> None:
                         "tests:\n  - {name: a, run: x, diag: y}\n")
     r = sh("manifest_needs_secure_boot && echo yes || echo no", {"TESTS_FILE": str(m)}, stubs)
     assert r.stdout.strip() == "no"
+
+
+# --- kernel args per category ----------------------------------------------
+
+
+@needs_yq
+def test_two_categories_on_one_tag_are_all_listed(stubs: Path) -> None:
+    m = manifest(stubs)
+    r = sh('IMAGE="img:x-enf_amd64"; list_categories', {"TESTS_FILE": str(m), "ARCH": "amd64"}, stubs)
+    assert r.stdout.split() == ["enforce", "lax"]
+
+
+@needs_yq
+@pytest.mark.parametrize(
+    ("category", "kargs"),
+    [("", "module.sig_enforce=1 quiet"), ("enforce", "module.sig_enforce=1 quiet"), ("lax", "")],
+)
+def test_select_category_from_environment_exports_kargs(stubs: Path, category: str, kargs: str) -> None:
+    m = manifest(stubs)
+    r = sh(
+        'IMAGE="img:x-enf_amd64"; select_category >/dev/null; '
+        'echo "${CATEGORY}|${INSTALL_KARGS}"; bash -c \'echo "exp:${INSTALL_KARGS}"\'',
+        {"TESTS_FILE": str(m), "ARCH": "amd64", "CATEGORY": category}, stubs,
+    )
+    assert r.returncode == 0, r.stdout + r.stderr
+    lines = r.stdout.splitlines()
+    assert lines[0] == f"{category or 'enforce'}|{kargs}"
+    assert lines[1] == f"exp:{kargs}"
+
+
+@needs_yq
+def test_category_not_matching_the_tag_is_rejected(stubs: Path) -> None:
+    m = manifest(stubs)
+    r = sh('IMAGE="img:x-enf_amd64"; select_category', {"TESTS_FILE": str(m), "ARCH": "amd64", "CATEGORY": "k4"}, stubs)
+    assert r.returncode == 1
+    assert 'no category "k4"' in r.stdout
+
+
+@needs_yq
+@pytest.mark.parametrize("karg", ["a b", "x;rm", "$(id)", "=v", "a=b c", "a='b'"])
+def test_bad_karg_is_rejected(stubs: Path, karg: str) -> None:
+    m = manifest(
+        stubs,
+        "categories:\n  - {name: p, arch: amd64, suffix: '', secure_boot: 0, reference: true, kargs: [\"" + karg + "\"]}\n"
+        "tests:\n  - {name: a, run: x, diag: y}\n",
+    )
+    r = sh("validate_manifest", {"TESTS_FILE": str(m)}, stubs)
+    assert r.returncode == 1
+    assert "kargs must be a list" in r.stdout
+
+
+@needs_yq
+def test_kargs_must_be_a_list(stubs: Path) -> None:
+    m = manifest(
+        stubs,
+        "categories:\n  - {name: p, arch: amd64, suffix: '', secure_boot: 0, reference: true, kargs: quiet}\n"
+        "tests:\n  - {name: a, run: x, diag: y}\n",
+    )
+    r = sh("validate_manifest", {"TESTS_FILE": str(m)}, stubs)
+    assert r.returncode == 1
+
+
+@needs_yq
+@pytest.mark.parametrize(("second_name", "ok"), [("other", True), ("p", False)])
+def test_duplicate_rule_is_arch_suffix_name(stubs: Path, second_name: str, ok: bool) -> None:
+    m = manifest(
+        stubs,
+        "categories:\n  - {name: p, arch: amd64, suffix: '', secure_boot: 0, reference: true}\n"
+        f"  - {{name: {second_name}, arch: amd64, suffix: '', secure_boot: 0}}\n"
+        "tests:\n  - {name: a, run: x, diag: y}\n",
+    )
+    r = sh("validate_manifest", {"TESTS_FILE": str(m)}, stubs)
+    assert (r.returncode == 0) is ok, r.stdout + r.stderr
+    if not ok:
+        assert "duplicate (arch:suffix:name)" in r.stdout
 
 
 # --- stopping the VM -------------------------------------------------------
