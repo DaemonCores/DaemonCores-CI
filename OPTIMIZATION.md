@@ -160,3 +160,9 @@ Steps: 1 `content-hash.sh` (hash parity test old vs new against published `hashe
 - Inside the 585 s boot test: install about 90 s, boot 110 s, one test (`kernel modules are all signed or none is`) 118 s, reboot 145 s.
 - L13 (done): that test forked `modinfo` per module (1667 modules). Replaced by one `grep -L` over the plain `.ko` files (local: 0.13 s vs forks; same verdict on the real 16k kernel modules: 1667 signed, 0 unsigned; mixed set fails). Saves about 2 min per boot test, twice per arm64 image (twin).
 - Next measured candidates: the unsigned twin repeats the whole boot test (L1/L6), install about 90 s, and calibrated timeouts do not shorten a passing run.
+
+## L14: skip unchanged images (implemented, awaiting CI evidence)
+- Before: `chash` computed `identical` but only used it to open a "Suspicious pipeline" issue; all 6 image jobs rebuilt, boot-tested (about 15 min on arm64), pushed and signed on every run. The 24 min wall clock of run 41191163442 is this: the deb phase was over at about 10:06.
+- Now: `skip=true` when the content hash equals the published image's `org.daemoncores.content-hash` label (except schedule / force_no_cache). Every step from `Build base` to `Sign image` is guarded. The hash also includes the boot-test manifest. The manifest job reuses the already published per-arch tags.
+- First run after the change rebuilds everything once (hash formula changed); the next no-change run is the measurement.
+- Images that fail their boot test are never pushed, so they never become "identical" and run again.
