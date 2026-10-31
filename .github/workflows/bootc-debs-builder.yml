@@ -194,3 +194,4 @@ jobs:
           repo_name: ${{ steps.repo.outputs.name }}
           apt_gpg_key: ${{ secrets.APT_GPG_KEY }}
           skip_pages: ${{ !inputs.deploy_pages }}
+          carry_over: ${{ needs.build.result != 'success' }}

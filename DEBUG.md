@@ -609,3 +609,10 @@ Conclusions (proved by these runs):
 - Symptom: `bootupd (amd64)` fails right after the vendor tarball check, `bash: line 24: /build/rust/env: No such file or directory`.
 - Proof: the Rust toolchain is baked into the build image at `CARGO_HOME=RUSTUP_HOME=/build/rust` (`debian-bootc/workflows/env.yml:19-20,115`); `build-all.sh` ran `rm -rf "${BUILD_DIR}"/*` after each built package, which deleted it before `bootupd`.
 - Fix: the entries of `BUILD_DIR` are recorded at start and only entries added since are removed; `tests/test_build_all.py::test_cleanup_keeps_what_the_build_image_ships` covers it.
+
+## Conditional rebuild lost: `prior=<none>` for every package (run 41219400047)
+
+- Symptom: `cache[...]: prior=<none>` for libcomposefs/ostree/fisherman/linux-image although the computed hashes equal those of run 41199518844 (where they were reported unchanged and reused).
+- Proof: hash parity holds; the published `hashes.json` had been overwritten by run 41218539531, whose build jobs all failed. `bootc-debs-end/action.yml` rebuilds `hashes.json` and the APT repo from `debs/.meta/*.json` of the current artifact only, and the `publish` job runs with `always() && !cancelled()` (`bootc-debs-builder.yml`), so an empty artifact published an empty cache and repo.
+- Fix: new input `carry_over` (set when `needs.build.result != 'success'`) runs `bootc-debs-end/carry-over.sh` before the repo is created: every package of the published `hashes.json` without metadata in the artifact is downloaded back from `debs-cache/` and recorded as reused. A fully successful build keeps the artifact authoritative, so removed packages still disappear. Covered by `tests/test_carry_over.py`.
+- Status: not yet confirmed on a real run; confirm with `prior=` values after the next failed-then-rerun sequence.
