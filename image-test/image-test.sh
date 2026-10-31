@@ -61,6 +61,9 @@ SECURE_BOOT="${SECURE_BOOT:-}"
 # Manifest category of the image under test and whether it is the reference one
 # (set by select_category).
 CATEGORY=""
+# Multiplier applied to the manifest timeouts (tuned for KVM) when the guest is
+# emulated: a TCG arm64 guest needs about 330 s to boot, 5x of 60 s tripped.
+TCG_TIMEOUT_SCALE="${TCG_TIMEOUT_SCALE:-12}"
 REFERENCE=0
 # 1 once we know /dev/kvm is present and usable, 0 otherwise (set in
 # install_deps). GitHub's hosted arm64 runners expose no /dev/kvm at all —
@@ -427,10 +430,18 @@ guest_state() {
     "info status" "info cpus" "info registers" 2>&1 | grep -aE '^(>|VM status|\*? ?CPU|.*PC=|PSTATE)' || true
   # A stalled guest: the whole register file (LR, SP give the call chain) and
   # the code around the program counter, to be matched against the kernel image.
-  sudo python3 -I "${SCRIPT_DIR}/hmp.py" "${MONITOR}" "info registers" 2>&1 \
-    | grep -aE '^(X[0-9]+|.* X[0-9]+=)' || true
-  sudo python3 -I "${SCRIPT_DIR}/hmp.py" "${MONITOR}" 'gva2gpa $pc' 'gva2gpa $sp' 'x /32xw $pc' 'x /16xg $sp' 2>&1 \
-    | grep -avE '^(>|[xgv]+( |$)|\(qemu\) *$)' | cut -c1-200 || true
+  # This QEMU monitor does not know $pc/$sp as expressions: read the numbers
+  # from the register dump and pass them as addresses.
+  local regs pc sp
+  regs=$(sudo python3 -I "${SCRIPT_DIR}/hmp.py" "${MONITOR}" "info registers" 2>&1)
+  grep -aE '^(X[0-9]+|.* X[0-9]+=)' <<<"${regs}" || true
+  pc=$(grep -aoE ' PC=[0-9a-f]+' <<<"${regs}" | head -n 1 | cut -d= -f2)
+  sp=$(grep -aoE ' SP=[0-9a-f]+' <<<"${regs}" | head -n 1 | cut -d= -f2)
+  if [ -n "${pc}" ] && [ -n "${sp}" ]; then
+    sudo python3 -I "${SCRIPT_DIR}/hmp.py" "${MONITOR}" "gva2gpa 0x${pc}" "gva2gpa 0x${sp}" \
+      "x /32xw 0x${pc}" "x /16xg 0x${sp}" 2>&1 \
+      | grep -aE '^(gpa:|[0-9a-f]{16}:|Cannot|Unable|unknown|Try)' | cut -c1-200 || true
+  fi
   local i
   for i in 1 2; do
     sleep 1
@@ -796,7 +807,7 @@ main() {
   # TCG emulation is an order of magnitude slower than KVM, so the manifest's
   # KVM-tuned boot timeout would trip on a boot that is merely slow. Scale it.
   if [ "${KVM}" != "1" ]; then
-    timeout=$((timeout * 12))
+    timeout=$((timeout * TCG_TIMEOUT_SCALE))
     echo "TCG emulation: boot timeout scaled to ${timeout}s"
   fi
   if ! wait_ssh "${timeout}"; then
@@ -824,7 +835,7 @@ main() {
     local reboot_timeout
     reboot_timeout=$(yq '.reboot_timeout // 300' "${TESTS_FILE}")
     if [ "${KVM}" != "1" ]; then
-      reboot_timeout=$((reboot_timeout * 5))
+      reboot_timeout=$((reboot_timeout * TCG_TIMEOUT_SCALE))
     fi
     if ! wait_ssh "${reboot_timeout}" "${old_boot}"; then
       echo "::error::VM did not come back after reboot within ${reboot_timeout}s"
