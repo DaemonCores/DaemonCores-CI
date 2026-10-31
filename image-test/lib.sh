@@ -71,8 +71,9 @@ unset _d
 # for a local run. A manifest with no `categories:` keeps the former default, 0.
 SECURE_BOOT="${SECURE_BOOT:-}"
 # Manifest category of the image under test and whether it is the reference one
-# (set by select_category).
-CATEGORY=""
+# (set by select_category). A CATEGORY already in the environment selects that
+# category among those matching the tag.
+CATEGORY="${CATEGORY:-}"
 # Multiplier applied to the manifest timeouts (tuned for KVM) when the guest is
 # emulated (TCG). Back to 5: the 330 s boots came from -cpu max, a neoverse-n1
 # arm64 guest reaches SSH in about 105 s (run 41191163442).
@@ -219,9 +220,10 @@ install_disk() {
   # bootc-build.yml builds with sudo podman, so this root podman sees the freshly
   # built image directly (no registry pull).
   # ARCH is forwarded so install-fs.sh can set the right console= kernel arg
-  # (ttyS0 on x86, ttyAMA0 on arm64 QEMU virt machine).
+  # (ttyS0 on x86, ttyAMA0 on arm64 QEMU virt machine). INSTALL_KARGS carries
+  # the extra kernel arguments of the manifest category (select_category).
   sudo podman run --rm --privileged --pid=host --security-opt label=disable \
-    -e ARCH="${ARCH}" \
+    -e ARCH="${ARCH}" -e INSTALL_KARGS="${INSTALL_KARGS:-}" \
     -v /dev:/dev -v /var/lib/containers:/var/lib/containers \
     -v "${DISK}:/disk.raw" \
     -v "${KEY}.pub:/key.pub:ro" \
@@ -825,7 +827,9 @@ _validate_section() {
 #######################################
 # Check the manifest's `categories:` (when present): every entry has a name, an
 # arch, a `suffix:` key (empty = the plain tags) and a `secure_boot:` of 0 or 1;
-# (arch, suffix) pairs are unique; each arch has exactly one `reference: true`
+# an optional `kargs:` is a list of kernel arguments of the strict form
+# name[=value] (added at install); (arch, suffix, name) triples are unique, so
+# several categories may share a suffix and the tag is booted once per category; each arch has exactly one `reference: true`
 # category (the one running the global tests); every `category:` a test lists
 # names a defined category.
 # Globals:
@@ -847,8 +851,13 @@ _validate_categories() {
     echo "::error::categories need name, arch (amd64|arm64), suffix and secure_boot (0|1): ${msg}"
     bad=1
   }
-  msg=$(yq '[.categories[] | .arch + ":" + .suffix] | group_by(.) | .[] | select(length > 1) | .[0]' "${TESTS_FILE}")
-  [ -z "${msg}" ] || { echo "::error::duplicate (arch:suffix) in categories: ${msg}"; bad=1; }
+  msg=$(yq '[.categories[] | .arch + ":" + .suffix + ":" + .name] | group_by(.) | .[] | select(length > 1) | .[0]' "${TESTS_FILE}")
+  [ -z "${msg}" ] || { echo "::error::duplicate (arch:suffix:name) in categories: ${msg}"; bad=1; }
+  msg=$(yq '.categories[] | select(has("kargs")) | select(
+    (.kargs | tag) != "!!seq"
+    or ([.kargs[] | select((tag) != "!!str" or (test("^[A-Za-z0-9._-]+(=[A-Za-z0-9.,_:/-]+)?$") | not))] | length) > 0
+  ) | .name' "${TESTS_FILE}")
+  [ -z "${msg}" ] || { echo "::error::kargs must be a list of name[=value] kernel arguments ([A-Za-z0-9._-] names, [A-Za-z0-9.,_:/-] values): ${msg}"; bad=1; }
   msg=$(yq '.categories | group_by(.arch) | .[] | select(([.[] | select(.reference == true)] | length) != 1) | .[0].arch' "${TESTS_FILE}")
   [ -z "${msg}" ] || { echo "::error::categories of arch ${msg} must have exactly one reference: true"; bad=1; }
   for sec in tests reboot_tests; do
@@ -859,43 +868,89 @@ _validate_categories() {
 }
 
 #######################################
-# Pick the manifest category of the image under test: among the categories of
-# this arch whose `suffix:` ends the tag name (the tag minus its `_<arch>`), the
-# one with the longest suffix. Sets CATEGORY, REFERENCE and, unless already
-# set, SECURE_BOOT from the category's `secure_boot:`. A manifest with no
-# `categories:` leaves CATEGORY empty (every test runs) and SECURE_BOOT at 0.
+# Indices of the manifest categories matching the image: those of this arch
+# whose `suffix:` ends the tag name (the tag minus its `_<arch>`), restricted
+# to the longest matching suffix. Several categories may share that suffix:
+# the image is then booted once per category.
 # Globals:
-#   IMAGE, ARCH, TESTS_FILE, CATEGORY, REFERENCE, SECURE_BOOT
-# Returns:
-#   Exits 1 when the manifest has categories but none matches this image.
+#   IMAGE, ARCH, TESTS_FILE
+# Outputs:
+#   One index per line on stdout (none when no category matches).
 #######################################
-select_category() {
-  local tag n i c_arch c_suffix best=-1 best_i=-1
+_matching_category_indices() {
+  local tag n i c_arch c_suffix best=-1
+  local -a idx=() len=()
   tag=${IMAGE##*:}
   tag=${tag%_"${ARCH}"}
   n=$(yq '.categories | length // 0' "${TESTS_FILE}")
-  if [ "${n}" -eq 0 ]; then
-    SECURE_BOOT="${SECURE_BOOT:-0}"
-    return 0
-  fi
   for ((i = 0; i < n; i++)); do
     c_arch=$(yq ".categories[${i}].arch" "${TESTS_FILE}")
     [ "${c_arch}" = "${ARCH}" ] || continue
     c_suffix=$(yq ".categories[${i}].suffix" "${TESTS_FILE}")
     case "${tag}" in *"${c_suffix}") ;; *) continue ;; esac
-    if [ "${#c_suffix}" -gt "${best}" ]; then
-      best=${#c_suffix}
-      best_i=${i}
-    fi
+    idx+=("${i}")
+    len+=("${#c_suffix}")
+    [ "${#c_suffix}" -le "${best}" ] || best=${#c_suffix}
   done
+  for i in "${!idx[@]}"; do
+    [ "${len[i]}" -ne "${best}" ] || echo "${idx[i]}"
+  done
+}
+
+#######################################
+# Names of every manifest category the image is tested under (see
+# _matching_category_indices), one per line. Empty when the manifest has no
+# `categories:` or none matches.
+# Globals:
+#   IMAGE, ARCH, TESTS_FILE
+#######################################
+list_categories() {
+  local i
+  while IFS= read -r i; do
+    yq ".categories[${i}].name" "${TESTS_FILE}"
+  done < <(_matching_category_indices)
+}
+
+#######################################
+# Pick the manifest category of the image under test: among the categories
+# matching the tag (_matching_category_indices) the CATEGORY already in the
+# environment when set (one boot per category of a tag), else the first. Sets
+# CATEGORY, REFERENCE, INSTALL_KARGS (the category's `kargs:`, space separated;
+# exported for the installer) and, unless already set, SECURE_BOOT from the
+# category's `secure_boot:`. A manifest with no `categories:` leaves CATEGORY
+# empty (every test runs) and SECURE_BOOT at 0.
+# Globals:
+#   IMAGE, ARCH, TESTS_FILE, CATEGORY, REFERENCE, SECURE_BOOT, INSTALL_KARGS
+# Returns:
+#   Exits 1 when the manifest has categories but none matches this image, or
+#   the requested CATEGORY is not one of the matching ones.
+#######################################
+select_category() {
+  local tag n i best_i=-1 want="${CATEGORY}"
+  tag=${IMAGE##*:}
+  tag=${tag%_"${ARCH}"}
+  INSTALL_KARGS=""
+  export INSTALL_KARGS
+  n=$(yq '.categories | length // 0' "${TESTS_FILE}")
+  if [ "${n}" -eq 0 ]; then
+    SECURE_BOOT="${SECURE_BOOT:-0}"
+    return 0
+  fi
+  while IFS= read -r i; do
+    if [ -z "${want}" ] || [ "$(yq ".categories[${i}].name" "${TESTS_FILE}")" = "${want}" ]; then
+      best_i=${i}
+      break
+    fi
+  done < <(_matching_category_indices)
   if [ "${best_i}" -lt 0 ]; then
-    echo "::error::no category of ${TESTS_FILE} matches tag '${tag}' on ${ARCH}"
+    echo "::error::no category${want:+ \"${want}\"} of ${TESTS_FILE} matches tag '${tag}' on ${ARCH}"
     exit 1
   fi
   CATEGORY=$(yq ".categories[${best_i}].name" "${TESTS_FILE}")
   [ "$(yq ".categories[${best_i}].reference // false" "${TESTS_FILE}")" = true ] && REFERENCE=1
   SECURE_BOOT="${SECURE_BOOT:-$(yq ".categories[${best_i}].secure_boot" "${TESTS_FILE}")}"
-  echo "Category: ${CATEGORY} (tag ${tag}, reference=${REFERENCE}, secure_boot=${SECURE_BOOT})"
+  INSTALL_KARGS=$(yq ".categories[${best_i}].kargs // [] | join(\" \")" "${TESTS_FILE}")
+  echo "Category: ${CATEGORY} (tag ${tag}, reference=${REFERENCE}, secure_boot=${SECURE_BOOT}, kargs='${INSTALL_KARGS}')"
 }
 
 #######################################
@@ -1045,7 +1100,8 @@ cmd_test() {
     VARIANT="minimal"
   fi
   mkdir -p "${LOGS}"
-  SERIAL="${LOGS}/${IMAGE//[^A-Za-z0-9._-]/_}.serial.log"
+  # One log per category when the caller forces one (several boots of a tag).
+  SERIAL="${LOGS}/${IMAGE//[^A-Za-z0-9._-]/_}${CATEGORY:+.${CATEGORY//[^A-Za-z0-9._-]/_}}.serial.log"
   trap 'stop_vm; sudo chmod a+r "${SERIAL}" 2>/dev/null' EXIT
   stop_vm
   free_ssh_port 5 || exit 1
@@ -1123,13 +1179,15 @@ cmd_teardown() {
 
 usage() {
   cat <<USAGE
-usage: image-test.sh [prepare | test <image-ref> [<ram-max-mb>] | teardown]
+usage: image-test.sh [prepare | test <image-ref> [<ram-max-mb>] | categories <image-ref> | teardown]
 
   prepare   once per job: dependencies, KVM detection, manifest validation,
             SSH key, Secure Boot tooling; state goes to \$IMAGE_TEST_STATE
             (default \${RUNNER_TEMP:-/tmp}/image-test)
   test      once per image: install, boot, run the tests, power off. Run it as
             a child process (under timeout): the exit code is the verdict
+  categories  print the manifest categories the image is tested under, one per
+            line (run 'test' once per line with CATEGORY=<name> when several)
   teardown  once per job: remove the disk, keys and varstores, keep the logs
   (none)    prepare, test \$IMAGE \$RAM_IDLE_MAX_MB, teardown (the action)
 USAGE
@@ -1157,6 +1215,15 @@ dispatch() {
         return 2
       fi
       cmd_test "${@:2}"
+      ;;
+    categories)
+      if [ "$#" -ne 2 ] || [ -z "$2" ]; then
+        usage >&2
+        return 2
+      fi
+      IMAGE="$2"
+      load_state || return 1
+      list_categories
       ;;
     teardown)
       [ "$#" -eq 1 ] || { usage >&2; return 2; }

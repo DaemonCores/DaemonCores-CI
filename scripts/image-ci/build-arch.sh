@@ -510,7 +510,15 @@ image_test() {
 serial_log_of() {
   local ref
   ref=$(ref_of "$1")
-  echo "${STATE_DIR}/image-test/logs/${ref//[^A-Za-z0-9._-]/_}.serial.log"
+  local base="${STATE_DIR}/image-test/logs/${ref//[^A-Za-z0-9._-]/_}"
+  # A tag booted once per category leaves one log per category: the most
+  # recently written one is the failing boot (the harness stops at none).
+  local f newest=""
+  for f in "${base}.serial.log" "${base}".*.serial.log; do
+    [[ -f "${f}" ]] || continue
+    if [[ -z "${newest}" || "${f}" -nt "${newest}" ]]; then newest=${f}; fi
+  done
+  echo "${newest:-${base}.serial.log}"
 }
 
 ensure_prepared() {
@@ -527,7 +535,8 @@ ensure_prepared() {
 }
 
 phase_test() {
-  local tag ref rc
+  local tag ref rc cat failed
+  local -a cats
   while IFS= read -r tag; do
     if in_list "${tag}" "${BOOT_TEST_SKIP_TAGS:-iso}"; then
       set_state "${tag}" ok "no boot test for this image"
@@ -539,15 +548,29 @@ phase_test() {
     fi
     ref=$(ref_of "${tag}")
     group "Boot test ${tag}"
-    rc=0
-    image_test env ARCH="${ARCH}" IMAGE="${ref}" \
-      bash "${IMAGE_TEST}" test "${ref}" "$(ram_budget "${tag}")" || rc=$?
-    if [[ "${rc}" -eq 0 ]]; then
+    # One boot per manifest category matching the tag (each may add kernel
+    # args at install). Zero or one category: a single boot, the category being
+    # left to the harness (manifests without categories, the -nosign twins).
+    mapfile -t cats < <(image_test env ARCH="${ARCH}" bash "${IMAGE_TEST}" categories "${ref}")
+    [[ "${#cats[@]}" -gt 1 ]] || cats=("")
+    failed=""
+    for cat in "${cats[@]}"; do
+      rc=0
+      # The harness stops its VM (and removes the PID file) when each run ends,
+      # so the boots never share a live QEMU PID lock.
+      image_test env ARCH="${ARCH}" IMAGE="${ref}" CATEGORY="${cat}" \
+        bash "${IMAGE_TEST}" test "${ref}" "$(ram_budget "${tag}")" || rc=$?
+      [[ "${rc}" -eq 0 ]] && continue
+      if [[ "${rc}" -eq 124 ]]; then
+        failed+="${failed:+; }${cat:+${cat}: }timeout after ${BOOT_TEST_TIMEOUT:-2700}"
+      else
+        failed+="${failed:+; }${cat:+${cat}: }exit ${rc}"
+      fi
+    done
+    if [[ -z "${failed}" ]]; then
       set_state "${tag}" ok
-    elif [[ "${rc}" -eq 124 ]]; then
-      set_state "${tag}" test-failed "timeout after ${BOOT_TEST_TIMEOUT:-2700}"
     else
-      set_state "${tag}" test-failed "exit ${rc}"
+      set_state "${tag}" test-failed "${failed}"
     fi
     endgroup
   done < <(tags_in_state linted)

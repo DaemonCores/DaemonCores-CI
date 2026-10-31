@@ -141,6 +141,14 @@ else
   CONSOLE_KARGS=(--karg console=tty0 --karg console=ttyS0,115200)
 fi
 
+# Extra kernel arguments of the manifest category (validated by the harness):
+# one --karg per space-separated INSTALL_KARGS entry.
+read -ra _extra_kargs <<<"${INSTALL_KARGS:-}"
+EXTRA_KARGS=()
+for _k in "${_extra_kargs[@]}"; do
+  EXTRA_KARGS+=(--karg "${_k}")
+done
+
 # Sandbox EFI NVRAM so bootupd does not write to or read from the host firmware vars.
 #
 # bootc install to-filesystem does two things that defeat a naive "mount empty tmpfs" trick:
@@ -162,7 +170,7 @@ touch /sys/firmware/efi/efivars/BootOrder-8be4df61-93ca-11d2-aa0d-00e098032b8c
 mount -o remount,ro /sys/firmware/efi/efivars
 
 bootc install to-filesystem --skip-fetch-check \
-  "${CONSOLE_KARGS[@]}" \
+  "${CONSOLE_KARGS[@]}" "${EXTRA_KARGS[@]}" \
   --root-ssh-authorized-keys "${KEY}" \
   "${T}"
 
