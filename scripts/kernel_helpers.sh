@@ -29,12 +29,20 @@
 # Mode pve only (the PVE packaging is a git packaging, not a kernel.org
 # tarball — kernel_pve_prepare ported verbatim from the VE lib):
 #   kernel_pve_prepare <data-dir> [builddir]          -> SRCDIR/KERNEL_VERSION
+# Module signing (kernel_signing.sh) and the out-of-tree module bootstrap
+# (kernel_prepare.sh) are sourced below:
+#   kernel_signing_setup / kernel_signing_verify / kernel_sign_efi <image>
+#   kernel_prepare                                    -> COMMON_DEB/BUILT_VER/KVER/SRCDIR
 #
 # Globals understood:
 #   CI_SCRIPTS   path to the shared DaemonCores-CI scripts (patch_guard.py)
 #   KERNEL_CDN   kernel.org archive root
 #   PATCH_GUARD_UPDATE  1 = rewrite the lock instead of enforcing it
 set -euo pipefail
+
+KERNEL_HELPERS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+. "${KERNEL_HELPERS_DIR}/kernel_signing.sh"
+. "${KERNEL_HELPERS_DIR}/kernel_prepare.sh"
 
 KERNEL_CDN="${KERNEL_CDN:-https://cdn.kernel.org/pub/linux/kernel}"
 
