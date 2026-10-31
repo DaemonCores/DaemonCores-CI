@@ -131,15 +131,10 @@ jobs:
             # workspace-relative for build-deb.
             echo "sources=$(yq "${sel} | .sources[]" "${MAN}" \
               | sed 's#^#workflows/bootc-debs-builder/#' | paste -sd' ' -)"
-            # A package compiling the kernel declares `ccache: true`: its object
-            # cache is restored/saved across runs (see "Enable ccache").
-            if [ "$(yq "${sel} | .ccache // false" "${MAN}")" = true ]; then
-              echo "ccache=yes"
-            else
-              echo "ccache=no"
-            fi
             # Only a package built with lib/kernel-signing.sh depends on the
-            # signing flag, so only its content hash may carry it.
+            # signing flag, so only its content hash may carry it. That
+            # library is also what marks a package compiling the kernel: it
+            # gets the compiler cache (see "Enable ccache").
             if yq "${sel} | .sources[]" "${MAN}" \
               | grep -qx 'lib/kernel-signing.sh'; then
               echo "signs=yes"
@@ -191,7 +186,7 @@ jobs:
       # independent of the versioned source directory (/tmp/linux-<version>).
       # The cache is not a build input: it never enters the content hash.
       - name: Enable ccache
-        if: steps.def.outputs.ccache == 'yes'
+        if: steps.def.outputs.signs == 'yes'
         shell: bash
         run: |
           set -euo pipefail
@@ -207,7 +202,7 @@ jobs:
           } >>"$GITHUB_ENV"
 
       - name: Restore ccache
-        if: steps.def.outputs.ccache == 'yes'
+        if: steps.def.outputs.signs == 'yes'
         uses: actions/cache@v4
         with:
           path: /ccache
@@ -314,7 +309,7 @@ jobs:
           extra-env: ${{ steps.hashenv.outputs.lines }}
 
       - name: ccache statistics
-        if: always() && steps.def.outputs.ccache == 'yes'
+        if: always() && steps.def.outputs.signs == 'yes'
         shell: bash
         run: ccache -s
 
