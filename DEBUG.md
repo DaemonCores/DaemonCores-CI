@@ -429,3 +429,24 @@ Conclusions (proved by these runs):
   so the amd64 SB e2e only needs the root podman step.
 - Next step: read run 41159448486 (arm64 AAVMF CODE/VARS lines, networking journal). No root popup issued while
   the owner is away.
+
+## Run 41159448486 (debian-bootc a015666, after the lib/patches refactor): results (MEASURED)
+
+- All deb jobs passed: the overlay-based rebuilds (bootupd, fisherman, bootc-installer) and the kernel helpers now
+  hosted here work in CI. The kernels were rebuilt once (HELPERS_VER 5 to 6 invalidated their hash).
+- 6 image jobs failed:
+  - `minimal-amd64` / `minimal-4k-arm64`: `RAM idle budget exceeded: 316 MiB / 203 MiB over the 15 MiB budget`
+    (RAM gate, other work). `minimal-arm64`: `VM did not become reachable within 300s`.
+  - `latest-amd64`: `PASS booted with UEFI Secure Boot enforced`; `signed kernel enforces module signatures`
+    fails with `sig_enforce` = `N`. Proven cause: the kernel job input is `signing_active: no` (linux-image job log,
+    line 46) because `Prepare signing secrets` logged `PAT_SECRETS is not set: missing signing secrets cannot be
+    generated (images are signed keyless, modules stay unsigned)`; `MODULE_SIGNING_KEY`/`MODULE_SIGNING_CERT` are empty.
+    The run started before the owner stored the PAT. `gh secret list` shows only APT_GPG_KEY, SB_SIGNING_CERT,
+    SB_SIGNING_KEY on debian-bootc (the org-level list is not readable with this token: HTTP 403).
+  - `latest-arm64` (secboot, 16k) and `minimal-arm64`: `AAVMF CODE: AAVMF_CODE.secboot.fd`, `AAVMF VARS: .../OVMF_VARS.fd`,
+    then `VM did not become reachable within 300s`. `latest-4k-arm64` (no SB): same timeout, `networking.service`
+    `Failed with result 'timeout'` at 192.5 s and `tee: /dev/ttyS0: Input/output error` again.
+- Owner statement (2026-10-31): arm64 is NOT missing IPv4 (supersedes the "no IPv4" reading above, which came from
+  one `ip addr` sample at 201 s). The cause of the 300 s timeout is open.
+- Run 41166078848 dispatched to see whether `PAT_SECRETS` is now seen (expect `Prepare signing secrets` to generate
+  MODULE_SIGNING_KEY/CERT and the kernel to be rebuilt signed).
