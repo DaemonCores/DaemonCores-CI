@@ -355,3 +355,30 @@ image-test action reads by default).
 - Single-sleep design of `wait_ssh` (`image-test.sh:368-374`): one attempt after the grace period, so a guest
   that is merely slow under TCG is reported like a hung one. Not changed: needs the local arm64 boot first.
 - Blocker unchanged: no `qemu-aarch64` binfmt handler on the host (needs one batched pkexec prompt).
+
+## arm64: local bench separates the kernel, the page size and Secure Boot from the CI hang (MEASURED)
+
+Method (no root, no arm64 execution): the published `daemoncores-kernel-7.2.14` (4k) and
+`daemoncores-kernel-7.2.14-16k` debs were extracted with `dpkg-deb -x` from the APT repository
+(`file`: "ARM64 boot executable Image, 4K pages" / "16K pages"), a static arm64 busybox from Debian
+trixie was packed into a 1 MB initramfs whose `/init` prints `INIT-REACHED <uname -r>`. Same QEMU
+flags as the CI (`-M virt -cpu max`, TCG, virtio disk and net).
+
+| Boot path | 4k kernel | 16k kernel |
+|---|---|---|
+| `-kernel` direct (DT) | init reached, `genpd` 1.77 s, `Freeing unused kernel memory` 2.11 s | init reached, 1.80 s / 2.14 s |
+| UEFI `AAVMF_CODE.no-secboot.fd` (ACPI) + GRUB | init reached, 1.74 s / 2.10 s | init reached, 1.77 s / 2.14 s |
+| UEFI `AAVMF_CODE.secboot.fd`, SB ENFORCED, shim -> Debian signed GRUB -> the REAL signed kernel, its signing cert (`CN=debian-bootc Secure Boot Signing Key`, extracted from the kernel with `pe-listsigs -x`) enrolled as MOK | init reached, 1.78 s / 2.16 s | init reached, 1.79 s / 2.15 s |
+
+Conclusions (proved by these runs):
+- The signed 16k kernel boots under Secure Boot enforced with the CI's firmware on the TCG machine. The
+  firmware, shim, signed GRUB, the kernel signature, the 16 KB page size and TCG are NOT the cause of the CI
+  silence after `PM: genpd: Disabling unused power domains` (the CI never reaches `Freeing unused kernel
+  memory`; every bench boot prints it 0.3 to 0.4 s after the `genpd` line).
+- What the bench does not have and the CI has: the installed disk (GPT, btrfs/ostree root), the 25 MB real
+  initramfs (`Freeing initrd memory: 25936K` is printed in CI), the real kernel command line. The CI log only
+  shows the last 200 serial lines, so the command line is not visible there.
+- Next proof needed: boot the real installed image. Blocked on the arm64 binfmt handler (root): the arm64
+  image is never pushed (push runs after the boot test), so its layers cannot be fetched either.
+- Proposed diagnostic for `image-test.sh` (diag only, no behaviour change): print the first 40 serial lines
+  (kernel command line) in `dump_serial`.
