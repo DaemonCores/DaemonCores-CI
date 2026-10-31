@@ -46,7 +46,7 @@ def _discover(tmp_path: Path, nosign: bool) -> dict[str, list[dict[str, Any]]]:
         nosign: Value of the ``nosign_images`` input.
 
     Returns:
-        The wave 1 and the manifest matrices.
+        The images of every architecture (flattened) and the manifest matrix.
     """
     generic = (
         'LABEL org.daemoncores.arm64-4k-image="true"\n'
@@ -71,8 +71,10 @@ def _discover(tmp_path: Path, nosign: bool) -> dict[str, list[dict[str, Any]]]:
     lines = dict(
         ln.split('=', 1) for ln in out.read_text().splitlines() if '=' in ln
     )
+    groups = json.loads(lines['arch_matrix'])
     return {
-        'wave1': json.loads(lines['matrix_wave1']),
+        'groups': groups,
+        'wave1': [e for g in groups for e in g['entries']],
         'manifest': json.loads(lines['manifest_matrix'])
     }
 
@@ -94,6 +96,26 @@ def test_there_is_one_image_per_tag_and_arch(tmp_path: Path) -> None:
 
 
 @needs_jq
+def test_images_are_grouped_by_architecture_in_build_order(
+        tmp_path: Path) -> None:
+    """One group per arch on its native runner, the -4k image after its parent.
+
+    Args:
+        tmp_path: Scratch repository root.
+    """
+    groups = _discover(tmp_path, nosign=False)['groups']
+    assert [(g['arch'], g['runner']) for g in groups] == [
+        ('amd64', 'ubuntu-latest'), ('arm64', 'ubuntu-24.04-arm')
+    ]
+    amd64, arm64 = (
+        [e['tag'] for e in g['entries']] for g in groups
+    )
+    assert amd64 == ['latest', 'board', 'iso']
+    assert arm64 == ['latest', 'latest-4k', 'board', 'iso']
+    assert all(e['arch'] == g['arch'] for g in groups for e in g['entries'])
+
+
+@needs_jq
 def test_twin_only_for_the_generic_images(tmp_path: Path) -> None:
     """The twin exists for amd64 and the 16 KB arm64 kernel, nothing else.
 
@@ -112,6 +134,8 @@ def test_twin_only_for_the_generic_images(tmp_path: Path) -> None:
         ('latest-4k', 'arm64'): '',
         ('board', 'amd64'): '',
         ('board', 'arm64'): '',
+        ('iso', 'amd64'): '',
+        ('iso', 'arm64'): '',
     }
     manifest = {e['tag']: e['arches'] for e in result['manifest']}
     assert manifest['latest-nosign'] == ['amd64', 'arm64']
