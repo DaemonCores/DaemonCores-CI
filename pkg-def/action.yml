@@ -1,0 +1,50 @@
+name: 'Read a package definition'
+description: >-
+  Read one package of the expanded manifest and write its upstream, deb-glob,
+  deps, sources, signs flag, env and build script as step outputs.
+
+inputs:
+  manifest:
+    description: 'Path of the expanded manifest.'
+    required: true
+  package:
+    description: 'Package name.'
+    required: true
+  arch:
+    description: 'Target architecture (amd64 or arm64).'
+    required: true
+
+outputs:
+  upstream:
+    description: 'apt package name to resolve for repacks; empty for custom packages.'
+    value: ${{ steps.def.outputs.upstream }}
+  deb_glob:
+    description: 'Glob matching the package debs.'
+    value: ${{ steps.def.outputs.deb_glob }}
+  deps:
+    description: 'Space-separated direct dependencies.'
+    value: ${{ steps.def.outputs.deps }}
+  sources:
+    description: 'Workspace-relative hashed sources.'
+    value: ${{ steps.def.outputs.sources }}
+  signs:
+    description: 'yes when the build calls kernel_signing_setup.'
+    value: ${{ steps.def.outputs.signs }}
+  env:
+    description: 'KEY=VALUE lines (secret values resolved).'
+    value: ${{ steps.def.outputs.env }}
+  build:
+    description: 'Build script.'
+    value: ${{ steps.def.outputs.build }}
+
+runs:
+  using: composite
+  steps:
+    - name: Read package definition
+      id: def
+      shell: bash
+      env:
+        MAN: ${{ inputs.manifest }}
+        PKG: ${{ inputs.package }}
+        ARCH: ${{ inputs.arch }}
+      run: bash "${GITHUB_ACTION_PATH}/pkg-def.sh"
