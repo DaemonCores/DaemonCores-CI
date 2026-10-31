@@ -212,6 +212,32 @@ Pushed: image-test split, `build-arch.sh`, `plan.py` / `build-all.sh` (one build
 - The Mesa variants (`gpu-userspace-*`) run in parallel in wave 0 and take 11 to 15 min each (gaming-generic arm64 12 min 47 s, ia-generic arm64 8 min 19 s, gaming-x64v3 15 min 22 s, ia-x64v1 13 min 48 s, ia-x64v2 15 min 9 s, ia-x64v3 11 min 35 s). Wall clock of wave 0 is bounded by the slowest Mesa variant or `linux-image-16k`, not by the sum.
 - Billing (sum of jobs) is unchanged by parallelism: the Mesa variants alone are about 70 job-minutes. Reducing that needs a shared ccache across the profile x level variants (to be measured) or fewer variants, not more chaining.
 
+## Run 41243363879: conditional rebuild measured with a warm cache (MEASURED, 2026-10-31)
+- Deb phase wall clock: setup 21:23:43Z to end of `Publish .deb packages` 21:33:23Z = 9 min 40 s. Wave 0 (all reused except the corrupt `bootc-installer`) took 21:23:52Z to 21:25:46Z: every reused package finished in 30 to 90 s (job start + container + hash decision), the Mesa variants included (28 to 52 s, against 11 to 15 min when rebuilt in run 41233619804).
+- Rebuilt in wave 1: `bootc-installer` (the unpack gate discarded the corrupt cached copy), 1 min 10 s (arm64) and 2 min 5 s (amd64). `linux-modules-nvidia` amd64 failed after 2 min 41 s on the patch-reference guard (cause PROVEN: lock hashes of six kernel files stale for the resolved kernel 7.2.14; fixed by `b471d05`, workflow repaired by `4be7dbf`).
+- Image jobs started 21:35Z and ended 21:47Z (about 12 min), both failing for reasons unrelated to the cache: amd64 `nvidia` image (`linux-modules-nvidia` missing, consequence of the wave 1 failure), arm64 RAM idle budget (other party's work).
+- Reading: with the cache intact the deb phase is already about 10 min including one real rebuild; a run with no change at all should pay wave 0 (about 2 min) plus the hash decisions of the later waves. The 15 min target for a no-change run is therefore within reach as soon as the image jobs are skipped (L14) or green; the 45 min target for a full rebuild depends on L1/L5/`chain:`.
+
+## Consolidated lever list (state at 2026-10-31, single tracking list)
+| Id | Lever | State | Evidence / next step |
+|---|---|---|---|
+| L19 | conditional rebuild cache carry-over + unpack gate | PROVEN in run 41243363879 (reuse in 30-90 s, corrupt deb discarded) | confirm a no-change run prints `unchanged; reused` for every package |
+| L20 | patch reference guard refreshed automatically | workflow repaired, validated locally and in run 41246396958 (branch pushed); PR creation refused by the repository setting | owner decision: enable "Allow GitHub Actions to create and approve pull requests" or push directly |
+| L14 | skip unchanged images | pushed, awaiting a green run | needed for the 15 min no-change target |
+| L1 | remove the `-nosign` twins | designed, step 1 (harness `kargs`) not merged | risks listed above; owner decision on migration |
+| L5 | no per-layer `--cache-to` in a chain | not done | `build-arch.sh:199` |
+| L6 | smoke test for package-only variants | not done | |
+| L8 | per-package dependencies | not done | waves kept on the owner's order |
+| L12 | installer steps, remove `firstboot-user-setup` | in progress | |
+| `chain:` | chain packages sharing a cache (kernel + modules) | not started | declared in `packages.yml` |
+| timeout | boot-test timeout calibrated on the last measured boot | not done | `DEBUG.md:565` |
+| compression | xz/zstd for artifacts and layers | not done | to measure before choosing |
+| build-once | `Architecture: all` packages built once, not per arch | not done | cause of the `bootc-installer` double artifact (DEBUG.md Tick 9) |
+| partial publish | publish the images that succeeded even if another fails | not done | |
+| MOK | end-to-end MOK enrolment in the boot test | not done | Secure Boot stays enforced |
+| tests | 100 % YAML tests with an `arch:` field | not done | |
+| bootloaders | two bootloaders (UEFI/U-Boot) | not done | criterion is U-Boot vs UEFI, not page size |
+
 ## L1 design: remove the `-nosign` twins (DESIGNED, not yet coded)
 - One kernel per (arch, page size), built with `MODULE_SIG_FORCE=n` (`KERNEL_SIGNING_ENFORCE: "no"` set once in the `linux-image` package `env:`; `scripts/kernel_signing.sh` is untouched). Enforcement is the install-time karg `module.sig_enforce=1`, added by the installer (switch on by default, `default-gpu-security.blp:74`), never shipped in the image (bootc: removing a shipped karg is undefined behaviour).
 - CI: each category of `tests.yml` gets a `kargs:` list; the harness installs and boots the same tag once per matching category. The `signed` category carries `module.sig_enforce=1`, the `unsigned-kernel` category carries none. The sig_enforce Y/N assertions (`tests.yml:205-325`) stay byte-identical.
