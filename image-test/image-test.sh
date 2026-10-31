@@ -732,9 +732,19 @@ wait_boot() {
 # Kill the QEMU VM on exit.
 #######################################
 cleanup() {
-  if [ -f "${WORK}/qemu.pid" ]; then
-    sudo kill "$(cat "${WORK}/qemu.pid")" 2>/dev/null || true
-  fi
+  # QEMU runs under sudo, so its pidfile is root-owned: read it with sudo too,
+  # otherwise the VM is never killed and keeps the pidfile lock for the next
+  # image-test invocation of the same job.
+  local pid
+  pid=$(sudo cat "${WORK}/qemu.pid" 2>/dev/null) || return 0
+  [ -n "${pid}" ] || return 0
+  sudo kill "${pid}" 2>/dev/null || return 0
+  local i
+  for i in $(seq 1 30); do
+    sudo kill -0 "${pid}" 2>/dev/null || return 0
+    sleep 1
+  done
+  sudo kill -KILL "${pid}" 2>/dev/null || true
 }
 
 #######################################

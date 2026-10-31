@@ -470,3 +470,12 @@ Conclusions (proved by these runs):
   Neither change relaxes an assertion: the enforcement and load checks are unchanged.
 - arm64 (`latest-arm64` secboot 16k, `latest-4k-arm64`, `minimal-arm64`): still `VM did not become reachable within
   300s`; cause open (owner: not an IPv4 problem). `minimal-*` amd64/4k: RAM gate.
+
+## 2026-10-31 run 41173677216 (6b7f11c): latest-amd64 second image-test invocation
+
+- Symptom: first image-test invocation (signed image) logs all PASS, then `cat: /home/runner/work/_temp/qemu.pid: Permission denied`;
+  the second invocation (`latest-nosign_amd64`) dies with `qemu-system-x86_64: cannot create PID file: Cannot lock pid file: Resource temporarily unavailable`
+  (job log, error exit code 1). The two logic failures of the previous run (unsigned-kernel detection, module with dependencies) are gone: `PASS signature enforcement follows the installed kernel`, `PASS a signed module loads on either kernel`.
+- Cause (PROVEN from the log + `image-test.sh:313,735`): QEMU is started with `sudo ... -pidfile ${WORK}/qemu.pid`, so the pidfile is root-owned;
+  `cleanup()` ran `sudo kill "$(cat pidfile)"` with an unprivileged `cat`, which failed, `|| true` swallowed it, the VM survived and held the pidfile lock.
+- Fix: `cleanup()` reads the pidfile with sudo, kills, and waits for the process to exit. To validate in the next CI run (amd64 job: both invocations must complete).
