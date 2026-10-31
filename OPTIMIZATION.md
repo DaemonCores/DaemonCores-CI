@@ -199,3 +199,9 @@ Pushed: image-test split, `build-arch.sh`, `plan.py` / `build-all.sh` (one build
 | L19 cache carry-over | pushed 80ebca9, awaiting evidence | ESTIMATED deb phase 7 min to about 2 min |
 | gpu-userspace per profile and level | pushed, build-dep failing in CI | not measured |
 | Separate NVIDIA image | not started (agent stopped, no work left) | shrinks the common image, not measured |
+
+## Run 41229165698: per-package timings of the single-job layout (MEASURED, run cancelled at 19:13Z)
+- amd64 job (start 18:25Z): `linux-image-nosign` 3 min 51 s (18:25:38 to 18:29:29), `bootupd` 1 min 11 s, reused packages about 1 s each, **`gpu-userspace-gaming-x64v1` 18 min 39 s** (18:30:43 to 18:49:21), **`gpu-userspace-gaming-x64v2` 18 min 19 s** (to 19:07:40). Six Mesa variants chained in one job cost about 110 min of wall clock; the job was cancelled at 48 min with four variants and `bootc` (about 10 min in the previous run) still to build.
+- arm64 job: `linux-image-16k` rebuilt in **39 min** (18:25:31 to 19:04:39) before anything else could start.
+- Conclusion: one sequential job per arch serialises the slow independent builds (Mesa variants, arm64 kernel). Wall clock went from about 16 min (previous amd64 job, no Mesa) to more than 48 min. The saving of the single-job layout is the shared setup (one pull, one apt install, one cache download), which only pays when it does not serialise independent heavy builds.
+- Direction: chain only packages that share a cache (the kernel and its modules share the ccache and the kernel source), run independent heavy builds in parallel jobs, group the small packages in one job. Chains declared in `packages.yml` so the grouping is data, not code.
