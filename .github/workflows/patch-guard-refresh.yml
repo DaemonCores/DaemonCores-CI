@@ -16,10 +16,14 @@ on:
         description: 'Directory of the kernel manifest and lock in the caller repo'
         type: string
         default: workflows/bootc-debs-builder/kernel
-      lib-dir:
-        description: 'Directory holding kernel-source.sh and kernel-patches.sh'
+      manifest:
+        description: 'Package manifest that tracks the kernel (track: kernel-org)'
         type: string
-        default: workflows/bootc-debs-builder/lib
+        default: workflows/bootc-debs-builder/packages.yml
+      package:
+        description: 'Package of that manifest whose tracked kernel version is used'
+        type: string
+        default: linux-image
 
 permissions:
   contents: write
@@ -41,25 +45,37 @@ jobs:
       - name: Recompute the references on the latest stable kernel
         env:
           KDIR: ${{ inputs.kernel-dir }}
-          LDIR: ${{ inputs.lib-dir }}
+          MAN: ${{ inputs.manifest }}
+          PKG: ${{ inputs.package }}
         run: |
           set -euo pipefail
           export CI_SCRIPTS="${PWD}/.ci-tooling/scripts"
+          # kernel_fetch_source changes directory: every path must be absolute.
+          KDIR="${PWD}/${KDIR}"
+          MAN="${PWD}/${MAN}"
           export PATCH_GUARD_UPDATE=1
-          version=$(curl -fsSL https://www.kernel.org/releases.json |
-            jq -r 'first(.releases[] | select(.moniker == "stable")) | .version')
-          . "${LDIR}/kernel-source.sh"
-          . "${LDIR}/kernel-patches.sh"
-          rm -f "${KDIR}/patches.lock.json"
+          # Same resolution as the kernel build (upstream-track): the newest
+          # release whose series every patch source already provides, never the
+          # bare latest stable (a patch source may lag behind it).
+          export MAN PKG STRICT=true GITHUB_OUTPUT="${RUNNER_TEMP}/track.out"
+          : >"${GITHUB_OUTPUT}"
+          bash .ci-tooling/upstream-track/track.sh resolve
+          version=$(sed -n 's/^KERNEL_VER=//p' "${GITHUB_OUTPUT}" | head -n1)
+          [[ -n "${version}" ]] || { echo "kernel version not resolved" >&2; exit 1; }
+          . "${CI_SCRIPTS}/kernel_helpers.sh"
+          # Start from an empty lock: the guard only runs (and with
+          # PATCH_GUARD_UPDATE=1 rewrites the lock) when a lock file exists.
+          echo '{}' >"${KDIR}/patches.lock.json"
           for arch in amd64 arm64; do
             for class in kernel module; do
               kernel_fetch_source "${version}"
-              kernel_apply_patches "${KDIR}/patches.yml" "${class}" "${arch}" \
-                "${version}" "${SRCDIR}"
+              kernel_apply_patches "${KDIR}/patches.yml" "${arch}" \
+                "${version}" "${SRCDIR}" "${class}"
               rm -rf "${SRCDIR}"
             done
           done
-          [ -f "${KDIR}/patches.lock.json" ] || echo '{}' >"${KDIR}/patches.lock.json"
+          [ "$(jq length "${KDIR}/patches.lock.json")" -gt 0 ] \
+            || { echo "patch lock came out empty" >&2; exit 1; }
       - name: Propose the new references
         uses: peter-evans/create-pull-request@v7
         with:
