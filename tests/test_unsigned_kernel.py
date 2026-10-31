@@ -86,9 +86,8 @@ def test_there_is_one_image_per_tag_and_arch(tmp_path: Path) -> None:
     """
     result = _discover(tmp_path, nosign=False)
     keys = {key for entry in result['wave1'] for key in entry}
-    # `nvidia` / `gaming` flag the ia/gaming usage twins per entry.
-    assert keys == {'file', 'tag', 'arch', 'kernel_suffix', 'twin_suffix',
-                    'nvidia', 'gaming'}
+    # No GPU dimension: one image carries every vendor.
+    assert keys == {'file', 'tag', 'arch', 'kernel_suffix', 'twin_suffix'}
     assert all('lock' not in entry for entry in result['manifest'])
     pairs = [(e['tag'], e['arch']) for e in result['wave1']]
     assert len(pairs) == len(set(pairs))
