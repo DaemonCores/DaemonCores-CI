@@ -59,6 +59,7 @@ so no module signing key); with the twins active the cumulated time is about 290
 | L9 | GPU: ONE image per generic amd64 variant carries the drivers of EVERY vendor (AMD, Intel, nouveau in-tree `=m`, NVIDIA open modules as the plan deb `linux-modules-nvidia`, built against the same kernel). `-gaming`, `-ia` and any `-nvidia` twin disappear. See `GPU-VARIANTS.md` | removes the GPU twin images and the vendor hardcode (`bootc-build.yml:460`, `Containerfile:262-264`) | ORDERED: to develop |
 | L10 | Loading is an install-time variable of the bootc-installer (modules-load.d / blacklist, user-space stack activation), frozen after install; detection by `lspci`. Applies to every generic amd64 variant, NVIDIA included. Open points: image size cost (UNMEASURED), EULA scope of the NVIDIA user-space when it ships in the image (UNVERIFIED) | same | ORDERED: to develop |
 | L11 | A command to change the GPU profile after install (working name `dc-gpu set gaming\|ia\|auto`, plus `dc-gpu status`): it only rewrites `/etc` configuration of the single all-vendor image (modules-load.d, blacklist, user-space stack activation), which bootc preserves across upgrades. Applied at next boot by default; applied live only where it is safe: loading a module, enabling a compute stack, a GPU no display session uses. Switching the driver of the GPU that drives the running display (for example nouveau to NVIDIA open) needs the display session stopped, so it is reboot-only. The existing LXC glue `dc-gpu-lxc` (VE) is separate | removes the "frozen after install" rule of the current wiki (`GPU-Support.md`) | ORDERED: to design and develop after L9/L10; behaviour of live unbind UNVERIFIED |
+| L12 | ONE custom step set in the bootc-installer carrying ALL install-time configuration, so the first-boot setup service (`firstboot-user-setup`, `debian-bootc/workflows/bootc-debs-builder/firstbootpostinstall/usr/local/bin/firstboot-user-setup`) is removed (owner: the goal of bootc-installer is to drop the setup service). Axes: module-signature enforcement (L1), GPU profile (L9/L10), and every step of the service, transposed (table below); further axes to propose: bootloader/embedded profile (U-Boot vs UEFI), MOK enrolment (already patched in `bootc-installer-mok.patch`), auto-update (already `bootc-installer-autoupdate.patch`), SSH policy. Pattern to follow: one patch per step under `workflows/bootc-debs-builder/patches/` (template `.blp` + `defaults/<step>.py` + `builder.py` registration + `processor.py` recipe field) | removes a boot-time interactive service, the `getty@tty1` drop-in and the done-flag seeding in the boot test (`.ci/image-test/install-fs.sh:222-229`) | ORDERED: to design and develop |
 
 One-kernel scope (answer given to the owner): signed vs `-nosign` can share one kernel (L1). amd64 vs arm64 cannot (instruction set); 4K vs 16K pages on arm64 cannot (compile-time `CONFIG_ARM64_4K_PAGES`/16K); a per-device trimmed config is a different kernel, so the device `linux-modules-*` packages stay. Minimum: one kernel per (arch, page size).
 
@@ -103,3 +104,24 @@ modules configs (the CI step `ccache statistics` prints it for each job).
 - Run 41155245822 (`cb39aff`): wall clock 15 min 46 s (01:25:02 to 01:40:48), every deb reused (kernel jobs about 1 min,
   `linux-image (amd64) unchanged; reused cached deb(s)`), the 6 image jobs still fail. This is the first measured
   figure for the 15 min target on a push that rebuilds no deb.
+
+## L12: setup service steps to transpose (MEASURED, source read)
+
+Source: `firstboot-user-setup` (282 lines). Installer steps today (`src/buildisopreinstall/etc/bootc-installer/recipe.json`): welcome, disk, encryption, autoupdate, user. Whether the upstream `user` step already covers some fields below is UNVERIFIED (upstream `user.py` is fetched at package build time, not read yet).
+
+| Service step | Mechanism in the service | Installer transposition |
+|---|---|---|
+| System language | `dpkg-reconfigure locales` | locale step, written to the target `/etc/locale.gen` + `/etc/default/locale` |
+| Keyboard layout | `dpkg-reconfigure keyboard-configuration`, `setupcon` | keyboard step, written to `/etc/default/keyboard` |
+| Hostname (RFC 1123 check, max 63) | `hostnamectl set-hostname` | hostname step, same validation, written to `/etc/hostname` |
+| Username (`^[a-z_][a-z0-9_-]{0,31}$`, must not exist) | `useradd --create-home --shell /bin/bash` | user step (same validation) |
+| Full name (optional) | `useradd --comment` | user step field |
+| User password (min 8, confirmed) | `chpasswd` | user step |
+| Root password (required, min 8, `chage -d` today) | `chpasswd`, `chage` | root-password step |
+| Sudo for the user | `usermod -aG sudo` | user step switch |
+| Standard groups `adm systemd-journal cdrom audio video plugdev netdev` (those that exist) | `usermod -aG` | applied by the installer for the created user |
+| SSH root login | `/etc/ssh/sshd_config.d/01-permitrootlogin.conf` | SSH policy step (default no) |
+| Skip if a human account exists (uid 1000-65533, login shell, home under `/home`) | `_existing_user` | not needed: the installer creates the user once |
+| Done flag `/var/lib/firstboot-user-setup.done` | touch | disappears with the service |
+
+Once every row is covered and tested, `firstboot-user-setup` leaves `Containerfile:122`, `packages.yml:28-55` and its boot-test seeding. The `packages.yml` line shift must respect the `docs-check` citations.
