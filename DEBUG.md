@@ -520,3 +520,9 @@ Conclusions (proved by these runs):
 - latest (16k, signed, SB on): still unreachable at 300 s, serial ends at 4.65 s of kernel time (quiet systemd, no console output after) - consistent with "still booting", not with a firmware rejection (no Security Violation, `integrity: secureboot mode enabled`, db certs loaded).
 - Separate defect: test `u-boot-tools present` failed on 4k because no Containerfile sets the embedded profile (generic = GRUB, `libubootenv-tool` only). The test could never pass on a generic arm64 build; changed (debian-bootc cb7c122) to accept the stack of the profile.
 - Next: TCG boot-timeout multiplier 5 -> 12 and print the measured time-to-SSH, to learn the real boot time of 16k instead of guessing.
+
+## Run 41178510567 (TCG ceiling 720 s) - results
+
+- latest-4k: `SSH reachable after 298s` (MEASURED). My new test failed: `grub-efi-arm64-signed` is `hi` (held on purpose via APT_HOLD_PKG), not `ii`; the check now accepts `^[ih]i`.
+- latest-arm64 / minimal-arm64 (16k, SB enforced): still `VM did not become reachable within 720s`, so slowness is NOT the cause (720 s vs ~300 s for 4k). QEMU monitor: VM running, CPU executing in EL1h with DAIF masked (PSTATE=...3c5), PC alternating, X01=0x96000005 (an ESR value, data abort at EL1). Serial stops at `PM: genpd: Disabling unused power domains` (kernel 4.65 s), `Freeing unused kernel memory` never printed. The local bench with a tiny initramfs prints it 0.3 s after genpd, so the stall depends on what the real image adds (25 MB initramfs, cmdline, disk).
+- Next: dump the full register file and the code around PC from the monitor (image-test `guest_state`), match the instruction bytes against the 16k kernel Image to find the KASLR slide, resolve LR/PC with System.map.
