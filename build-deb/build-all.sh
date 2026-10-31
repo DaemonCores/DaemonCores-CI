@@ -26,7 +26,7 @@ set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CI_ROOT="$(cd "${HERE}/.." && pwd)"
 # Overridable so the unit tests can run in a sandbox.
-DEBS_DIR="${DEBS_DIR:-/debs}"
+export DEBS_DIR="${DEBS_DIR:-/debs}"
 BUILD_DIR="${BUILD_DIR:-/build}"
 
 #######################################
