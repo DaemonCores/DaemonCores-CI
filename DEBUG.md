@@ -544,3 +544,9 @@ Conclusions (proved by these runs):
 - Registers this time: PC=ffffe2aab1e10a00 on all 3 samples, SP=X29=ffffc0008002be00, X30=ffffe2aab21292e8, PSTATE=004003c5 (EL1h, DAIF masked). A 2 MB-aligned base fits PC - 0x10a00 = ffffe2aab1e00000; with that base PC = `vectors+0x200` and LR = `memblock_find_in_range_node+0x1c` in the System.map of the 16k kernel found in the scratchpad (same version 7.2.14-16k; the CI build itself is not verified identical).
 - Inference (NOT proven): `vectors+0x200` is the EL1h synchronous entry; SP=ffffc0008002be00 is the link-time (unrelocated) address of init_stack, so the vector entry faults on its own stack push and loops. This would be an exception taken with an SP that was not relocated.
 - The memory dump is still empty in CI. The monitor reply is now printed unfiltered (plus gva2gpa for PC and SP) to see whether the address is unreadable.
+
+## Run 41185182187 - 16k third sampling and a 4k reboot timeout
+
+- This CI QEMU monitor answers `unknown register` for `$pc`/`$sp` (the local QEMU accepts them), which is why every memory dump was empty. The dump now takes the numbers from `info registers`; the same extraction was run locally against a booting 16k kernel (`gpa:` and `ffff…: 0x…` lines printed).
+- 16k registers this time: PC=ffffe2fb8ac10a00 (again the EL1h synchronous vector entry, vectors+0x200 if the base is 2 MB aligned), SP=ffe00001fd30ff10 (not a linear-map address), X20=X01=0x96000005 (ESR: data abort, translation fault level 1), X30=0b9fe2fb8ac112b0 (high bits set: a pointer-authentication signature). So SP differs between samples (earlier ffffc0008002be00), the stall is an exception loop on an unusable stack.
+- 4k: `SSH reachable after 340s`, then `VM did not come back after reboot within 300s`: reboot_timeout was still multiplied by 5. Both timeouts now use TCG_TIMEOUT_SCALE (default 12, overridable).
