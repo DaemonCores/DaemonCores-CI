@@ -35,3 +35,14 @@ Gap to close for Intel compute: the compute-runtime has to come from a plan deb 
 3. Open: image size cost (UNMEASURED); EULA scope of the NVIDIA user-space when it ships inside the image
    (UNVERIFIED, owner decision).
 4. Per-variant build configuration and optimisation: list to be provided by the owner.
+5. The NVIDIA variant follows the same operation as `-gaming` and `-ia`: one all-vendor image, profile chosen at install
+   (owner: "la variante nvidia avec le même fonctionnement"). NVIDIA does not exclude the other drivers: multi-GPU
+   machines (AMD/Intel iGPU plus NVIDIA dGPU, owner's own machine) load several drivers at once. Consequences for the
+   design: the profile is a SET of vendors plus a usage (`gaming`, `ia`, `nvidia`), never a single exclusive choice;
+   no blacklist of a vendor's driver unless that vendor's hardware is absent or the user removed it; user-space stacks
+   (Vulkan/OpenCL ICDs, CUDA, ROCm, level-zero) are installed side by side and selected per GPU or per application
+   (ICD loader, `DRI_PRIME`, `CUDA_VISIBLE_DEVICES`); `dc-gpu status` lists each detected GPU with its driver. Behaviour of
+   the NVIDIA proprietary and nouveau modules on the same host is UNVERIFIED: nouveau must not bind the NVIDIA GPU when
+   the NVIDIA module is chosen for it, while the other GPUs keep their in-tree driver (per-device binding, not a global
+   `blacklist`), to be tested on real multi-GPU hardware.
+
