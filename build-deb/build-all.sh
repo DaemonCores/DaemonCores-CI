@@ -20,7 +20,7 @@
 #   SIGNING_ACTIVE  value of MODULE_SIGNING_ACTIVE for signing packages
 #   GITHUB_OUTPUT   receives any_built=true|false
 #   GITHUB_ENV is not touched; compiler cache variables are exported per package.
-#   SECRETVAL_<NAME>, GITHUB_TOKEN, GITHUB_REPOSITORY as in build-one-deb.yml.
+#   SECRETVAL_<NAME>, GITHUB_TOKEN, GITHUB_REPOSITORY as in the former per-package job.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

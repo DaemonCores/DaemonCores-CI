@@ -193,12 +193,13 @@ def test_one_apt_suite_and_one_deb_cache() -> None:
     script = (ROOT / 'build-deb' / 'build-deb.sh').read_text()
     assert 'trixie-nosign' not in end
     assert 'debs-cache-nosign' not in end + script
-    assert 'variant_suffix' not in (WORKFLOWS / 'build-one-deb.yml').read_text()
+    assert 'variant_suffix' not in (
+        WORKFLOWS / 'bootc-debs-builder.yml').read_text()
 
 
 def test_signing_flag_only_hashes_the_packages_that_sign() -> None:
     """MODULE_SIGNING_ACTIVE reaches the hash of the signing packages only."""
-    text = (WORKFLOWS / 'build-one-deb.yml').read_text()
-    assert "steps.def.outputs.signs == 'yes'" in text
+    text = (ROOT / 'build-deb' / 'build-all.sh').read_text()
+    assert '[[ "${signs}" != yes ]] || extra+="MODULE_SIGNING_ACTIVE=' in text
     definition = (ROOT / 'pkg-def' / 'pkg-def.sh').read_text()
     assert "grep -q 'kernel_signing_setup'" in definition
