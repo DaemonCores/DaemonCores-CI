@@ -125,3 +125,31 @@ Source: `firstboot-user-setup` (282 lines). Installer steps today (`src/buildiso
 | Done flag `/var/lib/firstboot-user-setup.done` | touch | disappears with the service |
 
 Once every row is covered and tested, `firstboot-user-setup` leaves `Containerfile:122`, `packages.yml:28-55` and its boot-test seeding. The `packages.yml` line shift must respect the `docs-check` citations.
+
+## L4 + L8 design: plan job and per-package waiting (DESIGNED, not yet coded)
+
+Source: architect-opus report, files read in `build-deb/build-deb.sh`, `build-one-deb.yml`,
+`bootc-debs-builder.yml`, `bootc-debs-end/action.yml`. Status of each step is tracked here.
+
+- **Plan job, not a `setup` step.** `upstream_id` resolves through apt of the build env for the native
+  arch, and `setup` runs on `ubuntu-latest` amd64. A new `plan` job (`needs: setup`) runs on the arch
+  runner inside `container: env_image`: one container start (about 25 s) instead of 22.
+- **No duplicated logic.** Move into shared scripts used by both the plan and the build path:
+  `build-deb/content-hash.sh` (hash functions, `write_meta`, `restore_cached`),
+  `scripts/pkg-def.sh` (package definition read), `scripts/dep-debs.sh` (dependency closure and
+  `DEPS_HASH`). The hash formula does not change, so the published cache stays valid.
+- **Dependency propagation.** A package with any transitive dependency in the build set is built
+  without hashing; otherwise `DEPS_HASH` is computed from the restored cached dependency debs.
+- **Skipped packages** are restored into `/debs` with `.meta`, uploaded as ONE artifact
+  `debs-_reused-<arch>` (underscore cannot occur in a Debian package name); publish is unchanged.
+- **Per-package waiting (L8).** One dynamic `build` matrix (`{package, wait_for}` list from the plan)
+  replaces `wave0..wave3`; `build-one-deb.yml` gets a `wait_for` input, a polling first step on
+  `status-<dep>-<arch>` artifacts and an `always()` last step uploading its own status.
+- **Gates.** `publish` requires `plan.result == success` and `plan_ok`, otherwise an APT repo without
+  the reused packages would be deployed.
+- **Open measurements.** Time of the single job moving all cached debs (kernels included): UNMEASURED,
+  decides the 15 min target. Artifact API budget for polling: ASSUMPTION (1000 req/h), not verified.
+
+Steps: 1 `content-hash.sh` (hash parity test old vs new against published `hashes.json`),
+2 `pkg-def.sh` + `dep-debs.sh` (diff of `GITHUB_OUTPUT` old vs new), 3 `deb-plan/` action,
+4 `wait_for` in `build-one-deb.yml`, 5 `bootc-debs-builder.yml`, 6 `full-pipeline.yml` gates, 7 docs.
