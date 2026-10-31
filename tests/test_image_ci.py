@@ -662,7 +662,8 @@ def test_boot_tests_use_one_prepare_and_one_child_process_per_image(
     assert done.returncode == 0, done.stderr
     calls = sb.calls('image-test')
     assert [c.split()[1] for c in calls] == [
-        'prepare', 'test', 'test', 'test', 'teardown'
+        'prepare', 'categories', 'test', 'categories', 'test', 'categories',
+        'test', 'teardown'
     ]
     tests = [c.split()[1:4] for c in calls if c.startswith('image-test test')]
     assert tests == [
