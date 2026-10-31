@@ -362,42 +362,50 @@ boot_vm() {
 # Poll SSH until the VM answers or the timeout elapses.
 # Arguments:
 #   $1 - timeout in seconds
+#   $2 - optional boot id of the previous boot: a guest still reporting it is
+#        the one being rebooted, not the new boot, and does not count
 # Returns:
 #   0 when reachable, 1 on timeout.
 #######################################
 wait_ssh() {
-  local timeout="$1" resets
-  # timeout is a boot grace period — sleep through it so the VM can come up,
-  # then make a single SSH attempt.  If SSH is not answering after a healthy
-  # boot it will never answer; retrying wastes CI minutes.
-  echo "  … boot grace period: sleeping ${timeout}s"
-  sleep "${timeout}"
-  # Fail fast on definitive firmware failures before the SSH attempt.
-  if grep -q 'Security Violation' "${SERIAL}" 2>/dev/null; then
-    echo "::error::Secure Boot rejected a boot binary (Security Violation)"
-    return 3
-  fi
-  resets=$(grep -c 'Reset System' "${SERIAL}" 2>/dev/null || echo 0)
-  if [ "${resets}" -ge 3 ]; then
-    echo "::error::guest firmware reboot loop (${resets}x Reset System)"
-    return 2
-  fi
-  echo "  … single SSH attempt after grace period:"
+  local timeout="$1" old_boot="${2:-}" resets deadline _ssh_log boot
+  # timeout is a ceiling, not a fixed sleep: probe until SSH answers. A single
+  # probe after a fixed grace period failed on emulated (TCG) guests that were
+  # still busy finishing boot: sshd listened, but the 3 s banner exchange of
+  # SSH_OPTS expired ("Connection timed out during banner exchange"). Each
+  # probe gets a longer ConnectTimeout (first -o wins over SSH_OPTS).
+  echo "  … waiting up to ${timeout}s for SSH"
+  deadline=$((SECONDS + timeout))
+  _ssh_log=$(mktemp)
+  while [ "${SECONDS}" -lt "${deadline}" ]; do
+    # Fail fast on definitive firmware failures.
+    if grep -q 'Security Violation' "${SERIAL}" 2>/dev/null; then
+      echo "::error::Secure Boot rejected a boot binary (Security Violation)"
+      rm -f "${_ssh_log}"
+      return 3
+    fi
+    resets=$(grep -c 'Reset System' "${SERIAL}" 2>/dev/null || echo 0)
+    if [ "${resets}" -ge 3 ]; then
+      echo "::error::guest firmware reboot loop (${resets}x Reset System)"
+      rm -f "${_ssh_log}"
+      return 2
+    fi
+    if boot=$(ssh -o ConnectTimeout=30 "${SSH_OPTS[@]}" -v root@localhost \
+      cat /proc/sys/kernel/random/boot_id 2>"${_ssh_log}") \
+      && [ -n "${boot}" ] && [ "${boot}" != "${old_boot}" ]; then
+      rm -f "${_ssh_log}"
+      return 0
+    fi
+    sleep 5
+  done
+  echo "  … no SSH answer within ${timeout}s; guest console tail:"
   sudo tail -n 100 "${SERIAL}" 2>/dev/null | sed 's/^/    | /' || true
-  # TCP probe first — distinguishes "port closed" from "auth failure".
   if nc -z -w 3 localhost "${SSH_PORT}" 2>/dev/null; then
     echo "  … port ${SSH_PORT} open"
   else
     echo "  … port ${SSH_PORT} CLOSED (no TCP connection)"
-    return 1
   fi
-  local _ssh_log
-  _ssh_log=$(mktemp)
-  if ssh "${SSH_OPTS[@]}" -v root@localhost true >"${_ssh_log}" 2>&1; then
-    rm -f "${_ssh_log}"
-    return 0
-  fi
-  echo "  … SSH failed — verbose output:"
+  echo "  … last SSH attempt — verbose output:"
   sed 's/^/    | /' "${_ssh_log}" || true
   rm -f "${_ssh_log}"
   return 1
@@ -793,6 +801,9 @@ main() {
   if [ "${reboot_n:-0}" -gt 0 ]; then
     echo "--- triggering VM reboot for post-reboot test phase ---"
     # reboot exits non-zero (connection reset) — that is expected.
+    # The boot id tells the new boot apart from the guest still shutting down.
+    local old_boot
+    old_boot=$(ssh "${SSH_OPTS[@]}" root@localhost cat /proc/sys/kernel/random/boot_id)
     ssh "${SSH_OPTS[@]}" root@localhost "reboot" 2>/dev/null || true
     # Brief pause so the VM starts going down before we poll SSH.
     sleep 5
@@ -801,7 +812,7 @@ main() {
     if [ "${KVM}" != "1" ]; then
       reboot_timeout=$((reboot_timeout * 5))
     fi
-    if ! wait_ssh "${reboot_timeout}"; then
+    if ! wait_ssh "${reboot_timeout}" "${old_boot}"; then
       echo "::error::VM did not come back after reboot within ${reboot_timeout}s"
       dump_serial
       exit 1
