@@ -50,7 +50,7 @@ so no module signing key); with the twins active the cumulated time is about 290
 |---|---|---|---|
 | L1 | One kernel build for signed and `-nosign`: `MODULE_SIG_FORCE=n` in the kernel, the signed image ships `/usr/lib/bootc/kargs.d/*.toml` with `module.sig_enforce=1`, the `-nosign` image ships none (the twin then differs by one tiny layer, not by a kernel) | kernel builds only: about 45 min of 290 (amd64 about 950 s + arm64-16k about 1770 s); the 4 twin image jobs stay unless the twin is dropped | planned, see constraint below |
 | L2 | Shared `ccache` for all kernel/module builds | modules 985 s to about 250 s each: about 48 min, and about 12 min off the wall clock | to measure locally |
-| L3 | Chain the variants of one Containerfile+arch in one job (local layer cache), push once | about 200 s per extra variant: about 27 min with the full plan | planned |
+| L3 | Chain the variants of one Containerfile+arch in one job | already done: `bootc-build.yml:611-625` builds the image, its `-nosign` twin, `-gaming` and `-ia` in one `Build` step on shared local layers; nothing left to gain | closed (no change) |
 | L4 | Skip unchanged debs in the setup job instead of starting a container per package | 22 jobs x 30-50 s, plus shorter waves | planned |
 | L5 | Build without per-layer `--cache-to` inside a chain (push the final layers once) | about 80 s per image job | to measure |
 | L6 | Smoke test only for package-only variants (gaming/ia); full boot test per (arch, kernel) | up to 6 min per variant on arm64 | to decide |
