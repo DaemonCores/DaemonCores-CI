@@ -350,12 +350,18 @@ jobs:
             "${ARCH}" "${signing}" \
             | sha256sum | cut -d' ' -f1)
           echo "hash=${hash}" >>"$GITHUB_OUTPUT"
-          # Per-arch fingerprint of the published debs, passed to the image build as a
-          # build arg so its apt layers are not served stale from the layer cache.
+          # Per-arch fingerprints of the published debs, passed to the image build as
+          # build args so its apt layers are not served stale from the layer cache.
+          # Kernels and device modules are fingerprinted apart: a kernel rebuild
+          # must re-run the kernel layer only, not the heavy package layer before it.
           debs_hash=$(printf '%s' "${debs}" \
-            | jq -cS --arg a "-${ARCH}" 'with_entries(select(.key | endswith($a)))' \
+            | jq -cS --arg a "-${ARCH}" 'with_entries(select((.key | endswith($a)) and (.key | test("^linux-(image|modules)-") | not)))' \
             | sha256sum | cut -d' ' -f1)
           echo "debs_hash=${debs_hash}" >>"$GITHUB_OUTPUT"
+          kernel_debs_hash=$(printf '%s' "${debs}" \
+            | jq -cS --arg a "-${ARCH}" 'with_entries(select((.key | endswith($a)) and (.key | test("^linux-(image|modules)-"))))' \
+            | sha256sum | cut -d' ' -f1)
+          echo "kernel_debs_hash=${kernel_debs_hash}" >>"$GITHUB_OUTPUT"
           # The twin differs from its primary image by the kernel only.
           twin_hash=$(printf '%s\nnosign\n' "${hash}" | sha256sum | cut -d' ' -f1)
           echo "twin_hash=${twin_hash}" >>"$GITHUB_OUTPUT"
@@ -457,6 +463,7 @@ jobs:
           COSIGN_PUBLIC_KEY: ${{ secrets.COSIGN_PUBLIC_KEY }}
           HASH: ${{ steps.chash.outputs.hash }}
           DEBS_HASH: ${{ steps.chash.outputs.debs_hash }}
+          KERNEL_DEBS_HASH: ${{ steps.chash.outputs.kernel_debs_hash }}
           TWIN_HASH: ${{ steps.chash.outputs.twin_hash }}
         run: |
           set -euo pipefail
@@ -564,6 +571,7 @@ jobs:
               --build-arg "FIRMWARE_PKGS=${firmware_pkgs}"
               --build-arg "APT_HOLD_PKG=${apt_hold_pkg}"
               --build-arg "DEBS_HASH=${DEBS_HASH}"
+              --build-arg "KERNEL_DEBS_HASH=${KERNEL_DEBS_HASH}"
               # The GPU usage twins only: ia (EULA-restricted compute) and
               # gaming (public display stack) carry their package lists; the
               # public build keeps both args empty.
