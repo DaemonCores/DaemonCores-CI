@@ -561,3 +561,8 @@ Conclusions (proved by these runs):
 ## Timeout scale back to 5 (MEASURED)
 - With `-cpu neoverse-n1` the arm64 4k guest answers SSH after 105 s and after 115 s on reboot (run 41191163442, job latest-4k-arm64), against 298-340 s with `-cpu max`. The x12 scale only compensated for the slow CPU model; it is reverted to the original x5.
 - Open proposal: replace the ceiling by a stall watchdog on the serial console (fail when the console is silent for N s) with SSH expected within seconds of boot end. Needs a boot-complete marker on the serial, not yet verified.
+
+## TODO (owner-approved): boot timeout calibrated on previous runs
+- Timeouts must never trip on a merely slow emulated boot, and a fixed multiplier is not a measure. Keep the manifest value as the first-run default, then use the last measured `SSH reachable after Ns` (per arch / page size) times a margin, persisted between runs (CI cache or artifact).
+- Context: arm64 runners have no /dev/kvm, so TCG is the only mode there (run 41191163442 log: "/dev/kvm unavailable on arm64"). Measured with neoverse-n1: 4k boot 105 s, reboot 115 s.
+- Related proposal: serial-console stall watchdog, SSH expected within 5 s of boot end (marker not yet verified).
