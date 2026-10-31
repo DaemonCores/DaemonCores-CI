@@ -36,10 +36,19 @@ kernel_prepare() {
   # collision (the common deb Conflicts with linux-image-amd64 AND
   # linux-image-arm64). Filter on the runner's DEB_ARCH so only the
   # matching-arch deb is selected.
-  COMMON_DEB=$(find /tmp/prior -maxdepth 1 -name "linux-image-common${KERNEL_SUFFIX:-}_*_${DEB_ARCH}.deb" | head -1)
+  # The directories searched are the one build-all.sh keeps its debs in
+  # (DEBS_DIR) and the legacy per-package download directory (/tmp/prior);
+  # only existing ones are searched so a missing directory is not an error.
+  local dir
+  COMMON_DEB=
+  for dir in "${DEBS_DIR:-/debs}" /tmp/prior; do
+    [[ -d "${dir}" ]] || continue
+    COMMON_DEB=$(find "${dir}" -maxdepth 1 -name "linux-image-common${KERNEL_SUFFIX:-}_*_${DEB_ARCH}.deb" | head -1)
+    [[ -z "${COMMON_DEB}" ]] || break
+  done
   test -n "${COMMON_DEB}" \
     || {
-      echo "ERROR: linux-image-common deb not found in /tmp/prior" >&2
+      echo "ERROR: linux-image-common deb not found in ${DEBS_DIR:-/debs} or /tmp/prior" >&2
       exit 1
     }
   # Extract version + kernel version from the deb without installing it.
