@@ -599,3 +599,7 @@ Conclusions (proved by these runs):
 - Symptom: both `Build all packages` jobs fail in 67 ms, `build-all.sh: line 241: GITHUB_TOKEN: unbound variable`.
 - Proof: the step env lists `SECRETVAL_GITHUB_TOKEN` but no `GITHUB_TOKEN`; the workflow maps the secret only under that name (`bootc-debs-builder.yml:82`). The unit test exported `GITHUB_TOKEN` itself, which masked the gap.
 - Fix: the script derives `GITHUB_TOKEN` from `SECRETVAL_GITHUB_TOKEN`; the test now supplies only the workflow's variable and drops `GITHUB_TOKEN`.
+
+## Tick 4: waiting for the full run (state)
+- Secure Boot needs no further work: enforced and passing on both architectures in run 41199518844 (see above). Nothing was disabled or weakened.
+- Run 41219400047 (debian-bootc 1b73370, CI f1b04f5+token fix) is the first one exercising the single-job-per-arch pipeline. Next reading: arm64 `.pyc` mtime diag line (proves or refutes the stale-pyc hypothesis), AAVMF CODE/VARS lines, one job per arch.
