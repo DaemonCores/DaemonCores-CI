@@ -181,4 +181,21 @@ Steps: 1 `content-hash.sh` (hash parity test old vs new against published `hashe
 - Not proven yet: kernel postinst (dracut) running after `ostree-layout`; the boot test and `bootc container lint` of the next run decide.
 
 ## Single-job-per-arch plan status
-Done locally, not pushed: step 2 `sign-image/sign.sh` (04d9d08), step 6 kernel tarball cache (b3fb61d). Open: 1 image-test split, 3 `build-arch.sh`, 4 `Containerfile.iso` ARG, 5 workflow wiring, 7 `plan.py`/`build-all.sh`, 8 `bootc-debs-builder.yml`, 9 docs.
+Pushed: image-test split, `build-arch.sh`, `plan.py` / `build-all.sh` (one build job per arch), `sign-image/sign.sh`, kernel tarball cache. Run 41219400047 was the first run of this pipeline: 10 packages built on amd64; the failures were `bootupd` (cleanup deleted the baked Rust toolchain, fixed in cd6e1a6) and the six `gpu-userspace-*` Mesa builds (apt `build-dep` state in CI, cause not yet identified; diag added). Wall-clock gain of the single-job layout: not yet measured (needs one green run).
+
+## L19: conditional rebuild lost its cache (cause PROVEN, fix pushed 80ebca9, not yet confirmed on a real run)
+- Rule from the owner: a package is rebuilt only if it changed here or upstream. The decision (content hash vs the published `hashes.json`) was correct: run 41199518844 reused `linux-image` with identical hashes.
+- Why it stopped working in run 41219400047: `cache[...]: prior=<none>` while the computed hashes were identical to the earlier run. The published `hashes.json` had been replaced by the previous run, whose build jobs had all failed, because `bootc-debs-end` builds `hashes.json` and the APT repo from the current artifact only and `publish` runs with `always() && !cancelled()`. A failed or partial build therefore erased the cache and the live APT repo.
+- Fix: `carry_over` input and `bootc-debs-end/carry-over.sh` restore every published package missing from the artifact when the build did not succeed. A fully green build stays authoritative.
+- Consequence for the 15 / 45 minute target (ESTIMATED): with the cache intact a no-change run only pays hash decisions (about 1 s per package, MEASURED in L17) plus image jobs skipped by L14, so the deb phase should drop from about 7 min to about 2 min per arch.
+- To confirm: after the next green run, a second run with no change must print `unchanged; reused cached deb(s)` for every package and skip the images.
+
+## Open levers and their state
+| Lever | State | Gain |
+|---|---|---|
+| L14 skip unchanged images | pushed, awaiting a green run | ESTIMATED: no-change run well under 15 min |
+| L17 / single job per arch | pushed, partly proven (run 41219400047) | ESTIMATED about 30 job-minutes saved per run |
+| L18 layer order | pushed, awaiting evidence | ESTIMATED: twins share the heavy layers |
+| L19 cache carry-over | pushed 80ebca9, awaiting evidence | ESTIMATED deb phase 7 min to about 2 min |
+| gpu-userspace per profile and level | pushed, build-dep failing in CI | not measured |
+| Separate NVIDIA image | not started (agent stopped, no work left) | shrinks the common image, not measured |
