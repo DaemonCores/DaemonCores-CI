@@ -566,3 +566,8 @@ Conclusions (proved by these runs):
 - Timeouts must never trip on a merely slow emulated boot, and a fixed multiplier is not a measure. Keep the manifest value as the first-run default, then use the last measured `SSH reachable after Ns` (per arch / page size) times a margin, persisted between runs (CI cache or artifact).
 - Context: arm64 runners have no /dev/kvm, so TCG is the only mode there (run 41191163442 log: "/dev/kvm unavailable on arm64"). Measured with neoverse-n1: 4k boot 105 s, reboot 115 s.
 - Related proposal: serial-console stall watchdog, SSH expected within 5 s of boot end (marker not yet verified).
+
+## Run 41191163442 result (MEASURED, `-cpu neoverse-n1`, d56d067)
+- `latest-arm64` (16k, AAVMF_CODE.secboot.fd, SB enforced): success; SSH after 110 s (boot) and 145 s / 111 s / 93 s on the following boots/reboots. `latest-4k-arm64` and `latest-amd64`: success. The 16k stall is closed.
+- `minimal-arm64`, `minimal-4k-arm64`, `minimal-amd64`: boot OK (SSH after 80 s, 81 s, 18 s) then fail on the RAM gate only: 508 / 208 / 348 MiB used over the 15 MiB budget. Not a boot or Secure Boot failure; the gate is separate work.
+- Wall clock of the run: 10:03:17 to 10:27:27 (24 min), with the kernels rebuilt.
