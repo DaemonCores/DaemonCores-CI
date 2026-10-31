@@ -10,6 +10,7 @@
 #
 # Functions:
 #   deb_overlay_apply <overlay-dir> <extracted-tree>          -> exit 3 on drift
+#   deb_src_overlay <overlay-dir> <source-tree>               -> lock guard + overlay on an upstream source tree; exit 3 on drift
 #   deb_repack <pkg> <ver-suffix> <overlay-dir>               -> full repack
 #   deb_overlay_tree <pkg> <ver-suffix> <tree-dir> [exec...]  -> tree-copy repack
 #   deb_custom <pkg> <ver> <tree-dir>                         -> custom whole...
@@ -38,11 +39,13 @@ deb_overlay_apply() {
   # Mirror everything EXCEPT the patch/lock metadata onto the tree copy so a
   # dry-run sees the exact files the apply will create or replace.
   (cd "${tdir}/overlay" && find . -name '*.patch' -print) >"${tdir}/patchlist"
-  find "${tdir}/overlay" -name '*.patch' -prune -o \
-       -name 'patches.lock.json' -prune -o -type f -print |
+  mkdir -p "${tdir}/tree"
+  (cd "${tdir}/overlay" && find . -name '*.patch' -prune -o \
+       -name 'patches.lock.json' -prune -o -type f -print) |
     while read -r cand; do
+      cand="${cand#./}"
       mkdir -p "${tdir}/tree/$(dirname "${cand}")"
-      cp -a "${tdir}/overlay/${cand#./}" "${tdir}/tree/${cand#./}"
+      cp -a "${tdir}/overlay/${cand}" "${tdir}/tree/${cand}"
     done
   # Copy the pristine tree for the dry run of the patches it touches.
   rm -rf "${tdir}/tree-dry"
@@ -67,6 +70,22 @@ deb_overlay_apply() {
   done <"${tdir}/patchlist"
   rm -rf "${tdir}"
   return 0
+}
+
+# Overlay on an upstream SOURCE tree (not an extracted deb): the overlay dir
+# mirrors the source tree, new files are real files, modified upstream files are
+# git .patch at the mirrored path. patches.lock.json holds the sha256 each
+# patched file had when the patch was written; the guard hashes the pristine
+# tree first (drift = exit 3), then the all-or-nothing overlay applies.
+deb_src_overlay() {
+  local ovl="${1:?}" tree="${2:?}"
+  local -a patches
+  mapfile -t patches < <(cd "${ovl}" && find . -name '*.patch' -type f | sort | sed "s|^\./|${ovl}/|")
+  if [ "${#patches[@]}" -gt 0 ]; then
+    python3 "${CI_SCRIPTS}/patch_guard.py" --tree "${tree}" \
+      --lock "${ovl}/patches.lock.json" "${patches[@]}" || return 3
+  fi
+  deb_overlay_apply "${ovl}" "${tree}"
 }
 
 deb_repack() {
