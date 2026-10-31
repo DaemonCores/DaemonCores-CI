@@ -44,6 +44,7 @@ unset _d
 DISK="${WORK}/test-disk.raw"
 KEY="${WORK}/test-key"
 SERIAL="${WORK}/serial.log"
+MONITOR="${WORK}/monitor.sock"
 SSH_PORT=2222
 # SECURE_BOOT=1 boots the VM with UEFI Secure Boot enforced, using a varstore
 # build_sb_vars generates from scratch (our own PK/KEK + the public Microsoft
@@ -308,7 +309,7 @@ boot_vm() {
       -drive "file=${DISK},format=raw,if=virtio" \
       -netdev "user,id=n0,hostfwd=tcp::${SSH_PORT}-:22" \
       -device "virtio-net,netdev=n0,romfile=" \
-      -display none -serial "file:${SERIAL}" -monitor none \
+      -display none -serial "file:${SERIAL}" -monitor "unix:${MONITOR},server,nowait" \
       -daemonize -pidfile "${WORK}/qemu.pid"
   else
     local secure=off
@@ -352,7 +353,7 @@ boot_vm() {
       -drive "file=${DISK},format=raw,if=virtio" \
       -netdev "user,id=n0,hostfwd=tcp::${SSH_PORT}-:22" \
       -device "virtio-net,netdev=n0,romfile=" \
-      -display none -serial "file:${SERIAL}" -monitor none \
+      -display none -serial "file:${SERIAL}" -monitor "unix:${MONITOR},server,nowait" \
       -daemonize -pidfile "${WORK}/qemu.pid"
   fi
 }
@@ -403,6 +404,27 @@ wait_ssh() {
 }
 
 #######################################
+# Print what the guest CPU is doing: run state, then the program counter
+# sampled three times one second apart. A fixed PC is a CPU parked idle (the
+# guest waits for an event); a moving PC is a CPU still executing.
+# Globals:
+#   MONITOR, SCRIPT_DIR
+#######################################
+guest_state() {
+  [[ -S "${MONITOR}" ]] || return 0
+  echo "::group::guest state (QEMU monitor)"
+  sudo python3 -I "${SCRIPT_DIR}/hmp.py" "${MONITOR}" \
+    "info status" "info cpus" "info registers" 2>&1 | grep -aE '^(>|VM status|\*? ?CPU|.*PC=|PSTATE)' || true
+  local i
+  for i in 1 2; do
+    sleep 1
+    sudo python3 -I "${SCRIPT_DIR}/hmp.py" "${MONITOR}" "info registers" 2>&1 \
+      | grep -aE 'PC=|PSTATE' || true
+  done
+  echo "::endgroup::"
+}
+
+#######################################
 # Print why a guest never became reachable: every failed unit and error line
 # of the serial console, then its tail, with terminal escape sequences removed
 # so the GitHub log stays readable.
@@ -411,6 +433,7 @@ wait_ssh() {
 #######################################
 dump_serial() {
   local clean
+  guest_state
   clean=$(sudo cat "${SERIAL}" 2>/dev/null \
     | sed -e 's/\x1b\[[0-9;?]*[A-Za-z]//g' -e 's/\r//g') || true
   echo "::group::serial console: failed units and errors"
