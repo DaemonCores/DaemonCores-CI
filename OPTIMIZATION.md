@@ -43,7 +43,7 @@ so no module signing key); with the twins active the cumulated time is about 290
 
 | # | Lever | Estimated gain (cumulated) | Status |
 |---|---|---|---|
-| L1 | Drop the `-nosign` twin: one kernel with `MODULE_SIG_FORCE=n`, enforcement by the default kernel command line (`module.sig_enforce=1`, kernel docs: module-signing) | about 89 min of 290 (kernel builds 45 min + 4 images 44 min) | planned |
+| L1 | One kernel build for signed and `-nosign`: `MODULE_SIG_FORCE=n` in the kernel, the signed image ships `/usr/lib/bootc/kargs.d/*.toml` with `module.sig_enforce=1`, the `-nosign` image ships none (the twin then differs by one tiny layer, not by a kernel) | kernel builds only: about 45 min of 290 (amd64 about 950 s + arm64-16k about 1770 s); the 4 twin image jobs stay unless the twin is dropped | planned, see constraint below |
 | L2 | Shared `ccache` for all kernel/module builds | modules 985 s to about 250 s each: about 48 min, and about 12 min off the wall clock | to measure locally |
 | L3 | Chain the variants of one Containerfile+arch in one job (local layer cache), push once | about 200 s per extra variant: about 27 min with the full plan | planned |
 | L4 | Skip unchanged debs in the setup job instead of starting a container per package | 22 jobs x 30-50 s, plus shorter waves | planned |
@@ -53,6 +53,18 @@ so no module signing key); with the twins active the cumulated time is about 290
 
 Target (ESTIMATED): about 290 to 150 min cumulated with L1+L2, wall clock from 64 to about
 45 min; below 15 min only for pushes that rebuild nothing heavy (L4+L7).
+
+## L1 constraint found in the bootc docs (MEASURED, source read)
+
+`docs/src/building/bootc-kernel-arguments.7.md` of bootc: "It is currently undefined behavior to
+remove kernel arguments locally that are included in the base image via /usr/lib/bootc/kargs.d".
+So a user cannot cleanly drop `module.sig_enforce=1` from a signed image; the unsigned behaviour
+must come from the image that does not ship the karg (the `-nosign` tag stays, built on the same
+kernel package). The kernel config has `CONFIG_SECURITY_LOCKDOWN_LSM=y` only
+(`kernel/config:266`), no `LOCK_DOWN_IN_EFI_SECURE_BOOT`, so Secure Boot alone does not enforce
+module signatures: the karg is what makes `sig_enforce=Y`. The test
+"signed kernel enforces module signatures" (`tests.yml:206-213`) and
+"unsigned-kernel variant does not enforce" (`tests.yml:215-221`) stay unchanged.
 
 ## Constraints from the owner
 
