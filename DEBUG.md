@@ -588,3 +588,8 @@ Conclusions (proved by these runs):
 - Hypothesis (NOT proven on the guest): ostree stores no file mtime, so the deployed tree has a different mtime and every timestamp-based
   pyc is stale (ostreedev/ostree#1469). Evidence needed before any fix: print `stat -c %Y` of `utils.py` and its pyc in the diag of the failing test.
 - Candidate fix once proven: hash-based pycs (`python3 -m compileall --invalidation-mode unchecked-hash`) in the ifupdown2 overlay build.
+
+## Tick 3: instrumentation for the networking timeout (not pushed)
+- No local reproduction is possible without root (installing the image needs `podman --privileged`; no new pkexec while the owner is away), and the deployed mtimes only exist on the installed guest.
+- debian-bootc `workflows/tests.yml` diag of `no failed systemd units` now prints the source mtime and the pyc header mtime of `ifupdown/utils.py` on the guest (diag only, the assertion is unchanged). Commit is local; the push waits for the other pending work, since a partial push breaks the pipelines.
+- Expected reading in the next run: equal values = hypothesis false (look elsewhere); different values = hypothesis proven, then switch the ifupdown2 overlay to hash-based pycs.
