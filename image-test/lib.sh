@@ -223,6 +223,7 @@ install_disk() {
   # the extra kernel arguments of the manifest category (select_category).
   sudo podman run --rm --privileged --pid=host --security-opt label=disable \
     -e ARCH="${ARCH}" -e INSTALL_KARGS="${INSTALL_KARGS:-}" \
+    -e KVM="${KVM}" -e TCG_TIMEOUT_SCALE="${TCG_TIMEOUT_SCALE}" \
     -v /dev:/dev -v /var/lib/containers:/var/lib/containers \
     -v "${DISK}:/disk.raw" \
     -v "${KEY}.pub:/key.pub:ro" \

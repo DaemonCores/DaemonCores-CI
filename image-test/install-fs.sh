@@ -258,6 +258,24 @@ if [ -n "${deployed_dir}" ]; then
     # subvol, leaving the entire /var tree (and any etc overlay backed by it)
     # read-only at runtime. The /boot and /boot/efi entries are included for
     # completeness; they are not load-bearing for the writability fix.
+    # Under QEMU TCG (no KVM) the guest CPU is an order of magnitude slower, so a
+    # start timeout tuned for real hardware (ifupdown2 starts in a few seconds on
+    # metal, 30 s cap) trips on a start that is merely slow. Scale every plain
+    # seconds TimeoutStartSec the image ships by the same factor that scales the
+    # boot timeout (TCG_TIMEOUT_SCALE), via /etc drop-ins; the unit must still
+    # succeed. Derived from the image, nothing named here.
+    if [ "${KVM:-1}" != "1" ] && [ -n "${TCG_TIMEOUT_SCALE:-}" ]; then
+      _usr="${_deploy_etc%/etc}/usr/lib/systemd/system"
+      while IFS= read -r _conf; do
+        _secs=$(sed -n 's/^TimeoutStartSec=\([0-9][0-9]*\)$/\1/p' "${_conf}" | tail -n1)
+        [ -n "${_secs}" ] || continue
+        _unit=$(basename "$(dirname "${_conf}")" .d)
+        mkdir -p "${_deploy_etc}/systemd/system/${_unit}.d"
+        printf '[Service]\nTimeoutStartSec=%s\n' "$((_secs * TCG_TIMEOUT_SCALE))" \
+          > "${_deploy_etc}/systemd/system/${_unit}.d/99-ci-tcg-timeout.conf"
+        echo "=== TCG: ${_unit} TimeoutStartSec ${_secs}s -> $((_secs * TCG_TIMEOUT_SCALE))s ==="
+      done < <(find "${_usr}" -path '*.service.d/*.conf' 2>/dev/null)
+    fi
     install -D -m 0644 "${CI_FILES_DIR}/fstab" "${_deploy_etc}/fstab"
     echo "=== fstab written to ${_deploy_etc}/fstab ==="
     # CI-only diagnostic oneshot: dump the real /etc and /etc/ssh state
