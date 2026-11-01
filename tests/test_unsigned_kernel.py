@@ -38,12 +38,16 @@ def _discover_script() -> str:
     return next(s['run'] for s in steps if s.get('id') == 'list')
 
 
-def _discover(tmp_path: Path, nosign: bool) -> dict[str, list[dict[str, Any]]]:
+def _discover(tmp_path: Path,
+              nosign: bool,
+              extra: dict[str, str] | None = None
+              ) -> dict[str, list[dict[str, Any]]]:
     """Run the discover step on a repository with three Containerfiles.
 
     Args:
         tmp_path: Scratch repository root.
         nosign: Value of the ``nosign_images`` input.
+        extra: Additional Containerfiles (name to content).
 
     Returns:
         The images of every architecture (flattened) and the manifest matrix.
@@ -56,6 +60,8 @@ def _discover(tmp_path: Path, nosign: bool) -> dict[str, list[dict[str, Any]]]:
     (tmp_path / 'Containerfile.board').write_text('FROM debian:trixie\n')
     (tmp_path / 'Containerfile.iso'
      ).write_text('FROM ghcr.io/daemoncores/debian-bootc:latest_amd64\n')
+    for name, content in (extra or {}).items():
+        (tmp_path / name).write_text(content)
     out = tmp_path / 'out'
     env = dict(
         os.environ,
@@ -226,3 +232,44 @@ def test_signing_flag_only_hashes_the_packages_that_sign() -> None:
     assert "steps.def.outputs.signs == 'yes'" in text
     definition = (ROOT / 'pkg-def' / 'pkg-def.sh').read_text()
     assert "grep -q 'kernel_signing_setup'" in definition
+
+
+@needs_jq
+def test_arches_label_limits_an_image_to_its_architectures(
+        tmp_path: Path) -> None:
+    """An image labelled amd64-only has no arm64 entry and a one-arch manifest.
+
+    It stays in the amd64 job, after the Containerfile it derives from, so no
+    extra job is added.
+
+    Args:
+        tmp_path: Scratch repository root.
+    """
+    result = _discover(tmp_path,
+                       nosign=True,
+                       extra={
+                           'Containerfile.vendor':
+                           'FROM ghcr.io/daemoncores/debian-bootc:latest_amd64\n'
+                           'LABEL org.daemoncores.arches="amd64"\n'
+                       })
+    amd64, arm64 = ([e['tag'] for e in g['entries']] for g in result['groups'])
+    assert amd64 == ['latest', 'board', 'iso', 'vendor']
+    assert 'vendor' not in arm64
+    manifest = {e['tag']: e['arches'] for e in result['manifest']}
+    assert manifest['vendor'] == ['amd64']
+    assert manifest['latest'] == ['amd64', 'arm64']
+    assert len(result['groups']) == 2
+
+
+@needs_jq
+def test_arches_label_with_no_known_architecture_fails(
+        tmp_path: Path) -> None:
+    """A label naming no supported architecture fails the discovery.
+
+    Args:
+        tmp_path: Scratch repository root.
+    """
+    with pytest.raises(subprocess.CalledProcessError):
+        _discover(tmp_path,
+                  nosign=False,
+                  extra={'Containerfile.vendor': 'LABEL org.daemoncores.arches=riscv64\n'})
