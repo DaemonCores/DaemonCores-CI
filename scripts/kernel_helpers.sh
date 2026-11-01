@@ -171,15 +171,40 @@ kernel_patch_list() {
 }
 
 #######################################
+# Fuzz tolerance of one manifest patch: its optional `fuzz:` field, else the
+# global KERNEL_PATCH_FUZZ, else 0. A per-patch value is the visible, reviewed
+# exception for a third-party patch whose context drifted but whose placement
+# was checked; every other patch stays strict.
+# Arguments:
+#   $1 - manifest path (patches.yml) or - for the native PATCHES_JSON set
+#   $2 - patch name
+# Outputs:
+#   The fuzz level on stdout.
+#######################################
+kernel_patch_fuzz() {
+  local manifest="$1" name="$2" doc filter value=""
+  if [[ "${manifest}" == "-" ]]; then
+    doc="${PATCHES_JSON:-[]}"
+    filter='.[]'
+  else
+    doc=$(cat "${manifest}")
+    filter='.patches[]'
+  fi
+  value=$(printf '%s\n' "${doc}" | NAME="${name}" yq -r \
+    "${filter}"' | select(.name == strenv(NAME)) | .fuzz // ""' | head -n1)
+  echo "${value:-${KERNEL_PATCH_FUZZ:-0}}"
+}
+
+#######################################
 # Download the patches of one manifest, dry-run the WHOLE set
 # (all-or-nothing), then apply them in manifest order.
 # Nothing is tolerated: a patch that cannot be downloaded or does not apply
 # fails the build and the last good deb is kept. The guard against upstream
 # drift is the strict dry-run itself: patch runs with --fuzz=0, so a hunk
 # whose context moved (not just its line numbers) is refused instead of being
-# applied to the wrong place; no committed hash list is kept. KERNEL_PATCH_FUZZ
-# (default 0) raises the tolerance for a manifest of third-party patches that
-# is known to need it.
+# applied to the wrong place; no committed hash list is kept. A manifest entry
+# may carry `fuzz: N` (see kernel_patch_fuzz) for a third-party patch whose
+# placement was verified; KERNEL_PATCH_FUZZ sets a global default.
 # Arguments:
 #   $1 - manifest path (patches.yml)
 #   $2 - architecture/stage (amd64 or arm64)
@@ -190,7 +215,7 @@ kernel_patch_list() {
 kernel_apply_patches() {
   local manifest="$1" arch="$2" version="$3" tree="$4" class="${5:-}"
   local series="${version%.*}" name url dir file
-  local -a names=() files=()
+  local -a names=() files=() fuzzes=()
   [[ "${version}" == *.*.* ]] || series="${version}"
   dir=$(mktemp -d)
   while read -r name url; do
@@ -203,20 +228,21 @@ kernel_apply_patches() {
       }
     names+=("${name}")
     files+=("${file}")
+    fuzzes+=("$(kernel_patch_fuzz "${manifest}" "${name}")")
   done < <(kernel_patch_list "${manifest}" "${arch}" "${version}" "${class}")
   ((${#files[@]})) || return 0
 
   local i
   # Every patch must dry-run before ANY touch of the tree.
   for i in "${!files[@]}"; do
-    patch -d "${tree}" -p1 --fuzz="${KERNEL_PATCH_FUZZ:-0}" --no-backup-if-mismatch --dry-run <"${files[i]}" >/dev/null \
+    patch -d "${tree}" -p1 --fuzz="${fuzzes[i]}" --no-backup-if-mismatch --dry-run <"${files[i]}" >/dev/null \
       || {
         echo "ERROR: patch ${names[i]} does not apply to ${version}" >&2
         exit 1
       }
   done
   for i in "${!files[@]}"; do
-    patch -d "${tree}" -p1 --fuzz="${KERNEL_PATCH_FUZZ:-0}" --no-backup-if-mismatch <"${files[i]}" >/dev/null
+    patch -d "${tree}" -p1 --fuzz="${fuzzes[i]}" --no-backup-if-mismatch <"${files[i]}" >/dev/null
     echo "applied patch ${names[i]}"
   done
   rm -rf "${dir}"
