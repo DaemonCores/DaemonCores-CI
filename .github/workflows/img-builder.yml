@@ -64,8 +64,9 @@ jobs:
       # Same dependency set as the ISO builder plus dosfstools (mkfs.vfat) and
       # mtools (for FAT32 inspection) for the rpi target's /boot partition.
       # sfdisk ships in util-linux; e2fsprogs provides mkfs.ext4. For the
-      # gallium arm64 phone target, android-tools-mkbootimg provides mkbootimg
-      # (packs the Android boot.img from kernel + initramfs + DTB).
+      # gallium arm64 phone target, mkbootimg packs the Android boot.img from
+      # kernel + initramfs + DTB. AlmaLinux 10 and EPEL 10 ship no package for
+      # it, so it is fetched from AOSP in its own step below.
       - name: Install dependencies
         run: |
           set -euo pipefail
@@ -78,9 +79,29 @@ jobs:
             git gh curl cpio gzip podman fuse-overlayfs \
             dosfstools mtools \
             parted e2fsprogs \
-            util-linux \
-            android-tools-mkbootimg
+            util-linux
           git config --system --add safe.directory '*'
+
+      # AOSP mkbootimg (pure Python, needs its gki/ package next to it). The
+      # tag is only a convenience: the commit it must resolve to is checked, so
+      # a moved tag fails the build instead of changing the tool silently.
+      - name: Install mkbootimg
+        if: inputs.target == 'gallium'
+        env:
+          MKBOOTIMG_URL: https://android.googlesource.com/platform/system/tools/mkbootimg
+          MKBOOTIMG_TAG: android-15.0.0_r1
+          MKBOOTIMG_COMMIT: c40a04c0620c5a0dab87497857805b8d9b8a827a
+        run: |
+          set -euo pipefail
+          dir=/usr/local/lib/mkbootimg
+          git clone --quiet --depth 1 --branch "${MKBOOTIMG_TAG}" "${MKBOOTIMG_URL}" "${dir}"
+          got=$(git -C "${dir}" rev-parse HEAD)
+          if [ "${got}" != "${MKBOOTIMG_COMMIT}" ]; then
+            echo "::error::mkbootimg ${MKBOOTIMG_TAG} resolves to ${got}, expected ${MKBOOTIMG_COMMIT}"
+            exit 1
+          fi
+          ln -s "${dir}/mkbootimg.py" /usr/local/bin/mkbootimg
+          mkbootimg --help >/dev/null
 
       # ─── VARIABLES ───────────────────────────────────────────────────────
       - name: Compute names
