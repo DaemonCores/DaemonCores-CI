@@ -52,6 +52,14 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      - name: Checkout CI tooling
+        uses: actions/checkout@v7
+        with:
+          repository: DaemonCores/DaemonCores-CI
+          ref: main
+          path: .ci-tooling
+          persist-credentials: false
+
       # Arch-aware yq download: pick the binary matching the runner arch.
       # The setup job runs on the amd64 runner regardless of the target
       # arch (it only computes the wave plan), so the yq binary must match
@@ -98,24 +106,7 @@ jobs:
           echo "env_image=ghcr.io/${GITHUB_REPOSITORY,,}:buildenv-${arch}" \
             >>"$GITHUB_OUTPUT"
           yq -o=json '.' "${MAN}" >/tmp/pkgs.json
-          python3 - <<'PY'
-          import json, os
-          pkgs = json.load(open('/tmp/pkgs.json'))['packages']
-          deps = {p['name']: (p.get('deps') or []) for p in pkgs}
-          memo = {}
-          def wave(name):
-              if name in memo:
-                  return memo[name]
-              d = deps.get(name, [])
-              memo[name] = 0 if not d else 1 + max(wave(x) for x in d)
-              return memo[name]
-          waves = {}
-          for name in deps:
-              waves.setdefault(wave(name), []).append(name)
-          with open(os.environ['GITHUB_OUTPUT'], 'a') as out:
-              for i in range(4):
-                  out.write("wave%d=%s\n" % (i, json.dumps(sorted(waves.get(i, [])))))
-          PY
+          python3 .ci-tooling/scripts/dependency-waves.py /tmp/pkgs.json
 
   wave0:
     needs: setup

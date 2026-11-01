@@ -155,3 +155,12 @@ def test_middlewares_list_rendered(tmp_path: Path) -> None:
     text = out.read_text()
     assert "      middlewares:" in text
     assert "        - rate-limit" in text and "        - basic-auth" in text
+
+def test_script_embeds_no_heredoc_and_helpers_are_real_files() -> None:
+    """The helper programs are repo files referenced by path, not heredocs."""
+    text = SCRIPT.read_text()
+    assert "<<" not in text
+    assert "cat >" not in text
+    for helper in ("gateway-reconcile-collect.py", "gateway-reconcile-render.py"):
+        assert (SCRIPT.parent / helper).is_file()
+        assert helper in text
