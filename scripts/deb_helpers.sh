@@ -6,7 +6,11 @@
 # The overlay model (Gabriel spec 2026-10-30): package dirs mirror the deb
 # tree — new files are real files at their deb path; modified upstream files
 # are git .patch at the MIRROR PATH of the file they patch; all patches are
-# dry-run first (all-or-nothing); .patch is never shipped.
+# dry-run first (all-or-nothing); .patch is never shipped. An upstream file the
+# package must not ship is removed by an empty `<mirror path>.delete` marker:
+# unlike a deletion patch it carries no copy of the upstream content, so it
+# holds across every upstream revision and architecture index; the file still
+# has to exist (a missing target is drift, exit 3).
 #
 # Functions:
 #   deb_overlay_apply <overlay-dir> <extracted-tree>          -> exit 3 on drift
@@ -39,14 +43,25 @@ deb_overlay_apply() {
   # Mirror everything EXCEPT the patch/lock metadata onto the tree copy so a
   # dry-run sees the exact files the apply will create or replace.
   (cd "${tdir}/overlay" && find . -name '*.patch' -print) >"${tdir}/patchlist"
+  (cd "${tdir}/overlay" && find . -name '*.delete' -type f -print) |
+    sed -e 's|^\./||' -e 's|\.delete$||' >"${tdir}/deletelist"
+  if [ "${BUILD_ARCH:-amd64}" = "arm64" ]; then
+    sed -i 's/x86_64-linux-gnu/aarch64-linux-gnu/g' "${tdir}/deletelist"
+  fi
   mkdir -p "${tdir}/tree"
-  (cd "${tdir}/overlay" && find . -name '*.patch' -prune -o \
+  (cd "${tdir}/overlay" && find . -name '*.patch' -prune -o -name '*.delete' -prune -o \
        -name 'patches.lock.json' -prune -o -type f -print) |
     while read -r cand; do
       cand="${cand#./}"
       mkdir -p "${tdir}/tree/$(dirname "${cand}")"
       cp -a "${tdir}/overlay/${cand}" "${tdir}/tree/${cand}"
     done
+  # A removal target missing from the pristine tree is drift, like a patch.
+  while read -r p; do
+    [ -n "${p}" ] || continue
+    [ -e "${tree}/${p}" ] \
+      || { echo "ERROR: ${p}.delete targets a file absent from ${tree} — overlay drift." >&2; rm -rf "${tdir}"; return 3; }
+  done <"${tdir}/deletelist"
   # Copy the pristine tree for the dry run of the patches it touches.
   rm -rf "${tdir}/tree-dry"
   cp -a "${tree?}" "${tdir}/tree-dry"
@@ -68,6 +83,10 @@ deb_overlay_apply() {
       <"${tdir}/overlay/${p}" \
       || { echo "ERROR: ${p} failed to apply (unexpected: dry-run passed)." >&2; rm -rf "${tdir}"; return 3; }
   done <"${tdir}/patchlist"
+  while read -r p; do
+    [ -n "${p}" ] || continue
+    rm -f "${tree}/${p}"
+  done <"${tdir}/deletelist"
   rm -rf "${tdir}"
   return 0
 }
