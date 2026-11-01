@@ -102,9 +102,8 @@ jobs:
             base="${REPO_TAIL}"
           fi
           IMG_FILE="${base}-${TARGET}-${ARCH}.img"
-          # Per-arch image tag from bootc-build.yml: <tag>_<arch>_autoupdate.
-          # We pull the autoupdate variant (the canonical one).
-          IMG_REF="ghcr.io/${GITHUB_REPOSITORY,,}:latest_${ARCH}_autoupdate"
+          # Per-arch image tag from bootc-build.yml: <tag>_<arch>.
+          IMG_REF="ghcr.io/${GITHUB_REPOSITORY,,}:latest_${ARCH}"
           {
             echo "img_file=${IMG_FILE}"
             echo "img_ref=${IMG_REF}"

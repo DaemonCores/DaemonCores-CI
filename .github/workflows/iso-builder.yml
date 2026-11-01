@@ -1,7 +1,7 @@
 name: iso
 
 # Builds live-boot installation ISOs from the installer container image
-# (ghcr.io/<owner>/<repo>:iso-<arch>-autoupdate, built by the `image` job).
+# (ghcr.io/<owner>/<repo>:iso_<arch>, built by the `image` job).
 #
 # The installer container is a thin layer on top of the base image. It adds
 # only the graphical installer stack (bootc-installer GTK4 + fisherman Go
@@ -24,7 +24,8 @@ on:
 
 jobs:
   build-iso:
-    runs-on: ubuntu-latest
+    # Native runner per architecture, as the image builds: no emulation.
+    runs-on: ${{ matrix.arch == 'arm64' && 'ubuntu-24.04-arm' || 'ubuntu-latest' }}
     # --privileged is required for loop mounts inside bootc-image-builder.
     # Do NOT remove it.
     permissions:
@@ -115,9 +116,9 @@ jobs:
           REPO="${GITHUB_REPOSITORY,,}"
 
           # The payload is the clean base image — what gets installed on disk.
-          PAYLOAD="ghcr.io/${REPO}:latest-${ARCH}-autoupdate"
+          PAYLOAD="ghcr.io/${REPO}:latest_${ARCH}"
           # The installer image is the thin live env (base + installer layer).
-          INSTALLER="ghcr.io/${REPO}:iso-${ARCH}-autoupdate"
+          INSTALLER="ghcr.io/${REPO}:iso_${ARCH}"
 
           sudo podman pull "${PAYLOAD}"
           sudo podman pull "${INSTALLER}"
@@ -134,7 +135,7 @@ jobs:
           else
             echo "Payload ${PAYLOAD_SIZE} bytes >= ${THRESHOLD} — net-install ISO mode"
             # Use minimal image as live env to keep ISO small
-            MINIMAL="ghcr.io/${REPO}:iso-minimal-${ARCH}-autoupdate"
+            MINIMAL="ghcr.io/${REPO}:minimal_${ARCH}"
             sudo podman pull "${MINIMAL}"
             echo "offline=false" >> "$GITHUB_OUTPUT"
             echo "installer=${MINIMAL}" >> "$GITHUB_OUTPUT"

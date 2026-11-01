@@ -6,7 +6,7 @@
 #   target   : rpi | gallium
 #   arch     : amd64 | arm64
 #   img_file : output filename (e.g. debian-bootc-rpi-arm64.img)
-#   img_ref  : container image ref to pull (e.g. ghcr.io/owner/repo:latest_arm64_autoupdate)
+#   img_ref  : container image ref to pull (e.g. ghcr.io/owner/repo:latest_arm64)
 #
 # Targets:
 #   rpi     - Raspberry Pi bootable .img (arm64 only).
