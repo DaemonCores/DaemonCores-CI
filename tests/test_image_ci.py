@@ -667,8 +667,8 @@ def test_boot_tests_use_one_prepare_and_one_child_process_per_image(
     ]
     tests = [c.split()[1:4] for c in calls if c.startswith('image-test test')]
     assert tests == [
-        ['test', f'{IMAGE}:latest_amd64', '0'],
-        ['test', f'{IMAGE}:latest-nosign_amd64', '0'],
+        ['test', f'{IMAGE}:latest_amd64', '15'],
+        ['test', f'{IMAGE}:latest-nosign_amd64', '15'],
         ['test', f'{IMAGE}:minimal_amd64', '15'],
     ]
     assert 'STATE=' + str(sb.runner_temp / 'image-ci' / 'image-test') \

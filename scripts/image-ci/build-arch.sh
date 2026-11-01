@@ -32,8 +32,10 @@
 #   BOOT_TEST_TIMEOUT  per image boot test limit, timeout(1) syntax
 #                      (default 2700)
 #   BOOT_TEST_SKIP_TAGS  tags with no boot test (default iso: no SSH server)
-#   RAM_GATE_TAG_PREFIX, RAM_GATE_MB   idle RAM budget of the tags starting
-#                      with the prefix (default minimal, 15); 0 elsewhere
+#   RAM_GATE_TAG_PREFIX, RAM_GATE_MB   idle RAM target (default 15 MiB) of the
+#                      tags starting with the prefix; the default prefix is
+#                      empty: every tag is measured and reported (the figure
+#                      only blocks with RAM_IDLE_ENFORCE=1); 0 elsewhere
 #   TRIVY_SEVERITY     severities reported by the scan (default CRITICAL,HIGH)
 #   SUDO               command prefix for privileged tools (default sudo)
 #   RUNNER_TEMP, GITHUB_STEP_SUMMARY   Actions scratch dir and summary file
@@ -490,7 +492,7 @@ in_list() {
 }
 
 ram_budget() {
-  local gate_prefix="${RAM_GATE_TAG_PREFIX:-minimal}"
+  local gate_prefix="${RAM_GATE_TAG_PREFIX:-}"
   if [[ "$1" == "${gate_prefix}"* ]]; then
     echo "${RAM_GATE_MB:-15}"
   else
