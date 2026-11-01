@@ -735,3 +735,16 @@ Conclusions (proved by these runs):
 
 - amd64 `nvidia`: build-failed. Cause PROVEN (job 124849036943, `Containerfile.nvidia:52`): `linux-modules-nvidia` was versioned with the kernel deb version (`7.2.14+r1`) while the Containerfile compares it to `libcuda1` (`615.71.10`). Fix: package version = `<NVIDIA release>+<kernel deb version>` (debian-bootc cd65120); version parse checked with `dpkg --validate-version` and the Containerfile `sed`. Real result pending the next run.
 - arm64 `latest`: test-failed `no failed systemd units` (job 124849036931). Observed: `networking.service` hit `TimeoutStartSec=30` (`ifupdown2/.../networking.service.d/timeout.conf:2`), 23.9 s CPU, killed by TERM while dhclient had already bound 10.0.2.15. The `ip rule show` RTNETLINK warnings are only warnings. HYPOTHESIS (not proven): ifupdown2 is Python under TCG emulation and exceeds 30 s; first time the standard arm64 image boots in the test (amd64 passes under KVM). Next step: reproduce locally with qemu-system-aarch64 and measure the start duration before changing anything.
+
+## Tick 21 — idle RAM: what the figures really measure (MEASURED from run 41305715371 and r7 logs)
+
+| image | MemTotal-MemAvailable | free(1)-style in use | anonymous | page cache |
+|---|---|---|---|---|
+| minimal amd64 | 333 | 120 | 20 | 185 |
+| latest amd64 | 361 / 336 | 154 / 129 | 20 | 427 |
+| minimal arm64 | 508 | 98 | 26 | 197 |
+| latest arm64 | 580 | 100 | 23 | 346 |
+
+- Anonymous memory is ~20-26 MiB in every image: minimal and latest run the same base services (top RSS: systemd, journald, sshd, udevd, logind, wpa_supplicant, netavark, dhclient), so they weigh the same. The gate figure (MemTotal-MemAvailable) is dominated by non-image terms: min_free_kbytes reserve (66 MiB amd64, 196 MiB arm64 with 16k pages + THP madvise), page cache partly excluded from MemAvailable, and RSS that double-counts shared pages.
+- On the free(1)-style figure arm64 is NOT heavier than amd64. The extra arm64 weight in the gate figure is the reserve.
+- Harness change: the RAM log lines now carry the image and arch, and the per-image summary table gains "in use (free style)" and "anonymous" columns.
