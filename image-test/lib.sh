@@ -703,7 +703,7 @@ ram_gate() {
   # kB → MiB, ceil so a marginal over-budget never rounds its way past the gate.
   used=$(echo "${readout}" | awk 'NR==1{t=$1} NR==2{a=$1} END{print t-a}')
   used=$(( (used + 1023) / 1024 ))
-  echo "RAM idle (boot-fresh): ${used} MiB MemTotal-MemAvailable used; budget: ${RAM_IDLE_MAX_MB} MiB"
+  echo "RAM idle [${IMAGE:-?} ${ARCH:-?}] (boot-fresh): ${used} MiB MemTotal-MemAvailable used; budget: ${RAM_IDLE_MAX_MB} MiB"
   # Composition of the figure, computed on the guest (awk + coreutils only):
   # process RSS, kernel slabs, the min_free_kbytes reserve MemAvailable
   # subtracts, and what is left. One line per image in the run summary.
@@ -712,22 +712,27 @@ ram_gate() {
     p=$(awk "/^VmRSS:/{s+=\$2} END{print s+0}" /proc/[0-9]*/status 2>/dev/null)
     sl=$(awk "NR>2{s+=\$3*\$4} END{print s+0}" /proc/slabinfo 2>/dev/null)
     r=$(cat /proc/sys/vm/min_free_kbytes 2>/dev/null || echo 0)
-    echo "$p $sl $r"' 2>/dev/null || true)
-  read -r procs_kib slab_b reserve_kib <<<"${parts:-0 0 0}"
+    inuse=$(awk "/^MemTotal:/{t=\$2} /^MemFree:/{f=\$2} /^Buffers:/{b=\$2} /^Cached:/{c=\$2} /^SReclaimable:/{r=\$2} /^AnonPages:/{a=\$2} END{print t-f-b-c-r, a}" /proc/meminfo)
+    echo "$p $sl $r $inuse"' 2>/dev/null || true)
+  local inuse_kib anon_kib
+  read -r procs_kib slab_b reserve_kib inuse_kib anon_kib <<<"${parts:-0 0 0 0 0}"
   local procs_mib=$(((${procs_kib:-0} + 1023) / 1024))
   local slab_mib=$(((${slab_b:-0} + 1048575) / 1048576))
   local reserve_mib=$(((${reserve_kib:-0} + 1023) / 1024))
   local rest_mib=$((used - procs_mib - slab_mib - reserve_mib))
+  local inuse_mib=$(((${inuse_kib:-0} + 1023) / 1024))
+  local anon_mib=$(((${anon_kib:-0} + 1023) / 1024))
+  echo "RAM idle [${IMAGE:-?} ${ARCH:-?}] in use (MemTotal-MemFree-Buffers-Cached-SReclaimable, free(1) style): ${inuse_mib} MiB, anonymous: ${anon_mib} MiB"
   echo "RAM idle composition: processes ${procs_mib} MiB, kernel slabs ${slab_mib} MiB, min_free_kbytes reserve ${reserve_mib} MiB, remainder ${rest_mib} MiB"
   if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
     if ! grep -q '^| image | arch | idle RAM' "${GITHUB_STEP_SUMMARY}" 2>/dev/null; then
       {
         echo "### Idle RAM per image (MemTotal-MemAvailable, boot-fresh)"
-        echo "| image | arch | idle RAM (MiB) | processes (sum of RSS) | kernel slabs | min_free_kbytes reserve | remainder | target |"
-        echo "|---|---|---|---|---|---|---|---|"
+        echo "| image | arch | idle RAM (MiB) | processes (sum of RSS) | kernel slabs | min_free_kbytes reserve | remainder | in use (free style) | anonymous | target |"
+        echo "|---|---|---|---|---|---|---|---|---|---|"
       } >>"${GITHUB_STEP_SUMMARY}"
     fi
-    echo "| ${IMAGE:-?} | ${ARCH:-?} | ${used} | ${procs_mib} | ${slab_mib} | ${reserve_mib} | ${rest_mib} | ${RAM_IDLE_MAX_MB} |" >>"${GITHUB_STEP_SUMMARY}"
+    echo "| ${IMAGE:-?} | ${ARCH:-?} | ${used} | ${procs_mib} | ${slab_mib} | ${reserve_mib} | ${rest_mib} | ${inuse_mib} | ${anon_mib} | ${RAM_IDLE_MAX_MB} |" >>"${GITHUB_STEP_SUMMARY}"
   fi
   if [ "${used}" -gt "${RAM_IDLE_MAX_MB}" ]; then
     # Self-explaining report: dump what actually holds the memory. Everything
