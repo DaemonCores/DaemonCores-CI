@@ -748,3 +748,9 @@ Conclusions (proved by these runs):
 - Anonymous memory is ~20-26 MiB in every image: minimal and latest run the same base services (top RSS: systemd, journald, sshd, udevd, logind, wpa_supplicant, netavark, dhclient), so they weigh the same. The gate figure (MemTotal-MemAvailable) is dominated by non-image terms: min_free_kbytes reserve (66 MiB amd64, 196 MiB arm64 with 16k pages + THP madvise), page cache partly excluded from MemAvailable, and RSS that double-counts shared pages.
 - On the free(1)-style figure arm64 is NOT heavier than amd64. The extra arm64 weight in the gate figure is the reserve.
 - Harness change: the RAM log lines now carry the image and arch, and the per-image summary table gains "in use (free style)" and "anonymous" columns.
+
+## Tick 22 — minimal image, service by service (P-673)
+
+STATIC (podman, minimal_amd64): enabled units = ssh, systemd-networkd(+socket, wait-online, network-generator), systemd-timesyncd, netavark-dhcp-proxy(+socket), lvm2-monitor, lvm2-lvmpolld.socket, dm-event.socket, blk-availability, e2scrub_reap, xfs_scrub timer/slice, dpkg-db-backup.timer, bootc-fetch-apply-updates.timer, bootloader-update, dc-gpu-apply, systemd-pstore, getty@; dbus + logind via multi-user.target.wants. No wpa_supplicant/NetworkManager/dhclient in minimal (they appear in latest only).
+MEASURED (CI r7 log, minimal amd64, RSS incl. shared pages, KiB): systemd 14312 + user 12796, networkd 11068, sshd-session 11036+7040 (test connection), udevd 9944, logind 8904, timesyncd 8328, journald 8072, sshd 7880, netavark 6908, dbus 4388. Anonymous total 20 MiB; modules loaded: drm, cfg80211, drm_kms_helper, overlay, erofs, bochs (cfg80211 on a minimal VM image).
+Gap: RSS cannot attribute the ~100 MiB of kernel-side memory. Harness now also dumps per-unit cgroup memory (anon/file/kernel) and the kernel `Memory:` banner in the RAM breakdown; to be read from the next run.
