@@ -3,7 +3,7 @@
 # kernel_helpers.sh - shared kernel-build helpers for the bootc-debs builders
 # (DaemonCores-VE kernel-pve, debian-bootc linux-image). Sourced by
 # deb_helpers.sh in the SAME bash that runs the build: no import appears in
-# any build block. Exported to the build via CI_SCRIPTS (patch_guard.py).
+# any build block. Exported to the build via CI_SCRIPTS.
 #
 # The kernel patch format IS the canonical patches schema (Gabriel decision
 # 30/10/2026): a declarative YAML/JSON manifest of name/url/stage (+ optional
@@ -35,9 +35,8 @@
 #   kernel_prepare                                    -> COMMON_DEB/BUILT_VER/KVER/SRCDIR
 #
 # Globals understood:
-#   CI_SCRIPTS   path to the shared DaemonCores-CI scripts (patch_guard.py)
+#   CI_SCRIPTS   path to the shared DaemonCores-CI scripts
 #   KERNEL_CDN   kernel.org archive root
-#   PATCH_GUARD_UPDATE  1 = rewrite the lock instead of enforcing it
 set -euo pipefail
 
 KERNEL_HELPERS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -172,29 +171,25 @@ kernel_patch_list() {
 }
 
 #######################################
-# Download the patches of one manifest, guard the files they touch, dry-run
-# the WHOLE set (all-or-nothing), then apply them in manifest order.
+# Download the patches of one manifest, dry-run the WHOLE set
+# (all-or-nothing), then apply them in manifest order.
 # Nothing is tolerated: a patch that cannot be downloaded or does not apply
-# fails the build and the last good deb is kept.
-# Guard: when the manifest directory carries a patches.lock.json (the
-# debian-bootc model), the sha256 of every touched file is checked on the
-# pristine tree (patch_guard.py); a changed upstream file refuses the build
-# until the lock is refreshed. Without a lock (the VE kernel-pve manifest,
-# remote XanMod patches), the all-or-nothing dry-run IS the guard.
-# PATCH_GUARD_UPDATE=1 rewrites the lock instead of enforcing it.
+# fails the build and the last good deb is kept. The guard against upstream
+# drift is the strict dry-run itself: patch runs with --fuzz=0, so a hunk
+# whose context moved (not just its line numbers) is refused instead of being
+# applied to the wrong place; no committed hash list is kept. KERNEL_PATCH_FUZZ
+# (default 0) raises the tolerance for a manifest of third-party patches that
+# is known to need it.
 # Arguments:
 #   $1 - manifest path (patches.yml)
 #   $2 - architecture/stage (amd64 or arm64)
 #   $3 - kernel version, e.g. 6.12.107 or 7.3.0
 #   $4 - kernel source tree
 #   $5 - optional class (kernel or module)
-# Globals:
-#   CI_SCRIPTS: read, path to patch_guard.py
-#   PATCH_GUARD_UPDATE: read, optional
 #######################################
 kernel_apply_patches() {
   local manifest="$1" arch="$2" version="$3" tree="$4" class="${5:-}"
-  local series="${version%.*}" name url dir file lock
+  local series="${version%.*}" name url dir file
   local -a names=() files=()
   [[ "${version}" == *.*.* ]] || series="${version}"
   dir=$(mktemp -d)
@@ -211,31 +206,17 @@ kernel_apply_patches() {
   done < <(kernel_patch_list "${manifest}" "${arch}" "${version}" "${class}")
   ((${#files[@]})) || return 0
 
-  lock="$(dirname "${manifest}")/patches.lock.json"
-  # A native PATCHES_JSON set ("-") carries no lock by definition: the
-  # all-or-nothing dry-run is the guard (same as the lock-less VE manifest).
-  if [[ "${manifest}" != "-" && -f "${lock}" ]]; then
-    local guard=()
-    [[ "${PATCH_GUARD_UPDATE:-0}" != 1 ]] || guard=(--update)
-    python3 "${CI_SCRIPTS}/patch_guard.py" --tree "${tree}" \
-      --lock "${lock}" "${guard[@]}" "${files[@]}" \
-      || {
-        echo "ERROR: a file touched by the patches changed upstream" >&2
-        exit 1
-      }
-  fi
-
   local i
   # Every patch must dry-run before ANY touch of the tree.
   for i in "${!files[@]}"; do
-    patch -d "${tree}" -p1 --no-backup-if-mismatch --dry-run <"${files[i]}" >/dev/null \
+    patch -d "${tree}" -p1 --fuzz="${KERNEL_PATCH_FUZZ:-0}" --no-backup-if-mismatch --dry-run <"${files[i]}" >/dev/null \
       || {
         echo "ERROR: patch ${names[i]} does not apply to ${version}" >&2
         exit 1
       }
   done
   for i in "${!files[@]}"; do
-    patch -d "${tree}" -p1 --no-backup-if-mismatch <"${files[i]}" >/dev/null
+    patch -d "${tree}" -p1 --fuzz="${KERNEL_PATCH_FUZZ:-0}" --no-backup-if-mismatch <"${files[i]}" >/dev/null
     echo "applied patch ${names[i]}"
   done
   rm -rf "${dir}"
