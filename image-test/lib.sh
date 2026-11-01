@@ -710,6 +710,11 @@ ram_gate() {
     echo "----- ram gate breakdown (guest) -----"
     ssh "${SSH_OPTS[@]}" root@localhost '
       echo "[meminfo]"; grep -E "^(MemTotal|MemFree|MemAvailable|Buffers|Cached|SwapTotal|SwapFree|Slab|SReclaimable|SUnreclaim|KernelStack|PageTables|VmallocUsed|AnonPages|Mapped|Shmem):" /proc/meminfo;
+      echo "[reserves: MemAvailable is below MemFree when these are large]";
+      grep -E "^(Hugepagesize|HugePages_Total|HugePages_Free|CmaTotal|CmaFree|Percpu|AnonHugePages|Unevictable|Mlocked):" /proc/meminfo;
+      echo "min_free_kbytes=$(cat /proc/sys/vm/min_free_kbytes) watermark_scale_factor=$(cat /proc/sys/vm/watermark_scale_factor)";
+      awk "/^Node/{z=\$0} /^ +(min|low|high|managed|present) /{print z, \$1, \$2*4, \"KiB\"}" /proc/zoneinfo;
+      echo "cmdline: $(cat /proc/cmdline)";
       echo "[top process RSS (KiB, name)]";
       awk "/^Name:/{name=\$2} /^VmRSS:/{print \$2, name}" /proc/[0-9]*/status 2>/dev/null | sort -rn | head -15;
       echo "[top kernel slabs (bytes)]";
