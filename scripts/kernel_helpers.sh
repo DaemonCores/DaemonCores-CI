@@ -234,12 +234,23 @@ kernel_apply_patches() {
 
   local i
   # Every patch must dry-run before ANY touch of the tree.
+  local dry
   for i in "${!files[@]}"; do
-    patch -d "${tree}" -p1 --fuzz="${fuzzes[i]}" --no-backup-if-mismatch --dry-run <"${files[i]}" >/dev/null \
+    dry=$(patch -d "${tree}" -p1 --fuzz="${fuzzes[i]}" --no-backup-if-mismatch --dry-run <"${files[i]}") \
       || {
         echo "ERROR: patch ${names[i]} does not apply to ${version}" >&2
         exit 1
       }
+    # Drift report, never silent: a fuzz override that is no longer needed
+    # (the strict dry-run passes) or hunks that only apply thanks to the
+    # override are surfaced as warnings so the manifest is revisited.
+    if ((fuzzes[i] > 0)); then
+      if patch -d "${tree}" -p1 --fuzz=0 --no-backup-if-mismatch --dry-run <"${files[i]}" >/dev/null 2>&1; then
+        echo "::warning::patch ${names[i]}: fuzz ${fuzzes[i]} is no longer needed on ${version}, remove it from the manifest"
+      else
+        echo "::warning::patch ${names[i]} applies on ${version} only with fuzz ${fuzzes[i]}: $(grep -c 'with fuzz' <<<"${dry}") hunk(s) placed by fuzz, re-check the placement"
+      fi
+    fi
   done
   for i in "${!files[@]}"; do
     patch -d "${tree}" -p1 --fuzz="${fuzzes[i]}" --no-backup-if-mismatch <"${files[i]}" >/dev/null
