@@ -44,6 +44,12 @@ case "$1" in
       exit 1
     fi
     ;;
+  image)
+    if [ "$2" = "exists" ] && [ -n "${MISSING_IMAGE:-}" ] \
+      && [[ " $* " == *"${MISSING_IMAGE}"* ]]; then
+      exit 1
+    fi
+    ;;
   run)
     if [ -n "${FAIL_RUN:-}" ] && [[ " $* " == *"${FAIL_RUN}"* ]]; then
       exit 1
@@ -577,13 +583,27 @@ def test_the_derived_image_is_built_after_the_tests_on_the_local_parent(
     iso = [b for b in sb.calls('podman build') if 'Containerfile.iso' in b]
     assert len(iso) == 1
     assert f'--build-arg BASE_IMAGE={IMAGE}:latest_amd64' in iso[0]
-    assert '--pull=missing' in iso[0]
+    assert '--pull=never' in iso[0]
     assert sb.states()['iso'] == 'ok'
     # The installer image has no SSH server: no boot test, lint only.
     assert not [t for t in sb.calls('image-test test') if '/iso' in t
                 or ':iso_' in t]
     assert any(f'{IMAGE}:iso_amd64 bootc container lint' in c
                for c in sb.calls('podman run'))
+
+
+@needs_jq
+def test_a_derived_image_never_falls_back_to_the_published_parent(
+        sb: Sandbox) -> None:
+    """A parent rebuilt in this run but absent locally fails the child.
+
+    Pulling the published tag would build on the previous publication and
+    push it back under the parent's tag.
+    """
+    done = sb.run(LATEST, MISSING_IMAGE=f'{IMAGE}:latest_amd64')
+    assert done.returncode == 1
+    assert sb.states()['iso'] == 'build-failed'
+    assert not [b for b in sb.calls('podman build') if 'Containerfile.iso' in b]
 
 
 @needs_jq

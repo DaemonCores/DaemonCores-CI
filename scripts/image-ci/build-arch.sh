@@ -321,11 +321,22 @@ build_image() {
     # An image built on another image of this run: the parent is the local
     # image when it was rebuilt, the published one otherwise (pull policy
     # missing).
-    local parent
+    local parent pull=missing
     parent=$(row_get "${tag}" "${col_parent}")
+    if [[ "$(row_get "${parent}" "${col_state}")" == "ok" ]]; then
+      # Rebuilt in this run: the local image is the only valid parent. A
+      # registry fallback would silently build on the previous publication
+      # and push it back under the parent's tag.
+      pull=never
+      if ! podman_ image exists "$(ref_of "${parent}")"; then
+        echo "parent $(ref_of "${parent}") built in this run is absent from the local store" \
+          | tee "${log}"
+        return 1
+      fi
+    fi
     run_build "${log}" \
       "${flags[@]}" \
-      --pull=missing \
+      --pull="${pull}" \
       --arch "${ARCH}" \
       --build-arg "BASE_IMAGE=$(ref_of "${parent}")" \
       --build-arg "ARCH=${ARCH}" \
