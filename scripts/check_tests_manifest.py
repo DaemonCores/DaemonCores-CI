@@ -17,7 +17,6 @@ import yaml
 
 SECTIONS = ("tests", "reboot_tests")
 ARCHES = {"amd64", "arm64"}
-VARIANTS = {"main", "minimal"}
 
 
 def check(data: dict[str, object]) -> list[str]:
@@ -50,8 +49,6 @@ def check(data: dict[str, object]) -> list[str]:
                     found.append(f"{where} lacks {key}")
             if entry.get("arch", "amd64") not in ARCHES:
                 found.append(f"{where} has an unknown arch")
-            if entry.get("variant", "main") not in VARIANTS:
-                found.append(f"{where} has an unknown variant")
             names.append(str(entry.get("name")))
         if len(names) != len(set(names)):
             found.append(f"duplicate name in {section}")

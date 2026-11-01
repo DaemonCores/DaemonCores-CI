@@ -678,9 +678,9 @@ def test_lint_failure_is_recorded(sb: Sandbox) -> None:
 def test_boot_tests_use_one_prepare_and_one_child_process_per_image(
         sb: Sandbox) -> None:
     """Prepare once, test each image with its RAM budget, teardown once."""
-    entries = [entry('latest', twin='-nosign'), entry('minimal')]
-    (sb.root / 'Containerfile.minimal').write_text(MAIN_CF)
-    entries[1]['file'] = 'Containerfile.minimal'
+    entries = [entry('latest', twin='-nosign'), entry('extra')]
+    (sb.root / 'Containerfile.extra').write_text(MAIN_CF)
+    entries[1]['file'] = 'Containerfile.extra'
     done = sb.run(entries)
     assert done.returncode == 0, done.stderr
     calls = sb.calls('image-test')
@@ -692,7 +692,7 @@ def test_boot_tests_use_one_prepare_and_one_child_process_per_image(
     assert tests == [
         ['test', f'{IMAGE}:latest_amd64', '15'],
         ['test', f'{IMAGE}:latest-nosign_amd64', '15'],
-        ['test', f'{IMAGE}:minimal_amd64', '15'],
+        ['test', f'{IMAGE}:extra_amd64', '15'],
     ]
     assert 'STATE=' + str(sb.runner_temp / 'image-ci' / 'image-test') \
         in calls[1]

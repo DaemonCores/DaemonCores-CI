@@ -10,8 +10,8 @@ name: iso
 # Two modes, determined by the compressed size of the payload image:
 #   - offline (< 1.8 GiB): ISO embeds the clean base image as the install
 #     payload via --bootc-installer-payload-ref; no network needed at install.
-#   - net-install (>= 1.8 GiB): ISO is too large for GitHub Releases; falls
-#     back to the minimal image as the live env; all installs require network.
+#   - net-install (>= 1.8 GiB): ISO is too large for GitHub Releases; the ISO
+#     carries only the live env and all installs require network.
 #
 # Both amd64 and arm64 ISOs are built in parallel.
 
@@ -134,11 +134,8 @@ jobs:
             echo "installer=${INSTALLER}" >> "$GITHUB_OUTPUT"
           else
             echo "Payload ${PAYLOAD_SIZE} bytes >= ${THRESHOLD} — net-install ISO mode"
-            # Use minimal image as live env to keep ISO small
-            MINIMAL="ghcr.io/${REPO}:minimal_${ARCH}"
-            sudo podman pull "${MINIMAL}"
             echo "offline=false" >> "$GITHUB_OUTPUT"
-            echo "installer=${MINIMAL}" >> "$GITHUB_OUTPUT"
+            echo "installer=${INSTALLER}" >> "$GITHUB_OUTPUT"
           fi
           echo "payload=${PAYLOAD}" >> "$GITHUB_OUTPUT"
 

@@ -297,7 +297,7 @@ def test_validate_manifest_checks_reboot_tests(stubs: Path) -> None:
     [
         ("img:latest_amd64", "plain", "1"),
         ("img:latest-nosign_amd64", "nosign", "1"),
-        ("img:minimal-4k_amd64", "k4", "0"),
+        ("img:extra-4k_amd64", "k4", "0"),
     ],
 )
 def test_select_category_secure_boot_per_tag(stubs: Path, tag: str, category: str, secure: str) -> None:
