@@ -763,3 +763,9 @@ Gap: RSS cannot attribute the ~100 MiB of kernel-side memory. Harness now also d
 - arm64 `latest-nosign` passes, but that boot category SKIPs the "no failed systemd units" test (`SKIP ... (global test, running: unsigned-kernel)`), so it proves nothing about networking.
 - This run predates 522976c (no per-unit cgroup dump yet); arm64 RAM latest 591 / 111 / 24, latest-nosign 574 / 94 / 24.
 - State: cause still a hypothesis (ifupdown2 Python under TCG exceeds TimeoutStartSec=30). Needs a local arm64 boot with timings.
+
+## Tick 24 — minimal image discontinued (owner decision P-676)
+
+- The RAM-cut proposals are dropped: the services are required by bootc or by any server, and the minimal image brought nothing over `latest`.
+- Removed from this repo: the `variant` field of the tests manifest (harness `lib.sh`, `check_tests_manifest.py`, its test), the `minimal` references in `full-pipeline.yml` (img auto-rebuild trigger), `iso-builder.yml` (net-install mode now uses the ISO live image `iso_<arch>` instead of the minimal image), `install-fs.sh` comments, README and wiki. Tests: 222 passed.
+- Open (P-675): run 41312585255 failed in `upstream-track` (`no sha256 for linux-7.2.15.tar.xz` in `sha256sums.asc`, which lists 7.2.14 then 7.3.1; 7.3.1 skipped on a 404 BORE patch). Cause of the unresolved `KERNEL_VER` still to be fixed in `track.sh`.

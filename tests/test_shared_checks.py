@@ -114,14 +114,6 @@ def test_manifest_accepts_a_sound_file() -> None:
             "tests": [{
                 "name": "a",
                 "run": "x",
-                "diag": "y",
-                "variant": "z"
-            }]
-        }, "unknown variant"),
-        ({
-            "tests": [{
-                "name": "a",
-                "run": "x",
                 "diag": "y"
             }] * 2
         }, "duplicate name"),

@@ -5,7 +5,7 @@
 # (image-test/image-test.sh of this repository).
 #
 # Usage: e2e-local.sh IMAGE [ARCH]    (run from the calling repository root)
-#   IMAGE  image already present in local podman storage (e.g. x:minimal)
+#   IMAGE  image already present in local podman storage (e.g. x:latest)
 #   ARCH   amd64 (default) or arm64
 #
 # Environment:

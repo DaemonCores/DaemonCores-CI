@@ -178,7 +178,7 @@ jobs:
                 #   kernel/modules/x86_64 -> ISO, NOT any img format (no img)
                 # Only trigger a format whose deps actually changed; never
                 # cascade between img formats.
-                match '^Containerfile(\.minimal)?$' && { img_rpi=true; img_gallium=true; } || true
+                match '^Containerfile$' && { img_rpi=true; img_gallium=true; } || true
                 match '^workflows/bootc-debs-builder/packages\.yml$' && { img_rpi=true; img_gallium=true; } || true
                 match '^workflows/bootc-debs-builder/kernel/modules/(rpi|rk3588)' && img_rpi=true || true
               fi ;;

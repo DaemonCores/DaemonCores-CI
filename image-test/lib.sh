@@ -26,7 +26,6 @@ ARCH_FROM_ENV="${ARCH:-}"
 ARCH="${ARCH:-amd64}"
 RAM_IDLE_MAX_MB="${RAM_IDLE_MAX_MB:-15}"
 IMAGE="${IMAGE:-}"
-VARIANT="main"
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 # State shared by the sub-commands of one job: the SSH key, the Secure Boot
 # tooling and key hierarchy, the varstore cache, the per-image scratch files.
@@ -736,8 +735,8 @@ ram_gate() {
   fi
   if [ "${used}" -gt "${RAM_IDLE_MAX_MB}" ]; then
     # Self-explaining report: dump what actually holds the memory. Everything
-    # runs on the guest over SSH and must not assume extra packages (minimal
-    # image: awk+coreutils only).
+    # runs on the guest over SSH and must not assume extra packages
+    # (awk+coreutils only).
     echo "----- ram gate breakdown (guest) -----"
     ssh "${SSH_OPTS[@]}" root@localhost '
       echo "[meminfo]"; grep -E "^(MemTotal|MemFree|MemAvailable|Buffers|Cached|SwapTotal|SwapFree|Slab|SReclaimable|SUnreclaim|KernelStack|PageTables|VmallocUsed|AnonPages|Mapped|Shmem):" /proc/meminfo;
@@ -778,7 +777,7 @@ ram_gate() {
 #######################################
 run_tests() {
   local section="${1:-tests}"
-  local n i name cmd expect diag test_arch test_variant test_cats out rc fail=0 pass
+  local n i name cmd expect diag test_arch test_cats out rc fail=0 pass
   n=$(yq ".${section} | length" "${TESTS_FILE}")
   for ((i = 0; i < n; i++)); do
     name=$(yq ".${section}[${i}].name" "${TESTS_FILE}")
@@ -786,12 +785,6 @@ run_tests() {
     test_arch=$(yq ".${section}[${i}].arch // \"\"" "${TESTS_FILE}")
     if [ -n "${test_arch}" ] && [ "${test_arch}" != "${ARCH}" ]; then
       echo "  SKIP  ${name} (arch: ${test_arch}, running: ${ARCH})"
-      continue
-    fi
-    # Skip tests that are pinned to a different image variant.
-    test_variant=$(yq ".${section}[${i}].variant // \"\"" "${TESTS_FILE}")
-    if [ -n "${test_variant}" ] && [ "${test_variant}" != "${VARIANT}" ]; then
-      echo "  SKIP  ${name} (variant: ${test_variant}, running: ${VARIANT})"
       continue
     fi
     # Skip tests of another category; a test with no category is global and
@@ -1138,12 +1131,6 @@ cmd_test() {
   IMAGE="$1"
   RAM_IDLE_MAX_MB="${2:-${RAM_IDLE_MAX_MB}}"
   load_state || exit 1
-  # Tag containing "minimal" maps to the minimal variant; everything else
-  # (latest, gallium, ...) to main. run_tests skips tests of another variant.
-  VARIANT="main"
-  if echo "${IMAGE}" | grep -qE ':[^:]*minimal'; then
-    VARIANT="minimal"
-  fi
   mkdir -p "${LOGS}"
   # One log per category when the caller forces one (several boots of a tag).
   SERIAL="${LOGS}/${IMAGE//[^A-Za-z0-9._-]/_}${CATEGORY:+.${CATEGORY//[^A-Za-z0-9._-]/_}}.serial.log"
