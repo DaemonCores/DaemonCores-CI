@@ -236,18 +236,18 @@ jobs:
 
       - name: Log in to GHCR
         env:
-          PAT_PKG: ${{ secrets.PAT_PKG || github.token }}
+          GHCR_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           # Login Podman for build and push with podman fonctionality and for bootc standard
           sudo podman login ghcr.io \
             --username "${{ github.actor }}" \
-            --password-stdin <<< "${PAT_PKG}"
+            --password-stdin <<< "${GHCR_TOKEN}"
 
           # Login Docker because github signe container with docker and not podman
           docker login ghcr.io \
             --username "${{ github.actor }}" \
-            --password-stdin <<< "${PAT_PKG}"
+            --password-stdin <<< "${GHCR_TOKEN}"
 
       # Key-based signatures are stored as `.sig` tags, the format read by
       # containers-image (`sigstoreSigned`); pinned to cosign 2.x which writes it.
@@ -311,12 +311,12 @@ jobs:
     steps:
       - name: Log in to GHCR
         env:
-          PAT_PKG: ${{ secrets.PAT_PKG || github.token }}
+          GHCR_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           docker login ghcr.io \
             --username "${{ github.actor }}" \
-            --password-stdin <<< "${PAT_PKG}"
+            --password-stdin <<< "${GHCR_TOKEN}"
 
       - name: Create and push manifest lists
         env:

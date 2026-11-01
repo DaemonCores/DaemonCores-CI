@@ -22,7 +22,7 @@
 # must start a new run when `created` is not empty.
 #
 # Environment:
-#   GH_TOKEN           token with secrets:write (PAT_SECRETS)
+#   GH_TOKEN           token with secrets:write (PIPELINE_PAT)
 #   GITHUB_REPOSITORY  owner/name of the repository
 #   GITHUB_OUTPUT      step output file (optional)
 #
@@ -50,7 +50,7 @@ die() {
 #######################################
 store() {
   gh secret set "$1" --repo "${GITHUB_REPOSITORY}" >/dev/null \
-    || die "cannot write $1: GH_TOKEN (PAT_SECRETS) needs secrets:write"
+    || die "cannot write $1: GH_TOKEN (PIPELINE_PAT) needs secrets:write"
 }
 
 #######################################
@@ -170,9 +170,9 @@ main() {
   local group
   (($# > 0)) || die "usage: $0 cosign|apt|sb|modules..."
   if [[ -z "${GH_TOKEN:-}" ]]; then
-    echo "::warning::PAT_SECRETS is not set: missing signing secrets cannot be" \
+    echo "::warning::PIPELINE_PAT is not set: missing signing secrets cannot be" \
       "generated (images are signed keyless, modules stay unsigned)." \
-      "Store a PAT with secrets:write as PAT_SECRETS to generate them" \
+      "Store a PAT with secrets:write as PIPELINE_PAT to generate them" \
       "automatically."
     echo "created=" >>"${GITHUB_OUTPUT:-/dev/null}"
     return 0
