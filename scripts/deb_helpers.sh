@@ -173,6 +173,20 @@ deb_overlay_tree() {
     "/debs/${pkg}_${ORIG_VER}${suffix}_${ARCH}.deb"
 }
 
+# The buildenv image carries the Proxmox keyring but purges apt lists and
+# configures no Proxmox source, so `apt-get build-dep` sees neither the
+# Proxmox build-deps nor the Debian ones. Configure the source (suite from
+# the running Debian release, architecture left to apt) and refresh the lists.
+# Plain http: the CDN SNI mismatch breaks https; the keyring still authenticates.
+deb_setup_pve_repo() {
+  local suite keyring="${PVE_KEYRING:-/usr/share/keyrings/proxmox-archive-keyring.gpg}"
+  suite=$(. /etc/os-release && echo "${VERSION_CODENAME:?}")
+  [ -r "$keyring" ] || { echo "ERROR: Proxmox keyring ${keyring} missing" >&2; return 1; }
+  echo "deb [signed-by=${keyring}] http://download.proxmox.com/debian/pve ${suite} pve-no-subscription" \
+    >/etc/apt/sources.list.d/pve-no-subscription.list
+  apt-get update
+}
+
 deb_source_build() {
   local pkg="${1:?}" commit="${2:?}" src_ver="${3:?}" lane="${4:?}"
   shift 4
@@ -231,6 +245,7 @@ deb_source_build() {
   # Upstream build flow: build deps from debian/control, then the staged
   # `make deb` (not raw dpkg-buildpackage on the git root — its Makefile
   # stages src + debian into a build dir first). Debs land in $O/src.
+  deb_setup_pve_repo || return 1
   (cd "$O/src" && apt-get build-dep -y . && dpkg-checkbuilddeps >/dev/null)
   # The upstream Makefile runs lintian after every dpkg-buildpackage; the
   # buildenv image does not bake it, so install it on demand (quietly).
