@@ -743,7 +743,7 @@ ram_gate() {
       echo "[reserves: MemAvailable is below MemFree when these are large]";
       grep -E "^(Hugepagesize|HugePages_Total|HugePages_Free|CmaTotal|CmaFree|Percpu|AnonHugePages|Unevictable|Mlocked):" /proc/meminfo;
       echo "min_free_kbytes=$(cat /proc/sys/vm/min_free_kbytes) watermark_scale_factor=$(cat /proc/sys/vm/watermark_scale_factor)";
-      awk "/^Node/{z=\$0} /^ +(min|low|high|managed|present) /{print z, \$1, \$2*4, \"KiB\"}" /proc/zoneinfo;
+      awk -v ps="$(getconf PAGESIZE)" "/^Node/{z=\$0} /^ +(min|low|high|managed|present) /{print z, \$1, \$2*ps/1024, \"KiB\"}" /proc/zoneinfo;
       echo "cmdline: $(cat /proc/cmdline)";
       echo "[kernel memory banner (dmesg)]";
       dmesg 2>/dev/null | grep -E "Memory: [0-9]+K/|Freeing (unused|initrd)" | head -4;
