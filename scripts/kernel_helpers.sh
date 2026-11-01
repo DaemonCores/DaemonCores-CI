@@ -299,10 +299,15 @@ kernel_flavour_kcflags() {
 #   $1 - kernel source tree
 #   $2 - make target (bindeb-pkg or deb-pkg)
 #   $3 - optional KCFLAGS (e.g. the flavour -march, from kernel_flavour_kcflags)
+# Globals:
+#   KERNEL_MAKE_ARGS: optional, extra make arguments (word-split, e.g. a
+#     command-line variable override the tree needs)
 #######################################
 kernel_build_debs() {
   local tree="$1" target="$2" kcflags="${3:-}"
   local -a build_cmd=(make -j"$(nproc)")
+  # shellcheck disable=SC2206  # word-splitting of the make arguments is intended
+  [[ -z "${KERNEL_MAKE_ARGS:-}" ]] || build_cmd+=(${KERNEL_MAKE_ARGS})
   [[ -z "${kcflags}" ]] || build_cmd+=(KCFLAGS="${kcflags}")
   # The deb-pkg source package is built from `git archive` HEAD: without a
   # commit of the patch set, dpkg-source would have to embed the whole
