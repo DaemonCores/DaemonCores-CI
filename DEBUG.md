@@ -769,3 +769,9 @@ Gap: RSS cannot attribute the ~100 MiB of kernel-side memory. Harness now also d
 - The RAM-cut proposals are dropped: the services are required by bootc or by any server, and the minimal image brought nothing over `latest`.
 - Removed from this repo: the `variant` field of the tests manifest (harness `lib.sh`, `check_tests_manifest.py`, its test), the `minimal` references in `full-pipeline.yml` (img auto-rebuild trigger), `iso-builder.yml` (net-install mode now uses the ISO live image `iso_<arch>` instead of the minimal image), `install-fs.sh` comments, README and wiki. Tests: 222 passed.
 - Open (P-675): run 41312585255 failed in `upstream-track` (`no sha256 for linux-7.2.15.tar.xz` in `sha256sums.asc`, which lists 7.2.14 then 7.3.1; 7.3.1 skipped on a 404 BORE patch). Cause of the unresolved `KERNEL_VER` still to be fixed in `track.sh`.
+
+## Tick 25 — kernel with no eligible release is a skip (owner decision P-678)
+
+- Owner: when the kernel has no eligible release yet, skipping is legitimate. Previously the unset `KERNEL_VER` made the build fail (red job) while keeping the last-good deb.
+- `select_kernel_release` returns 2 for "nothing eligible" (no release with every patch, or only older than the published floor, or no published checksum); `track.sh resolve` then writes `skip=true`; `build-one-deb.yml` passes it to `build-deb`, whose `SKIP_BUILD=true` restores the last-good deb, keeps the prior hash and does NOT set `build_failed`. Any other resolution error (API/network, missing patch manifest) still fails as before. With no published deb to keep, the job still fails.
+- Tests: `test_resolve_skips_when_no_kernel_digest_is_published`, `skip=` assertions on the older-than-published and missing-manifest cases, `tests/test_build_deb_skip.py` (restore without `build_failed`; a failing build without skip stays flagged). 226 passed. `DEBS_DIR` is now overridable (`${DEBS_DIR:-/debs}`).

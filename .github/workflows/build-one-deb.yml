@@ -215,6 +215,7 @@ jobs:
           build: ${{ steps.def.outputs.build }}
           arch: ${{ inputs.arch }}
           extra-env: ${{ steps.hashenv.outputs.lines }}
+          skip: ${{ steps.track.outputs.skip }}
 
       - name: ccache statistics
         if: always() && steps.def.outputs.signs == 'yes'

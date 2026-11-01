@@ -41,7 +41,8 @@
 #
 # Modes (first argument):
 #   resolve  Resolve the tracked variables of PKG and write the manifest env
-#            with them merged in to the step output `env`.  An entry that cannot
+#            with them merged in to the step output `env`, and `skip=true` when
+#            a kernel entry has no eligible release yet (nothing to build).  An entry that cannot
 #            be resolved is left unset: the build then fails and the last-good
 #            published deb is kept.  With STRICT=true the step fails instead.
 #   check    Report, for every tracked package, the entries whose latest
@@ -172,6 +173,10 @@ kernel_digests() {
 #   $1 - package name
 #   $2 - env variable key
 #   $3 - moniker
+# Returns:
+#   0 with the entry on stdout; 2 when no release is eligible yet (upstream is
+#   not ready: patches or checksums unpublished, or only older than what is
+#   published), which is a legitimate "nothing to build"; 1 on any other error.
 #######################################
 select_kernel_release() {
   local req manifest version floor entry
@@ -194,7 +199,7 @@ select_kernel_release() {
     if [[ -n "${floor}" && "$(printf '%s\n%s\n' "${floor}" "${version}" \
       | sort -V | head -n1)" != "${floor}" ]]; then
       echo "kernel ${version} is older than the published ${floor}" >&2
-      return 1
+      return 2
     fi
     if patches_available "${manifest}" "${version}"; then
       entry=$(curl --retry 3 -fsSL "${KERNEL_ORG_URL:-https://www.kernel.org}/releases.json" \
@@ -211,7 +216,7 @@ select_kernel_release() {
     | yq -p=json '.releases[] | select(.moniker == "stable" or .moniker == "longterm")
       | .version' | sort -rV)
   echo "no kernel release has every patch of ${manifest}" >&2
-  return 1
+  return 2
 }
 
 #######################################
@@ -225,7 +230,7 @@ select_kernel_release() {
 #######################################
 resolve_kernel() {
   local pkg="$1" key="$2" moniker="$3" release version source digests
-  release=$(select_kernel_release "${pkg}" "${key}" "${moniker}") || return 1
+  release=$(select_kernel_release "${pkg}" "${key}" "${moniker}") || return $?
   version=$(yq -p=json '.version // ""' <<<"${release}")
   source=$(yq -p=json '.source // ""' <<<"${release}")
   [[ -n "${version}" && -n "${source}" ]] || return 1
@@ -395,12 +400,18 @@ merge_env() {
 #   Exits 1 when an entry is unresolved and STRICT is true.
 #######################################
 resolve() {
-  local key lines overrides="" failed=0
+  local key lines overrides="" failed=0 skip=false rc
   while IFS= read -r key; do
     [[ -n "${key}" ]] || continue
-    if lines=$(resolve_entry "${PKG}" "${key}"); then
+    rc=0
+    lines=$(resolve_entry "${PKG}" "${key}") || rc=$?
+    if [[ "${rc}" -eq 0 ]]; then
       overrides+="${lines}"$'\n'
       echo "upstream ${PKG}: ${lines//$'\n'/ }" >&2
+    elif [[ "${rc}" -eq 2 ]]; then
+      skip=true
+      echo "::notice::${PKG}: no upstream release is eligible for ${key} yet;" \
+        "nothing to build, the last-good deb is kept" >&2
     else
       failed=1
       echo "::warning::${PKG}: cannot resolve the latest upstream for ${key};" \
@@ -412,6 +423,7 @@ resolve() {
     echo "env<<TRACK_ENV_EOF"
     merge_env "${BASE_ENV:-}" "${overrides%$'\n'}"
     echo "TRACK_ENV_EOF"
+    echo "skip=${skip}"
   } >>"${GITHUB_OUTPUT:-/dev/stdout}"
 }
 
