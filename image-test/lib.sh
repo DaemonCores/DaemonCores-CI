@@ -228,6 +228,7 @@ install_disk() {
     -v "${DISK}:/disk.raw" \
     -v "${KEY}.pub:/key.pub:ro" \
     -v "${SCRIPT_DIR}/install-fs.sh:/install-fs.sh:ro" \
+    -v "${SCRIPT_DIR}/files:/files:ro" \
     "${IMAGE}" \
     bash /install-fs.sh
 }

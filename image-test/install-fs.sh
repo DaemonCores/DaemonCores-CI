@@ -6,6 +6,8 @@
 # via a btrfs qgroup quota. Runs privileged INSIDE the image, which ships the
 # partitioning tools (sfdisk, mkfs.*, btrfs). Used by the image-test harness.
 set -euo pipefail
+# Static files copied verbatim into the test deployment (no heredoc writes).
+CI_FILES_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/files
 
 # Minimal images omit sfdisk (util-linux fdisk package). Install it
 # on-demand so the disk partitioning step works for all image variants.
@@ -260,16 +262,7 @@ if [ -n "${deployed_dir}" ]; then
     # subvol, leaving the entire /var tree (and any etc overlay backed by it)
     # read-only at runtime. The /boot and /boot/efi entries are included for
     # completeness; they are not load-bearing for the writability fix.
-    cat > "${_deploy_etc}/fstab" <<'FSTAB'
-# Written by install-fs.sh — bootc install to-filesystem does not generate fstab.
-# NOTE: no "/" entry — composefs is enabled (prepare-root.conf), and the bootc
-# docs explicitly state that a "/" fstab entry does not work after the initrd
-# with composefs (the root is a composefs overlay, not the raw btrfs subvol).
-LABEL=dcos  /var       btrfs  subvol=var,x-systemd.device-timeout=0     0 0
-LABEL=dcos  /var/log   btrfs  subvol=varlog,x-systemd.device-timeout=0  0 0
-LABEL=boot  /boot      ext4   defaults                                   0 0
-LABEL=EFI   /boot/efi  vfat   umask=0077                                 0 2
-FSTAB
+    install -D -m 0644 "${CI_FILES_DIR}/fstab" "${_deploy_etc}/fstab"
     echo "=== fstab written to ${_deploy_etc}/fstab ==="
     # CI-only diagnostic oneshot: dump the real /etc and /etc/ssh state
     # (existence, mount flags, live access() probe, live systemd condition
@@ -278,42 +271,8 @@ FSTAB
     # in CI. Reaches the serial console through the ForwardToConsole config
     # above. Diagnostic only, never ships in published images.
     mkdir -p "${_deploy_etc}/systemd/system/multi-user.target.wants"
-    cat > "${_deploy_etc}/systemd/system/ci-ssh-debug.service" <<'UNIT'
-[Unit]
-Description=CI diagnostic: mount layout, writability, sshd keygen, network state
-After=networking.service ssh.service
-Wants=networking.service
-[Service]
-Type=oneshot
-ExecStart=/bin/sh -c "\
-  echo '| ci-dbg: findmnt /var / /etc'; \
-  findmnt /var / /etc 2>&1 | sed 's/^/| /'; \
-  echo '| ci-dbg: touch /etc/ssh probe'; \
-  touch /etc/ssh/.ci-rw-probe 2>&1 && echo '| ci-dbg: /etc/ssh RW OK' && rm -f /etc/ssh/.ci-rw-probe || echo '| ci-dbg: /etc/ssh NOT writable'; \
-  echo '| ci-dbg: touch /var probe'; \
-  touch /var/.ci-rw-probe 2>&1 && echo '| ci-dbg: /var RW OK' && rm -f /var/.ci-rw-probe || echo '| ci-dbg: /var NOT writable'; \
-  echo '| ci-dbg: ip addr'; \
-  ip addr show 2>&1 | sed 's/^/| /'; \
-  echo '| ci-dbg: ip route'; \
-  ip route show 2>&1 | sed 's/^/| /'; \
-  echo '| ci-dbg: /etc/network/interfaces'; \
-  cat /etc/network/interfaces 2>&1 | sed 's/^/| /'; \
-  echo '| ci-dbg: networking.service drop-ins'; \
-  ls -la /usr/lib/systemd/system/networking.service.d/ 2>&1 | sed 's/^/| /'; \
-  echo '| ci-dbg: ifupdown2-autoconf script'; \
-  ls -la /usr/sbin/ifupdown2-autoconf 2>&1 | sed 's/^/| /'; \
-  echo '| ci-dbg: systemctl cat networking.service'; \
-  systemctl cat networking.service 2>&1 | sed 's/^/| /'; \
-  echo '| ci-dbg: journalctl -u networking'; \
-  journalctl -u networking -b --no-pager -o short-precise 2>&1 | tail -40 | sed 's/^/| /'; \
-  echo '| ci-dbg: networking.service timings'; \
-  systemctl show networking.service -p ExecMainStartTimestampMonotonic -p ExecMainExitTimestampMonotonic -p TimeoutStartUSec -p Result 2>&1 | sed 's/^/| /'; \
-  echo '| ci-dbg: /root/.ssh/authorized_keys'; \
-  ls -la /root/.ssh/ 2>&1 | sed 's/^/| /'; \
-  cat /root/.ssh/authorized_keys 2>&1 | head -3 | sed 's/^/| /'; \
-  echo '| ci-dbg: sshd status'; \
-  systemctl status ssh.service 2>&1 | tail -8 | sed 's/^/| /'"
-UNIT
+    install -D -m 0644 "${CI_FILES_DIR}/ci-ssh-debug.service" \
+      "${_deploy_etc}/systemd/system/ci-ssh-debug.service"
     ln -sf "../ci-ssh-debug.service" \
       "${_deploy_etc}/systemd/system/multi-user.target.wants/ci-ssh-debug.service"
   done
