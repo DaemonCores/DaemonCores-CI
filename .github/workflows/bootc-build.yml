@@ -57,6 +57,9 @@ jobs:
   # Also computes a global hash over all Containerfiles so any variant change
   # invalidates every variant's "identical to previous" cache.
   #
+  # A Containerfile carrying `LABEL org.daemoncores.arches="amd64"` (or a list)
+  # is built for those architectures only, in the same per-arch job as the
+  # others; its manifest list covers the same architectures.
   # A second output, manifest_matrix, lists the unique tags with the `arches`
   # the manifest list covers (both for a regular tag, arm64 only for a `-4k`
   # tag).
@@ -113,8 +116,18 @@ jobs:
             if [[ "${NOSIGN_IMAGES}" == "true" ]] && grep -qE '^[[:space:]]*LABEL[[:space:]]+org\.daemoncores\.unsigned-kernel-image' "$name"; then
               has_twin=true
             fi
+            # An `org.daemoncores.arches` LABEL (space or comma separated) limits
+            # the image to those architectures (a vendor-binary image with no
+            # build for the other one); absent, both are built.
+            only_arches=$(sed -nE "s/^[[:space:]]*LABEL[[:space:]]+org\.daemoncores\.arches=[\"']?([a-z0-9, ]*).*/\1/p" "$name" \
+              | head -n1 | tr ',' ' ')
             twin_arches='[]'
+            built_arches='[]'
             for arch in amd64 arm64; do
+              if [[ -n "${only_arches// /}" && " ${only_arches} " != *" ${arch} "* ]]; then
+                continue
+              fi
+              built_arches=$(printf '%s' "$built_arches" | jq -c --arg a "$arch" '. += [$a]')
               suffix=""
               twin_suffix=""
               if [[ "$arch" == "arm64" && "$has_4k" == "true" ]]; then
@@ -129,9 +142,13 @@ jobs:
                 --arg ks "$suffix" --arg ts "$twin_suffix" \
                 '. += [{file: $file, tag: $tag, arch: $arch, kernel_suffix: $ks, twin_suffix: $ts}]')
             done
+            if [[ "$built_arches" == '[]' ]]; then
+              echo "::error::${name}: org.daemoncores.arches lists no known architecture" >&2
+              exit 1
+            fi
             manifest_matrix=$(printf '%s' "$manifest_matrix" | jq -c \
-              --arg tag "$tag" \
-              '. += [{tag: $tag, arches: ["amd64", "arm64"]}]')
+              --arg tag "$tag" --argjson arches "$built_arches" \
+              '. += [{tag: $tag, arches: $arches}]')
             # The 4 KB arm64 kernel image for the older devices, when the
             # Containerfile asks for it.
             if [[ "$has_4k" == "true" ]]; then

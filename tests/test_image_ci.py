@@ -587,6 +587,29 @@ def test_the_derived_image_is_built_after_the_tests_on_the_local_parent(
 
 
 @needs_jq
+def test_a_derived_vendor_image_is_built_and_boot_tested_in_the_same_job(
+        sb: Sandbox) -> None:
+    """A derived image that runs a VM is built on its tested parent, then tested.
+
+    Unlike the installer image it is not in the boot-test skip list: it is a
+    bootable image, so its own boot test runs in the job of its parent, after
+    the second build wave, and it is pushed without the canonical tags.
+    """
+    (sb.root / 'Containerfile.vendor').write_text(ISO_CF)
+    done = sb.run([entry('latest'), entry('vendor', 'Containerfile.vendor')])
+    assert done.returncode == 0, done.stderr
+    log = sb.log.read_text()
+    vendor = [b for b in sb.calls('podman build') if 'Containerfile.vendor' in b]
+    assert len(vendor) == 1
+    assert f'--build-arg BASE_IMAGE={IMAGE}:latest_amd64' in vendor[0]
+    tests = [t for t in sb.calls('image-test test') if ':vendor_' in t]
+    assert len(tests) == 1
+    assert log.index('Containerfile.vendor') < log.rindex('image-test test')
+    assert sb.states()['vendor'] == 'ok'
+    assert len(sb.calls('image-test prepare')) == 1
+
+
+@needs_jq
 def test_the_derived_image_is_blocked_when_its_parent_failed(
         sb: Sandbox) -> None:
     """A parent that did not pass blocks the image built on it."""
