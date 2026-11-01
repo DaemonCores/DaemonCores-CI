@@ -794,3 +794,10 @@ Gap: RSS cannot attribute the ~100 MiB of kernel-side memory. Harness now also d
 - Cause (reproduced locally): `phase_test` iterates `while read tag ... done < <(tags_in_state linted)`; `image_test` runs the harness (ssh, qemu) which inherits the loop's stdin and drains the remaining tags. With a harness stub reading stdin, a `hash build lint test` run tests only the first tag (`tests/test_multi_category_boot.py::test_boot_does_not_consume_the_tag_list` failed before the fix). The second `test` pass of the default pipeline hid it for one tag only.
 - Fix: `image_test` redirects its standard input from /dev/null. 234 tests pass.
 - Open until a full run shows every tag tested, pushed and the manifest lists created.
+
+## Tick 29 - ISO size probe read a single-image manifest as a list (run 41359740211)
+
+- Symptom: `Build ISO` failed on both arches at "Detect payload size": `jq: error (at <stdin>:5): Cannot iterate over null`, preceded by `The manifest type ... is not a manifest list but a single image`.
+- Cause (reproduced locally, podman 6.1.4): `podman manifest inspect ghcr.io/daemoncores/debian-bootc:latest_amd64` prints `"manifests": null` with no `layers`. The registry manifest does carry them: fetching it directly and applying the same jq gives 1186106015 bytes.
+- Fix: read the registry manifest with `skopeo inspect --raw` (iso-builder.yml). Same jq expression.
+- Open until a run shows the ISO jobs passing. The preceding jobs of that run (images, manifests, tests) passed, which closes Tick 28 for the `iso` manifest list.

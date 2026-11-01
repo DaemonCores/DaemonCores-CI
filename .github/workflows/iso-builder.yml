@@ -102,11 +102,11 @@ jobs:
 
       - name: Log in to GHCR
         env:
-          PAT_PKG: ${{ secrets.PAT_PKG || github.token }}
+          GHCR_TOKEN: ${{ github.token }}
         run: |
           sudo podman login ghcr.io \
             --username "${{ github.actor }}" \
-            --password-stdin <<< "${PAT_PKG}"
+            --password-stdin <<< "${GHCR_TOKEN}"
 
       - name: Detect payload size and choose build mode
         id: mode
@@ -123,8 +123,10 @@ jobs:
           sudo podman pull "${PAYLOAD}"
           sudo podman pull "${INSTALLER}"
 
-          # Sum compressed layer sizes from the manifest to estimate download/ISO size.
-          PAYLOAD_SIZE=$(sudo podman manifest inspect "${PAYLOAD}" \
+          # Sum compressed layer sizes from the registry manifest to estimate
+          # download/ISO size (`podman manifest inspect` only expands manifest
+          # lists: on a single-image tag it prints `manifests: null`).
+          PAYLOAD_SIZE=$(sudo skopeo inspect --raw "docker://${PAYLOAD}" \
             | jq '[.layers[].size] | add // 0')
           THRESHOLD=$((1800 * 1024 * 1024))  # 1.8 GiB
 

@@ -43,10 +43,10 @@ jobs:
       image: ${{ inputs.container_image }}
       credentials:
         username: ${{ github.actor }}
-        password: ${{ secrets.PAT_PKG || github.token }}
+        password: ${{ github.token }}
     permissions:
       contents: read
-      # Pull the private build-env image with the job token when PAT_PKG is unset.
+      # Pull the private build-env image with the job token.
       packages: read
       # The Delete old artifacts step calls gh api DELETE on actions/artifacts,
       # which requires the actions: write scope on GITHUB_TOKEN.

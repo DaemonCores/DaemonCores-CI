@@ -11,7 +11,7 @@ name: Rotate APT signing key
 # as an artifact.
 #
 # Triggers (schedule, workflow_dispatch) and the concurrency group belong in the
-# caller. The caller must provide PAT_SECRETS (secrets:write on its repository)
+# caller. The caller must provide PIPELINE_PAT (secrets:write on its repository)
 # and grant actions: write. Installed hosts are not affected: they update through
 # the bootc image, not through APT.
 
@@ -27,7 +27,7 @@ on:
         type: string
         default: 'main'
     secrets:
-      PAT_SECRETS:
+      PIPELINE_PAT:
         required: true
 
 permissions:
@@ -54,12 +54,12 @@ jobs:
       - name: Generate key and update the APT_GPG_KEY secret
         id: rotate
         env:
-          GH_TOKEN: ${{ secrets.PAT_SECRETS }}
+          GH_TOKEN: ${{ secrets.PIPELINE_PAT }}
           GITHUB_REPOSITORY: ${{ github.repository }}
           UID_NAME: ${{ github.event.repository.name || github.repository }} APT repository
         run: |
           set -euo pipefail
-          [ -n "${GH_TOKEN}" ] || { echo "::error::PAT_SECRETS is not set"; exit 1; }
+          [ -n "${GH_TOKEN}" ] || { echo "::error::PIPELINE_PAT is not set"; exit 1; }
           fpr=$(.ci-tooling/scripts/rotate-apt-key.sh rotate)
           echo "fingerprint=${fpr}" >>"$GITHUB_OUTPUT"
           echo "New signing key fingerprint: ${fpr}"

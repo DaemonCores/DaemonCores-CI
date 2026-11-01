@@ -56,7 +56,7 @@ def fixture_env(tmp_path: Path) -> dict[str, str]:
         'GH_TOKEN': 'token',
         'GITHUB_REPOSITORY': 'owner/repo',
         'GITHUB_OUTPUT': str(tmp_path / 'out'),
-        'EXISTING': 'PAT_PKG\n',
+        'EXISTING': 'PIPELINE_PAT\n',
     }
 
 
@@ -114,7 +114,7 @@ def test_existing_secret_is_left_alone(env: dict[str, str]) -> None:
     Args:
         env: Stub environment fixture.
     """
-    env['EXISTING'] = 'PAT_PKG\nCOSIGN_PRIVATE_KEY\n'
+    env['EXISTING'] = 'PIPELINE_PAT\nCOSIGN_PRIVATE_KEY\n'
     result = _run(env, 'cosign')
     assert result.returncode == 0, result.stderr
     assert not list(Path(env['SECRETS_DIR']).iterdir())
@@ -187,7 +187,7 @@ def test_several_groups_report_only_what_was_created(
 
 
 def test_without_token_nothing_is_created(env: dict[str, str]) -> None:
-    """Without PAT_SECRETS warn, create nothing and succeed.
+    """Without PIPELINE_PAT warn, create nothing and succeed.
 
     Args:
         env: Stub environment fixture.

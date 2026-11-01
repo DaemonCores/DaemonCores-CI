@@ -13,7 +13,7 @@
 # (apt-key-hash.sh), so nothing has to be committed after a rotation.
 #
 # Environment:
-#   GH_TOKEN          token with secrets:write (PAT_SECRETS)
+#   GH_TOKEN          token with secrets:write (PIPELINE_PAT)
 #   GITHUB_REPOSITORY owner/name, passed to gh when set
 #   UID_NAME          user id of the generated key (default: "APT repository")
 set -euo pipefail

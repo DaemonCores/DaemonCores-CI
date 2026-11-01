@@ -41,7 +41,7 @@ jobs:
         env:
           MAN: ${{ inputs.manifest }}
           GH_ACTOR: ${{ github.actor }}
-          PAT_PKG: ${{ secrets.PAT_PKG || github.token }}
+          GHCR_TOKEN: ${{ github.token }}
           ARCH: ${{ matrix.arch }}
         run: |
           set -euo pipefail
@@ -84,5 +84,5 @@ jobs:
             fi
           done
           buildah commit "$ctr" "${img}"
-          echo "$PAT_PKG" | buildah login ghcr.io -u "$GH_ACTOR" --password-stdin
+          echo "$GHCR_TOKEN" | buildah login ghcr.io -u "$GH_ACTOR" --password-stdin
           buildah push "${img}"

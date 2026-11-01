@@ -48,7 +48,7 @@ The reusable `full-pipeline.yml` workflow coordinates the following stages:
 | `upstream-check.yml` | Fails when a package tracking an upstream release does not ship that release in the published APT repository (the latest release did not build). |
 | `release.yml` | Publishes a GitHub release from Conventional Commits: `channel: edge` makes a pre-release `vX.Y.Z-edge.N` per releasable push, `channel: stable` makes `vX.Y.Z` and only runs when triggered manually. |
 | `lint.yml` | Provisions the lint toolchain (checksum-pinned hadolint) and runs the caller's `make admission check docs-check`. |
-| `rotate-apt-key.yml` | Rotates the APT signing key (`APT_GPG_KEY`) from CI and restarts the caller's pipeline, which republishes the repository. Nothing is committed: the key pin is derived at build time. Needs `PAT_SECRETS`. |
+| `rotate-apt-key.yml` | Rotates the APT signing key (`APT_GPG_KEY`) from CI and restarts the caller's pipeline, which republishes the repository. Nothing is committed: the key pin is derived at build time. Needs `PIPELINE_PAT`. |
 
 ## Composite actions
 
@@ -155,8 +155,7 @@ The complete pipeline currently uses the following Actions secrets when the corr
 
 | Secret | Purpose |
 | --- | --- |
-| `PAT_SECRETS` | Token with `secrets:write`. The only secret a fork has to provide: it lets the `prepare` job generate all the others. Without it nothing is generated and the pipeline degrades (keyless images, unsigned modules). |
-| `PAT_PKG` | Optional. Pull and push GHCR images; defaults to `github.token`. |
+| `PIPELINE_PAT` | The only secret a fork has to provide, a fine-grained personal access token limited to the product repositories, with repository permissions Secrets: read and write, and Actions: read and write. It writes the generated secrets (`prepare` job), dispatches the debian-bootc base rebuild and rotates the APT key. GHCR pushes and pulls use the job `github.token` (`packages: write`), no PAT involved. Without it nothing is generated and the pipeline degrades (keyless images, unsigned modules). |
 | `APT_GPG_KEY` | Signs the generated APT repository. Auto-generated. |
 | `SB_SIGNING_KEY`, `SB_SIGNING_CERT` | Self-signed Secure Boot key and certificate (base64) for the custom EFI bootloader. Auto-generated. |
 | `COSIGN_PRIVATE_KEY`, `COSIGN_PASSWORD`, `COSIGN_PUBLIC_KEY` | The repository's own image signing key. Auto-generated. |

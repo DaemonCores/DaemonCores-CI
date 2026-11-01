@@ -214,7 +214,7 @@ jobs:
           ref: main
           # PAT with Actions read+write on debian-bootc (GITHUB_TOKEN cannot
           # dispatch cross-repo). Provided by the caller via `secrets: inherit`.
-          token: ${{ secrets.PAT_DISPATCH }}
+          token: ${{ secrets.PIPELINE_PAT }}
 
   # Prepare the signing secrets. A fork must run the pipeline without hunting
   # for keys: every secret that can be generated is generated here, once
@@ -222,7 +222,7 @@ jobs:
   # all of this. A secret created during a run is only visible to the NEXT run,
   # so when something was created this run stops and starts a fresh one with the
   # same plan: the build then runs with the keys in place.
-  # Needs PAT_SECRETS (GITHUB_TOKEN cannot write secrets); without it nothing is
+  # Needs PIPELINE_PAT (GITHUB_TOKEN cannot write secrets); without it nothing is
   # generated and the pipeline degrades (keyless images, unsigned modules).
   # The caller must grant `actions: write` so this job can start the new run.
   prepare:
@@ -322,7 +322,7 @@ jobs:
         if: ${{ steps.need.outputs.groups != '' }}
         shell: bash
         env:
-          GH_TOKEN: ${{ secrets.PAT_SECRETS }}
+          GH_TOKEN: ${{ secrets.PIPELINE_PAT }}
           GROUPS_MISSING: ${{ steps.need.outputs.groups }}
         run: |
           set -euo pipefail
