@@ -786,3 +786,11 @@ Gap: RSS cannot attribute the ~100 MiB of kernel-side memory. Harness now also d
 - Symptom: same failure after Tick 26. The harness log wrote `=== TCG: networking.service TimeoutStartSec 30s -> 150s ===` for both deployments, yet the guest killed the unit at 30 s (start about 22:09:49, "start operation timed out" 22:10:19, CPU 22.555s, DHCP bound 22:10:16).
 - Cause (proved locally with `systemd-analyze --root=<tree> cat-config` on a unit with `usr/lib/.../n.service.d/timeout.conf` = 30 and `etc/.../n.service.d/99-ci-tcg-timeout.conf` = 150): drop-ins of /usr/lib and /etc are merged by FILE NAME and the last wins; `99-...` is read before `timeout.conf`, so 30 s won. Renamed to `zz-ci-tcg-timeout.conf`: the same check lists it after `timeout.conf` with 150.
 - Open until the next arm64 run shows `networking.service` active in `no failed systemd units`.
+
+## Tick 28 - tags silently dropped from the boot-test loop (run 41357016767)
+
+- Symptom: `Manifest lists iso` failed with `manifest unknown`: `iso_arm64` was built and linted on arm64 but never tested, scanned nor pushed. The same run showed `latest-4k` tested only in the second `test` pass, `latest` in the first.
+- Evidence: arm64 job log, groups `Boot test latest` (22:35), `Lint iso` (22:43:39), `Boot test latest-4k` (22:43:40), then only `Scan latest`, `Scan latest-4k`; no `image iso: ok` line. amd64 pushed `iso_amd64`, arm64 never pushed it.
+- Cause (reproduced locally): `phase_test` iterates `while read tag ... done < <(tags_in_state linted)`; `image_test` runs the harness (ssh, qemu) which inherits the loop's stdin and drains the remaining tags. With a harness stub reading stdin, a `hash build lint test` run tests only the first tag (`tests/test_multi_category_boot.py::test_boot_does_not_consume_the_tag_list` failed before the fix). The second `test` pass of the default pipeline hid it for one tag only.
+- Fix: `image_test` redirects its standard input from /dev/null. 234 tests pass.
+- Open until a full run shows every tag tested, pushed and the manifest lists created.

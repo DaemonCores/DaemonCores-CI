@@ -17,6 +17,8 @@ echo "image-test $* CATEGORY=${CATEGORY:-}" >>"${STUB_LOG}"
 case "$1" in
   categories) printf '%s\n' ${CATEGORIES:-} ;;
   test)
+    # ssh, run by the real harness, reads the standard input it inherits.
+    [ -z "${READ_STDIN:-}" ] || cat >/dev/null
     mkdir -p "${IMAGE_TEST_STATE}/logs"
     echo "boot of ${CATEGORY:-default}" >"${IMAGE_TEST_STATE}/logs/serial.${CATEGORY:-default}.log"
     [ -z "${FAIL_CATEGORY:-}" ] || [ "${CATEGORY:-}" != "${FAIL_CATEGORY}" ]
@@ -82,3 +84,17 @@ def test_zero_or_one_category_keeps_the_single_boot(
     done = sb.run([entry('latest')], CATEGORIES=categories)
     assert done.returncode == 0, done.stdout + done.stderr
     assert boots(sb) == ['']
+
+
+@needs_jq
+def test_boot_does_not_consume_the_tag_list(sb: Sandbox) -> None:
+    """A harness reading stdin (ssh) must not swallow the tags still to test."""
+    done = sb.run([entry('latest'), entry('other')],
+                  'hash',
+                  'build',
+                  'lint',
+                  'test',
+                  READ_STDIN='1')
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert boots(sb) == ['', '']
+    assert sb.states() == {'latest': 'ok', 'other': 'ok'}

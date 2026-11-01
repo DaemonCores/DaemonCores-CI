@@ -515,7 +515,9 @@ ram_budget() {
 # end this loop, and a hung VM must not hold the job.
 image_test() {
   local limit="${BOOT_TEST_TIMEOUT:-2700}"
-  timeout "${limit}" env IMAGE_TEST_STATE="${STATE_DIR}/image-test" "$@"
+  # No standard input: the callers run inside `while read` loops fed by a pipe,
+  # and the harness (ssh, qemu) would otherwise drain the tags still to process.
+  timeout "${limit}" env IMAGE_TEST_STATE="${STATE_DIR}/image-test" "$@" </dev/null
 }
 
 # Serial log image-test.sh writes for a reference (lib.sh derives the name the
