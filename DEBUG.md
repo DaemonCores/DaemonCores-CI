@@ -705,3 +705,8 @@ Conclusions (proved by these runs):
 - OPEN, owner decision needed (module version vs user space vs kernel); see Handoff-Decisions.
 - arm64 images: `ram_gate` default 15 MiB (`image-test/lib.sh:27`) vs 508/510 MiB measured (MemTotal-MemAvailable); amd64 runs with the gate disabled (`RAM idle gate disabled`). Not touched (owner's gate).
 - amd64 image `no failed systemd units` PASSED in run 41250424265 (it failed in 41249914654): `dc-gpu-apply` failure is intermittent, cause still unproven.
+
+## Tick 15: VE startup_failure and the kernel patch guard (PROVEN)
+- VE `Full Pipeline` (runs 41250321169, 41267485270) ended `startup_failure` with the same permissions as the working debian-bootc caller. Cause PROVEN by comparison: VE `pipeline.yml` passed `gpu_driver_images`, which `full-pipeline.yml` (inputs, lines 14-69) no longer declares (`gpu_driver` since `2bb3b58`). Fix VE `86c81d4`; validation: run 41267556092 left the startup stage (in_progress).
+- P-603: lock and refresh workflows removed, `patch --fuzz=0`. PROVEN locally that the default fuzz hides a moved context: `patch --dry-run` prints "Hunk #1 succeeded at 1 with fuzz 2", `--fuzz=0` prints "FAILED". Test `test_moved_context_is_refused_not_fuzzed` added (debian-bootc `bc33fd0`), pytest 5 passed. Not yet validated by a full run.
+- debian-bootc `Lint` failed on `tests/unit/test_locale_keyboard.py` (pydoclint DOC101/DOC103 on three tests, commit `3998654`); docstrings completed (`8045ef1`, local pydoclint clean), pushed after the running pipeline ends so it is not cancelled.
