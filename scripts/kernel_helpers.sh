@@ -322,6 +322,42 @@ kernel_build_debs() {
 }
 
 #######################################
+# Clone the PVE kernel packaging with its submodules at the newest commit
+# whose submodule pins are all fetchable. Upstream occasionally pins a
+# submodule commit that is not (yet) on its mirror; a plain recursive clone
+# of master then aborts ("not our ref"). The full history is cloned so
+# walking back is possible, and each commit touching the submodules is tried
+# newest first.
+# Globals:
+#   PVE_PACKAGING_MAX_BACK: optional, commits to walk back (default 20)
+# Arguments:
+#   $1 - packaging repository URL
+#   $2 - destination directory
+# Returns:
+#   0 when a commit with fetchable pins is checked out, 1 otherwise.
+#######################################
+kernel_pve_clone_packaging() {
+  local url="${1:?}" dest="${2:?}"
+  local max="${PVE_PACKAGING_MAX_BACK:-20}" commit tried=0
+  git clone --quiet --no-checkout "${url}" "${dest}" \
+    || return 1
+  while read -r commit; do
+    tried=$((tried + 1))
+    git -C "${dest}" checkout --quiet --force "${commit}" || return 1
+    if git -C "${dest}" submodule update --init --depth 1 --recommend-shallow; then
+      [[ "${tried}" -eq 1 ]] \
+        || echo "WARN: packaging master has unfetchable submodule pins; using ${commit} (${tried} submodule update(s) back)"
+      return 0
+    fi
+    echo "WARN: submodule pins of ${commit} not fetchable" >&2
+    git -C "${dest}" submodule deinit --all --force >/dev/null 2>&1 || true
+    rm -rf "${dest}/.git/modules"
+  done < <(git -C "${dest}" rev-list --first-parent -n "${max}" HEAD -- submodules)
+  echo "ERROR: no packaging commit with fetchable submodule pins in the last ${max} submodule updates" >&2
+  return 1
+}
+
+#######################################
 # PVE MODE: prepare the PVE kernel source tree. The pve-no-subscription
 # repo carries no source index, so the packaging is fetched as the
 # mirror_ubuntu-kernels submodule of git.proxmox.com/git/pve-kernel.git;
@@ -344,8 +380,8 @@ kernel_pve_prepare() {
   export ARCH="${KERNEL_ARCH}"
   cd "${builddir}"
   rm -rf "${builddir}/pkg-src"
-  git clone --depth 1 --recurse-submodules --shallow-submodules \
-    https://git.proxmox.com/git/pve-kernel.git "${builddir}/pkg-src"
+  kernel_pve_clone_packaging "https://git.proxmox.com/git/pve-kernel.git" \
+    "${builddir}/pkg-src" || exit 1
   local pkg_ver
   pkg_ver=$(sed -n 's/^proxmox-kernel-.* (\([^ )]*\)).*/\1/p' \
     "${builddir}/pkg-src/debian/changelog" | head -1)
