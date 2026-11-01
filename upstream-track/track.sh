@@ -131,6 +131,37 @@ published_kernel_floor() {
 }
 
 #######################################
+# Print DIGEST_ENV=<sha256> for each digest a tracked kernel entry declares,
+# read from the sha256sums.asc next to the tarball.  Fails, naming the
+# tarball, when one has no digest line (a release candidate, or a release
+# whose checksums are not published yet).
+# Arguments:
+#   $1 - package name
+#   $2 - env variable key
+#   $3 - kernel version
+#   $4 - tarball URL (kernel.org `source`)
+#######################################
+kernel_digests() {
+  local sel pair denv name digest sums=""
+  sel=".packages[] | select(.name == \"$1\") | .track.\"$2\""
+  while IFS= read -r pair; do
+    [[ -n "${pair}" ]] || continue
+    denv="${pair%%=*}"
+    name="${pair#*=}"
+    name="${name//\{version\}/$3}"
+    [[ -n "${sums}" ]] \
+      || sums=$(curl --retry 3 -fsSL "${4%/*}/sha256sums.asc") || return 1
+    digest=$(awk -v n="${name}" '$2 == n { print $1 }' <<<"${sums}")
+    [[ "${digest}" =~ ^[0-9a-f]{64}$ ]] || {
+      echo "no sha256 for ${name} in ${4%/*}/sha256sums.asc" >&2
+      return 1
+    }
+    printf '%s=%s\n' "${denv}" "${digest}"
+  done < <(yq "${sel} | (.digests // {}) | to_entries | .[] \
+    | .key + \"=\" + .value" "${MAN}")
+}
+
+#######################################
 # Print the releases.json entry to build, as JSON.  Without `require-patches`
 # on the entry it is the first release of the moniker.  With it (a patch
 # manifest path relative to the package manifest), it is the newest stable or
@@ -143,7 +174,7 @@ published_kernel_floor() {
 #   $3 - moniker
 #######################################
 select_kernel_release() {
-  local req manifest version floor
+  local req manifest version floor entry
   req=$(yq ".packages[] | select(.name == \"$1\") | .track.\"$2\".\"require-patches\" // \"\"" \
     "${MAN}")
   if [[ -z "${req}" ]]; then
@@ -166,9 +197,14 @@ select_kernel_release() {
       return 1
     fi
     if patches_available "${manifest}" "${version}"; then
-      curl --retry 3 -fsSL "${KERNEL_ORG_URL:-https://www.kernel.org}/releases.json" \
+      entry=$(curl --retry 3 -fsSL "${KERNEL_ORG_URL:-https://www.kernel.org}/releases.json" \
         | V="${version}" yq -p=json -o=json \
-          '[.releases[] | select(.version == strenv(V))] | .[0]'
+          '[.releases[] | select(.version == strenv(V))] | .[0]')
+      # A release listed in releases.json before its tarball digest is
+      # published cannot be built (nothing to pin): try the next one.
+      kernel_digests "$1" "$2" "${version}" "$(yq -p=json '.source // ""' <<<"${entry}")" \
+        >/dev/null || continue
+      printf '%s\n' "${entry}"
       return
     fi
   done < <(curl --retry 3 -fsSL "${KERNEL_ORG_URL:-https://www.kernel.org}/releases.json" \
@@ -188,31 +224,15 @@ select_kernel_release() {
 #   $3 - moniker
 #######################################
 resolve_kernel() {
-  local pkg="$1" key="$2" moniker="$3" sel release version source out sums
-  local pair denv name digest
-  sel=".packages[] | select(.name == \"${pkg}\") | .track.\"${key}\""
+  local pkg="$1" key="$2" moniker="$3" release version source digests
   release=$(select_kernel_release "${pkg}" "${key}" "${moniker}") || return 1
   version=$(yq -p=json '.version // ""' <<<"${release}")
   source=$(yq -p=json '.source // ""' <<<"${release}")
   [[ -n "${version}" && -n "${source}" ]] || return 1
-  out="${key}=${version}"
-  sums=""
-  while IFS= read -r pair; do
-    [[ -n "${pair}" ]] || continue
-    denv="${pair%%=*}"
-    name="${pair#*=}"
-    name="${name//\{version\}/${version}}"
-    [[ -n "${sums}" ]] \
-      || sums=$(curl --retry 3 -fsSL "${source%/*}/sha256sums.asc") || return 1
-    digest=$(awk -v n="${name}" '$2 == n { print $1 }' <<<"${sums}")
-    [[ "${digest}" =~ ^[0-9a-f]{64}$ ]] || {
-      echo "no sha256 for ${name} in ${source%/*}/sha256sums.asc" >&2
-      return 1
-    }
-    out+=$'\n'"${denv}=${digest}"
-  done < <(yq "${sel} | (.digests // {}) | to_entries | .[] \
-    | .key + \"=\" + .value" "${MAN}")
-  printf '%s\n' "${out}"
+  digests=$(kernel_digests "${pkg}" "${key}" "${version}" "${source}") \
+    || return 1
+  printf '%s=%s\n' "${key}" "${version}"
+  [[ -z "${digests}" ]] || printf '%s\n' "${digests}"
 }
 
 #######################################
