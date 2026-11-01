@@ -38,6 +38,11 @@ outputs:
   env:
     description: 'The package env with the tracked variables merged in.'
     value: ${{ steps.track.outputs.env }}
+  skip:
+    description: >-
+      'true' when a kernel entry has no eligible release yet (upstream patches
+      or checksums not published); there is nothing to build.
+    value: ${{ steps.track.outputs.skip }}
 
 runs:
   using: composite

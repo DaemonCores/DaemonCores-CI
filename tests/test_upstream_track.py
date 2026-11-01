@@ -431,6 +431,27 @@ def test_resolve_skips_a_kernel_whose_digest_is_not_published(
     assert 'no sha256 for linux-7.2.11.tar.xz' in result.stderr
 
 
+def test_resolve_skips_when_no_kernel_digest_is_published(api: Path) -> None:
+    """With no eligible release the build is a skip, not a failure.
+
+    Args:
+        api: API tree fixture.
+    """
+    _kernel_with_patches(api, {'7.2', '7.1'})
+    (api / 'cdn' / 'sha256sums.asc').write_text('')
+    result = _run(
+        api,
+        'resolve',
+        PKG='kernel',
+        BASE_ENV='A=1',
+        KERNEL_ORG_URL=f'file://{api}'
+    )
+    assert result.returncode == 0, result.stderr
+    assert 'no upstream release is eligible' in result.stderr
+    assert 'skip=true' in (api / 'out').read_text().splitlines()
+    assert not any(line.startswith('KERNEL_VER') for line in _env_output(api))
+
+
 def test_resolve_takes_the_newest_kernel_when_patches_cover_it(
     api: Path
 ) -> None:
@@ -473,6 +494,7 @@ def test_resolve_refuses_a_kernel_older_than_the_published_one(
     )
     assert 'older than the published 7.2.10' in result.stderr
     assert not any(line.startswith('KERNEL_VER') for line in _env_output(api))
+    assert 'skip=true' in (api / 'out').read_text().splitlines()
 
 
 def test_resolve_finds_the_patches_next_to_the_source_manifest(
@@ -518,3 +540,4 @@ def test_resolve_reports_a_missing_patch_manifest(api: Path) -> None:
     )
     assert 'patch manifest' in result.stderr
     assert not any(line.startswith('KERNEL_VER') for line in _env_output(api))
+    assert 'skip=false' in (api / 'out').read_text().splitlines()

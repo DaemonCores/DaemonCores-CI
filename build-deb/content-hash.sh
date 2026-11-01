@@ -7,7 +7,7 @@
 # Consumed environment: PACKAGE, ARCH, SOURCES, UPSTREAM, BUILD, EXTRA_ENV,
 # PAGES_URL, GITHUB_REPOSITORY (see build-deb.sh).
 
-DEBS_DIR=/debs
+DEBS_DIR="${DEBS_DIR:-/debs}"
 META_DIR="${DEBS_DIR}/.meta"
 
 # Env keys matching this (case-insensitive) are exported but kept out of the

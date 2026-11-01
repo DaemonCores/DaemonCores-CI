@@ -23,6 +23,8 @@
 #                 only when the package is really built; a failure fails the
 #                 build. Used to install dependencies lazily.
 #   CI_SCRIPTS  - (exported) directory of the shared DaemonCores-CI scripts.
+#   SKIP_BUILD  - "true" when there is nothing to build (no eligible upstream
+#                 release yet): the last-good published deb(s) are kept.
 #   PAGES_URL   - APT repo base URL; derived from GITHUB_REPOSITORY if empty.
 #   GITHUB_REPOSITORY, GITHUB_WORKSPACE, GITHUB_OUTPUT - provided by Actions.
 set -euo pipefail
@@ -149,6 +151,22 @@ main() {
       return 0
     fi
     echo "::warning::${PACKAGE} (${ARCH:-amd64}) cache download failed; rebuilding"
+  fi
+
+  # Nothing to build: upstream has no eligible release yet (tracked kernel
+  # whose patches or checksum are not published). Keep the last-good deb(s)
+  # and the prior hash, without flagging a failure.
+  if [[ "${SKIP_BUILD:-false}" == true && -n "${prior_hash}" ]]; then
+    local kept
+    kept=$(printf '%s' "${prior}" \
+      | jq -c --arg p "${cache_key}" '.[$p].debs // []')
+    if restore_cached "${base}" "${kept}"; then
+      echo "::notice::${PACKAGE} (${ARCH:-amd64}) no eligible upstream release;" \
+        "kept the last-good published deb(s)" >&2
+      write_meta "${prior_hash}" true "${kept}"
+      set_output skipped true
+      return 0
+    fi
   fi
 
   # Build. On failure (compile error, or a content check the build runs after
