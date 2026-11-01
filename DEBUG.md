@@ -780,3 +780,9 @@ Gap: RSS cannot attribute the ~100 MiB of kernel-side memory. Harness now also d
 
 - Evidence (run 41333868527, arm-last.log:5575-5600): dhclient bound at 18:33:29, ifupdown2 CPU 24.285s, unit killed at 18:33:35 by TimeoutStartSec=30 (debian-bootc networking.service.d/timeout.conf:2).
 - Change: install-fs.sh writes /etc drop-ins scaling each image TimeoutStartSec by TCG_TIMEOUT_SCALE when KVM!=1; lib.sh forwards KVM and TCG_TIMEOUT_SCALE. Drop-in generation tested locally (30s -> 150s). Not yet seen on a real arm64 run.
+
+## Tick 27 - the TCG drop-in did not take effect (run 41353579349)
+
+- Symptom: same failure after Tick 26. The harness log wrote `=== TCG: networking.service TimeoutStartSec 30s -> 150s ===` for both deployments, yet the guest killed the unit at 30 s (start about 22:09:49, "start operation timed out" 22:10:19, CPU 22.555s, DHCP bound 22:10:16).
+- Cause (proved locally with `systemd-analyze --root=<tree> cat-config` on a unit with `usr/lib/.../n.service.d/timeout.conf` = 30 and `etc/.../n.service.d/99-ci-tcg-timeout.conf` = 150): drop-ins of /usr/lib and /etc are merged by FILE NAME and the last wins; `99-...` is read before `timeout.conf`, so 30 s won. Renamed to `zz-ci-tcg-timeout.conf`: the same check lists it after `timeout.conf` with 150.
+- Open until the next arm64 run shows `networking.service` active in `no failed systemd units`.

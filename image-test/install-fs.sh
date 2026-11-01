@@ -263,7 +263,10 @@ if [ -n "${deployed_dir}" ]; then
     # metal, 30 s cap) trips on a start that is merely slow. Scale every plain
     # seconds TimeoutStartSec the image ships by the same factor that scales the
     # boot timeout (TCG_TIMEOUT_SCALE), via /etc drop-ins; the unit must still
-    # succeed. Derived from the image, nothing named here.
+    # succeed. Derived from the image, nothing named here. The drop-in name
+    # starts with `zz`: systemd merges the drop-ins of /usr/lib, /etc and /run by
+    # file name and the last one wins, so a name sorting before the image's own
+    # `timeout.conf` would be overridden by it.
     if [ "${KVM:-1}" != "1" ] && [ -n "${TCG_TIMEOUT_SCALE:-}" ]; then
       _usr="${_deploy_etc%/etc}/usr/lib/systemd/system"
       while IFS= read -r _conf; do
@@ -272,7 +275,7 @@ if [ -n "${deployed_dir}" ]; then
         _unit=$(basename "$(dirname "${_conf}")" .d)
         mkdir -p "${_deploy_etc}/systemd/system/${_unit}.d"
         printf '[Service]\nTimeoutStartSec=%s\n' "$((_secs * TCG_TIMEOUT_SCALE))" \
-          > "${_deploy_etc}/systemd/system/${_unit}.d/99-ci-tcg-timeout.conf"
+          > "${_deploy_etc}/systemd/system/${_unit}.d/zz-ci-tcg-timeout.conf"
         echo "=== TCG: ${_unit} TimeoutStartSec ${_secs}s -> $((_secs * TCG_TIMEOUT_SCALE))s ==="
       done < <(find "${_usr}" -path '*.service.d/*.conf' 2>/dev/null)
     fi
