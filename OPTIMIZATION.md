@@ -318,3 +318,11 @@ This section is the single tracking location for the owner's demands. Do not mov
 6. L5, L6, L8, calibrated boot timeout, xz/zstd.
 7. Push order: DaemonCores-CI, then debian-bootc, then the wikis (`main` and `main:master`).
 8. Cleanup of old runs/tags only after confirmation.
+
+## Decisions and state of 2026-11-01 (checked by command)
+
+- Kernel patch guard (owner P-601..P-603): the committed `patches.lock.json` and both refresh workflows are removed (CI `8dec319`, debian-bootc `bc33fd0`); `kernel_apply_patches` applies with `patch --fuzz=0` (override `KERNEL_PATCH_FUZZ`). The lock was already neutralised in practice: `linux-image` and the device modules ran with `PATCH_GUARD_UPDATE: "1"` (lock regenerated each build, dry-run was the real guard); only the nvidia entry enforced it, which is why it broke. Not done: a drift warning comparing touched-file hashes with the previous build. Overlay `*-src` locks and `patch_guard.py` stay.
+- Kernel PVE helper copies: the VE `kernel-pve/lib/` and both deprecated `kernel-pve.yml` workflows are removed (owner choice); one build path through `scripts/kernel_helpers.sh`.
+- NVIDIA image: user-space, GSP firmware and module come from NVIDIA's own Debian 13 repository at one release (decision in the Handoff wiki); not yet proven by a run.
+- VE `Full Pipeline` was `startup_failure` because its caller passed the removed input `gpu_driver_images`; removed in the caller (VE `86c81d4`), the next run starts normally (run 41267556092 in progress).
+- Still open for the 15-minute target: `chain:`, L1, L12, L5, L6, L8, calibrated boot timeout, xz/zstd, build-once `arch: all`, partial publication, MOK, YAML tests `arch:`, bootloaders (see the consolidated lever list above); no green run under 15 minutes exists yet.
