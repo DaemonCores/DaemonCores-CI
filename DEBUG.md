@@ -775,3 +775,8 @@ Gap: RSS cannot attribute the ~100 MiB of kernel-side memory. Harness now also d
 - Owner: when the kernel has no eligible release yet, skipping is legitimate. Previously the unset `KERNEL_VER` made the build fail (red job) while keeping the last-good deb.
 - `select_kernel_release` returns 2 for "nothing eligible" (no release with every patch, or only older than the published floor, or no published checksum); `track.sh resolve` then writes `skip=true`; `build-one-deb.yml` passes it to `build-deb`, whose `SKIP_BUILD=true` restores the last-good deb, keeps the prior hash and does NOT set `build_failed`. Any other resolution error (API/network, missing patch manifest) still fails as before. With no published deb to keep, the job still fails.
 - Tests: `test_resolve_skips_when_no_kernel_digest_is_published`, `skip=` assertions on the older-than-published and missing-manifest cases, `tests/test_build_deb_skip.py` (restore without `build_failed`; a failing build without skip stays flagged). 226 passed. `DEBS_DIR` is now overridable (`${DEBS_DIR:-/debs}`).
+
+## Tick 26 - arm64 networking.service timeout under TCG
+
+- Evidence (run 41333868527, arm-last.log:5575-5600): dhclient bound at 18:33:29, ifupdown2 CPU 24.285s, unit killed at 18:33:35 by TimeoutStartSec=30 (debian-bootc networking.service.d/timeout.conf:2).
+- Change: install-fs.sh writes /etc drop-ins scaling each image TimeoutStartSec by TCG_TIMEOUT_SCALE when KVM!=1; lib.sh forwards KVM and TCG_TIMEOUT_SCALE. Drop-in generation tested locally (30s -> 150s). Not yet seen on a real arm64 run.
