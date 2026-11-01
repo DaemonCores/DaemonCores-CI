@@ -746,6 +746,12 @@ ram_gate() {
       echo "min_free_kbytes=$(cat /proc/sys/vm/min_free_kbytes) watermark_scale_factor=$(cat /proc/sys/vm/watermark_scale_factor)";
       awk "/^Node/{z=\$0} /^ +(min|low|high|managed|present) /{print z, \$1, \$2*4, \"KiB\"}" /proc/zoneinfo;
       echo "cmdline: $(cat /proc/cmdline)";
+      echo "[kernel memory banner (dmesg)]";
+      dmesg 2>/dev/null | grep -E "Memory: [0-9]+K/|Freeing (unused|initrd)" | head -4;
+      echo "[per-unit cgroup memory, KiB: anon file kernel unit]";
+      for c in $(find /sys/fs/cgroup -mindepth 1 -maxdepth 3 -name memory.stat 2>/dev/null); do
+        awk -v u="${c%/memory.stat}" "\$1==\"anon\"{a=\$2} \$1==\"file\"{f=\$2} \$1==\"kernel\"{k=\$2} END{printf \"%d %d %d %s\\n\", a/1024, f/1024, k/1024, substr(u, 16)}" "$c";
+      done | sort -rn | head -25;
       echo "[top process RSS (KiB, name)]";
       awk "/^Name:/{name=\$2} /^VmRSS:/{print \$2, name}" /proc/[0-9]*/status 2>/dev/null | sort -rn | head -15;
       echo "[top kernel slabs (bytes)]";
