@@ -354,11 +354,23 @@ jobs:
             file="${WORKFLOW_REF#*/.github/workflows/}"
             file="${file%%@*}"
           fi
-          args=(-f "rebuild_env=${P_ENV}" -f "run_debs=${P_DEBS}"
-                -f "run_image=${P_IMAGE}" -f "run_iso=${P_ISO}"
-                -f "run_img_rpi=${P_RPI}" -f "run_img_gallium=${P_GALLIUM}")
-          [ "${UPDATE_BASE}" != true ] || args+=(-f update_base=true)
-          [ -z "${SIGN_MODULES}" ] || args+=(-f "sign_modules=${SIGN_MODULES}")
+          # Only pass the inputs the caller workflow declares: callers differ
+          # (one has no gallium/rpi checkbox, another no update_base) and
+          # workflow dispatch rejects any undeclared input with HTTP 422.
+          declared=$(gh workflow view "${file}" --ref "${REF_NAME}" --yaml \
+            | yq '.on.workflow_dispatch.inputs // {} | keys | .[]')
+          args=()
+          add_input() {
+            if grep -qx "$1" <<<"${declared}"; then args+=(-f "$1=$2"); fi
+          }
+          add_input rebuild_env "${P_ENV}"
+          add_input run_debs "${P_DEBS}"
+          add_input run_image "${P_IMAGE}"
+          add_input run_iso "${P_ISO}"
+          add_input run_img_rpi "${P_RPI}"
+          add_input run_img_gallium "${P_GALLIUM}"
+          [ "${UPDATE_BASE}" != true ] || add_input update_base true
+          [ -z "${SIGN_MODULES}" ] || add_input sign_modules "${SIGN_MODULES}"
           gh workflow run "${file}" --ref "${REF_NAME}" "${args[@]}" || {
             echo "::error::Secrets were created (${CREATED}) but the new run could not be started." \
               "Grant 'actions: write' to the calling workflow, or run it again by hand."
