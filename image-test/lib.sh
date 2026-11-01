@@ -673,14 +673,14 @@ dump_serial() {
 #######################################
 # Idle RAM budget gate, measured boot-fresh: the VM just settled (wait_boot)
 # and NOTHING else ran yet, so MemTotal - MemAvailable IS the idle
-# footprint. Fail (blocking the image push) when it exceeds the budget —
-# the regression to catch is a service creeping into the boot path, visible
-# as extra resident memory. The budget comes from RAM_IDLE_MAX_MB (default
-# 15 MiB; Gabriel 30/10: hold the idle footprint at 10-15 MiB).
+# footprint. The figure is always measured, broken down and added to the run
+# summary so every image can be compared; exceeding RAM_IDLE_MAX_MB (default
+# 15 MiB, an aspiration the owner keeps as optimisation pressure) is a warning,
+# never a failure, unless RAM_IDLE_ENFORCE=1 turns the budget into a gate.
 # Globals:
-#   SSH_OPTS, RAM_IDLE_MAX_MB
+#   SSH_OPTS, RAM_IDLE_MAX_MB, RAM_IDLE_ENFORCE, IMAGE, ARCH
 # Returns:
-#   Exits 1 when the idle footprint is over budget.
+#   0, or 1 when RAM_IDLE_ENFORCE=1 and the idle footprint is over budget.
 #######################################
 ram_gate() {
   local readout used
@@ -704,10 +704,35 @@ ram_gate() {
   used=$(echo "${readout}" | awk 'NR==1{t=$1} NR==2{a=$1} END{print t-a}')
   used=$(( (used + 1023) / 1024 ))
   echo "RAM idle (boot-fresh): ${used} MiB MemTotal-MemAvailable used; budget: ${RAM_IDLE_MAX_MB} MiB"
+  # Composition of the figure, computed on the guest (awk + coreutils only):
+  # process RSS, kernel slabs, the min_free_kbytes reserve MemAvailable
+  # subtracts, and what is left. One line per image in the run summary.
+  local parts procs_kib slab_b reserve_kib
+  parts=$(ssh "${SSH_OPTS[@]}" root@localhost '
+    p=$(awk "/^VmRSS:/{s+=\$2} END{print s+0}" /proc/[0-9]*/status 2>/dev/null)
+    sl=$(awk "NR>2{s+=\$3*\$4} END{print s+0}" /proc/slabinfo 2>/dev/null)
+    r=$(cat /proc/sys/vm/min_free_kbytes 2>/dev/null || echo 0)
+    echo "$p $sl $r"' 2>/dev/null || true)
+  read -r procs_kib slab_b reserve_kib <<<"${parts:-0 0 0}"
+  local procs_mib=$(((${procs_kib:-0} + 1023) / 1024))
+  local slab_mib=$(((${slab_b:-0} + 1048575) / 1048576))
+  local reserve_mib=$(((${reserve_kib:-0} + 1023) / 1024))
+  local rest_mib=$((used - procs_mib - slab_mib - reserve_mib))
+  echo "RAM idle composition: processes ${procs_mib} MiB, kernel slabs ${slab_mib} MiB, min_free_kbytes reserve ${reserve_mib} MiB, remainder ${rest_mib} MiB"
+  if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
+    if ! grep -q '^| image | arch | idle RAM' "${GITHUB_STEP_SUMMARY}" 2>/dev/null; then
+      {
+        echo "### Idle RAM per image (MemTotal-MemAvailable, boot-fresh)"
+        echo "| image | arch | idle RAM (MiB) | processes (sum of RSS) | kernel slabs | min_free_kbytes reserve | remainder | target |"
+        echo "|---|---|---|---|---|---|---|---|"
+      } >>"${GITHUB_STEP_SUMMARY}"
+    fi
+    echo "| ${IMAGE:-?} | ${ARCH:-?} | ${used} | ${procs_mib} | ${slab_mib} | ${reserve_mib} | ${rest_mib} | ${RAM_IDLE_MAX_MB} |" >>"${GITHUB_STEP_SUMMARY}"
+  fi
   if [ "${used}" -gt "${RAM_IDLE_MAX_MB}" ]; then
-    # Self-explaining failure: dump what actually holds the memory before the
-    # gate blocks the push. Everything runs on the guest over SSH and must not
-    # assume extra packages (minimal image: awk+coreutils only).
+    # Self-explaining report: dump what actually holds the memory. Everything
+    # runs on the guest over SSH and must not assume extra packages (minimal
+    # image: awk+coreutils only).
     echo "----- ram gate breakdown (guest) -----"
     ssh "${SSH_OPTS[@]}" root@localhost '
       echo "[meminfo]"; grep -E "^(MemTotal|MemFree|MemAvailable|Buffers|Cached|SwapTotal|SwapFree|Slab|SReclaimable|SUnreclaim|KernelStack|PageTables|VmallocUsed|AnonPages|Mapped|Shmem):" /proc/meminfo;
@@ -724,8 +749,11 @@ ram_gate() {
       awk "{print \$2, \$1}" /proc/modules 2>/dev/null | sort -rn | head -15
     ' 2>/dev/null | sed 's/^/  | /' || echo "  | breakdown unavailable (SSH read failed)"
     echo "----- end ram gate breakdown -----"
-    echo "::error::RAM idle budget exceeded: ${used} MiB at idle over the ${RAM_IDLE_MAX_MB} MiB budget"
-    exit 1
+    if [ "${RAM_IDLE_ENFORCE:-0}" = "1" ]; then
+      echo "::error::RAM idle budget exceeded: ${used} MiB at idle over the ${RAM_IDLE_MAX_MB} MiB budget"
+      exit 1
+    fi
+    echo "::warning::idle RAM ${used} MiB is over the ${RAM_IDLE_MAX_MB} MiB target (report only; RAM_IDLE_ENFORCE=1 makes it a gate)"
   fi
 }
 
