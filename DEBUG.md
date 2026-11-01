@@ -754,3 +754,12 @@ Conclusions (proved by these runs):
 STATIC (podman, minimal_amd64): enabled units = ssh, systemd-networkd(+socket, wait-online, network-generator), systemd-timesyncd, netavark-dhcp-proxy(+socket), lvm2-monitor, lvm2-lvmpolld.socket, dm-event.socket, blk-availability, e2scrub_reap, xfs_scrub timer/slice, dpkg-db-backup.timer, bootc-fetch-apply-updates.timer, bootloader-update, dc-gpu-apply, systemd-pstore, getty@; dbus + logind via multi-user.target.wants. No wpa_supplicant/NetworkManager/dhclient in minimal (they appear in latest only).
 MEASURED (CI r7 log, minimal amd64, RSS incl. shared pages, KiB): systemd 14312 + user 12796, networkd 11068, sshd-session 11036+7040 (test connection), udevd 9944, logind 8904, timesyncd 8328, journald 8072, sshd 7880, netavark 6908, dbus 4388. Anonymous total 20 MiB; modules loaded: drm, cfg80211, drm_kms_helper, overlay, erofs, bochs (cfg80211 on a minimal VM image).
 Gap: RSS cannot attribute the ~100 MiB of kernel-side memory. Harness now also dumps per-unit cgroup memory (anon/file/kernel) and the kernel `Memory:` banner in the RAM breakdown; to be read from the next run.
+
+## Tick 23 — run 41309239454 (debian-bootc cd65120)
+
+- nvidia amd64: `image nvidia: built` + `linted` (job 124858113920): the version fix works at build. Test/push of nvidia, minimal, iso not yet seen in that log.
+- amd64 `latest`, `latest-nosign`: ok + pushed. RAM (MemTotal-MemAvailable / free-style / anonymous, MiB): latest 325 / 119 / 21, latest-nosign 345 / 139 / 21.
+- arm64 `latest`: test-failed `no failed systemd units`, IDENTICAL to run 41305715371 (job 124858113954: `networking.service: start operation timed out`). Second identical failure: STOP, no mechanical retry.
+- arm64 `latest-nosign` passes, but that boot category SKIPs the "no failed systemd units" test (`SKIP ... (global test, running: unsigned-kernel)`), so it proves nothing about networking.
+- This run predates 522976c (no per-unit cgroup dump yet); arm64 RAM latest 591 / 111 / 24, latest-nosign 574 / 94 / 24.
+- State: cause still a hypothesis (ifupdown2 Python under TCG exceeds TimeoutStartSec=30). Needs a local arm64 boot with timings.
