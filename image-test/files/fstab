@@ -1,0 +1,8 @@
+# Written by install-fs.sh — bootc install to-filesystem does not generate fstab.
+# NOTE: no "/" entry — composefs is enabled (prepare-root.conf), and the bootc
+# docs explicitly state that a "/" fstab entry does not work after the initrd
+# with composefs (the root is a composefs overlay, not the raw btrfs subvol).
+LABEL=dcos  /var       btrfs  subvol=var,x-systemd.device-timeout=0     0 0
+LABEL=dcos  /var/log   btrfs  subvol=varlog,x-systemd.device-timeout=0  0 0
+LABEL=boot  /boot      ext4   defaults                                   0 0
+LABEL=EFI   /boot/efi  vfat   umask=0077                                 0 2
