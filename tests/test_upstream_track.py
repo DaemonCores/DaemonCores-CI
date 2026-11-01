@@ -406,6 +406,31 @@ def test_resolve_skips_a_kernel_the_patches_do_not_cover(api: Path) -> None:
     ]
 
 
+def test_resolve_skips_a_kernel_whose_digest_is_not_published(
+    api: Path
+) -> None:
+    """A release listed before its checksum exists falls back to the next.
+
+    Args:
+        api: API tree fixture.
+    """
+    _kernel_with_patches(api, {'7.2', '7.1'})
+    (api / 'cdn' / 'sha256sums.asc'
+     ).write_text(f'{DIGEST}  linux-7.1.20.tar.xz\n')
+    result = _run(
+        api,
+        'resolve',
+        PKG='kernel',
+        BASE_ENV='A=1',
+        KERNEL_ORG_URL=f'file://{api}'
+    )
+    assert result.returncode == 0, result.stderr
+    assert _env_output(api) == [
+        'A=1', 'KERNEL_VER=7.1.20', f'KERNEL_SHA256={DIGEST}'
+    ]
+    assert 'no sha256 for linux-7.2.11.tar.xz' in result.stderr
+
+
 def test_resolve_takes_the_newest_kernel_when_patches_cover_it(
     api: Path
 ) -> None:
