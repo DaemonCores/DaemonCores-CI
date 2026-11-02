@@ -921,3 +921,12 @@ Gap: RSS cannot attribute the ~100 MiB of kernel-side memory. Harness now also d
 - Not run locally: the PVE perl stack is not installable here without network changes; the other Bootc modules were never loadable before Tick 41, so further load errors are possible.
 - Observation: in the previous run (41406540225) the same amd64 test VM refused the SSH key for 900 s; in this run it was reachable after 20 s with the same image logic. The refused-key case is intermittent and unexplained (Tick 42 stays open); the serial dump fix of Tick 42 will show it if it recurs.
 - To confirm: next VE Full Pipeline, the five tests above pass.
+
+## Tick 44 - VE pveproxy down: "regex and fixed items" path match error (VE run 41412278383)
+
+- Symptom: amd64 boots, SSH works, 39 PASS; `pveproxy`, `pvedaemon`, `pve-guests`, web UI 8006 and login page still fail.
+- Proof (job 125169426032 diag): `pveproxy[2209]: register method PVE::API2::Bootc/compose/{stack} - path match error - regex and fixed items`, then `Compilation failed in require at /usr/share/perl5/PVE/API2/Cluster.pm line 9`.
+- Cause: `libpve-common-perl 9.2.5 PVE/RESTHandler.pm:305,313` forbids mixing a regex path item (`{vmid}`, subclass Status) with fixed items (`compose/{stack}`, `templates`, `template/{stack}/compose`) at the same path level. `API2/Bootc.pm` had both at its root.
+- Fix: the three non-guest endpoints moved to the new `PVE/API2/Bootc/Stacks.pm`, registered by `Nodes.pm.patch` under `nodes/{node}/bootc-stacks`; GUI URLs updated in `pvemanagerlib.js.patch` and `s10-pending/www/bootc-classes.js`.
+- Local proof: real `PVE::RESTHandler` (libpve-common-perl 9.2.5) loaded in a `debian-bootc` container with the Perl deps installed. New layout registers (`layout ok`); the old layout reproduces the exact error. `patch -p1 --dry-run` of `Nodes.pm.patch` on pve-manager 9.2.9 `Nodes.pm` succeeds.
+- To confirm: next VE Full Pipeline, the five tests above pass.
