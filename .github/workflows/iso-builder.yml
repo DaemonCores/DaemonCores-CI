@@ -219,10 +219,14 @@ jobs:
           # /var/lib/containers/storage/libpod ("database configuration
           # mismatch", run 41545038779): pull with the builder's own podman,
           # inside a container bound to the same store layout it will use.
+          # rshared propagation on the store bind: the osbuild sandbox rbinds
+          # the store itself and private propagation denies that nested rbind
+          # on the amd64 runner (mount permission denied: runs 41533824293,
+          # 41540601625, 41546441824).
           sudo podman run \
             --rm \
             --privileged \
-            -v "$(pwd)/run-store:/var/lib/containers/storage" \
+            -v "$(pwd)/run-store:/var/lib/containers/storage:rshared" \
             ${AUTH_ARGS[@]+${AUTH_ARGS[@]}} \
             --entrypoint /usr/bin/podman \
             "${BIB_IMAGE}" \
@@ -231,7 +235,7 @@ jobs:
             --rm \
             --privileged \
             --security-opt apparmor=unconfined \
-            -v "$(pwd)/run-store:/var/lib/containers/storage" \
+            -v "$(pwd)/run-store:/var/lib/containers/storage:rshared" \
             ${AUTH_ARGS[@]+${AUTH_ARGS[@]}} \
             -v "$(pwd)/out:/output" \
             "${BIB_IMAGE}" \
