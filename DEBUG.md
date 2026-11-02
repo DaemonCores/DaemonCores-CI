@@ -1041,3 +1041,15 @@ Gap: RSS cannot attribute the ~100 MiB of kernel-side memory. Harness now also d
 - Fix build-arch.sh lint_image: --entrypoint sh + guard `command -v bootc` (lint non applicable aux images sans bootc); assertion test mise a jour. Make test: 256 passed.
 - Fix collatéral (rouge concurrent): check_build_context.py importait yaml au top-level; hash.sh (python3 bare, sans PyYAML) obtenait ctx vide → hash d'image constant → pas de skip. import yaml rendu lazy (local_sources n'en dépend pas); test_hash_follows... redevient vert.
 - debian-bootc 7f3f6ea poussé (bib fixes + iso packages), re-dispatch Full Pipeline.
+
+## Tick - Alignment alignment-audit (G1/V3, V1-V6, V8, A1, A2)
+
+- DaemonCores-VE `c4235fd`: le pin SHA-256 de la clé APT VE (`DAEMONCORES_VE_GPG_SHA256` en dur, Containerfile:25) est remplacé par la consommation des build-args dérivés par la CI (`BOOTC_GPG_SHA256` haché du secret `APT_GPG_KEY` par le job `apt_key` de full-pipeline, `BOOTC_APT_URL` passé par bootc-build.yml:253-254). Defaults committés = contrat local; V3-bis: `Containerfile.base` VE provisionne le keyring depuis ces ARG (no-op si vides, sources stanzas restées côté produit pour ne jamais déclarer le repo deux fois).
+- DaemonCores-VE `5358de9` (V1/V2/V4-V6): lint.yml (caller shared lint, workflow_dispatch, make-targets: check) + Makefile minimal (check = hadolint+yamllint+check_tests_manifest+check_build_context via .ci/) + .yamllint.yml/.hadolint.yaml/.editorconfig copiés de la template; deux YAML pré-existants sans 
+ final corrigés (release.yml, kernel-pve/patches.yml).
+- DaemonCores-VE `7352137` (V8): reboot_timeout 300 -> 60 (calibration R-780), boot_timeout 900 inchangé.
+- DaemonCores-VE `2a222c2`: hadolint ignores DL3007 (FROM :latest, contrat base dérivée) + DL4006 (pipe sha256 sur /bin/sh) sur Containerfile.base — le premier run Lint (41541519079) échouerait là-dessus.
+- debian-bootc `70cc735` (A1): pipeline.yml re-gagne l'input dispatch `update_base` + `enable_base: true` (signature template pipeline.yml:29-32/66-67); push/schedule jamais. Wiki e7c1e82: citation pipeline.yml:17->18 (ligne `on:` décalée par l'ajout).
+- debian-bootc `bfd1e25` (A2): lint.yml workflow_dispatch + make-targets explicites 'admission check docs-check'. Le Lint persistant rouge (R-783) = hadolint Containerfile.bib:48 DL3022 -> ignore posé + push (bib COPY overlay, contexte déclaré), Lint re-dispatché.
+- DROPPED (owner decision 03/11 ~00h): G2 (câblage gpu/nvidia dans bootc-build.yml — nvidia MOVED dans debian-bootc, VE installe depuis ce repo APT), G7 (prune kernel inline VE = délibérée, debian-bootc est le côté pas à jour ici, pas l'inverse), G4 (ifupdown2 = forks délibérés), G6 (packages.yml: rien avant le GO de découpe). Aucun commit de ces axes.
+- Preuves: make test DaemonCores-CI 256 passed (55s); Lint dispatch post-push VE 41542105061, bootc 41542111465; push VE 7352137..2a222c2 via pre-push docs-sync (wiki 2 commits bbacfa3, a5c922e).
