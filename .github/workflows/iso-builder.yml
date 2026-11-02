@@ -219,12 +219,12 @@ jobs:
           # (run 41543534089, job Build ISO amd64).
           if [ -f auth.json ]; then
             sudo podman --root "$(pwd)/run-store" \
-              --runroot "$(pwd)/run-store/runroot" \
+              --runroot /run/iso-rr \
               --authfile "$(pwd)/auth.json" \
               pull "${PAYLOAD}" "${INSTALLER}"
           else
             sudo podman --root "$(pwd)/run-store" \
-              --runroot "$(pwd)/run-store/runroot" \
+              --runroot /run/iso-rr \
               pull "${PAYLOAD}" "${INSTALLER}"
           fi
           sudo podman run \
