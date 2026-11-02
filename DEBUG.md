@@ -858,3 +858,11 @@ Gap: RSS cannot attribute the ~100 MiB of kernel-side memory. Harness now also d
 - Reproduced locally in the published `debian-bootc:latest` image with a stale `7.2.15-stale` directory next to `7.0.14-26-pve`: the unfixed script runs dracut with `--kver 7.2.15-stale`.
 - Fix (debian-bootc): `bootc-finalize` takes the kernel version as `$1` (the hook passes it); without argument it takes the newest version directory that holds a module tree. Same fixture after the fix: with `7.0.14-26-pve` as argument dracut gets `--kver 7.0.14-26-pve`; without argument the stale directory is skipped.
 - To confirm after the push: debian-bootc pipeline builds `latest`, then a VE Full Pipeline boots (initramfs contains erofs/overlay/btrfs, SSH reachable).
+
+## Tick 37 - grub-efi-arm64-signed build failed on an upstream HTTP 500 (debian-bootc run 41382456261, issue #58)
+
+- Symptom: job 125076137327 `wave0 (grub-efi-arm64-signed)` fails; the pipeline keeps the last-good deb and opens issue #58.
+- Proof (job log): `./bootstrap` clones gnulib: `error: RPC failed; HTTP 500 curl 22 The requested URL returned error: 500` / `fatal: unable to access 'https://git.savannah.gnu.org/git/gnulib.git/'`. The amd64 entry of the same run passed (same step, no 500).
+- Cause: transient server error of git.savannah.gnu.org; the build had no retry around `./bootstrap`.
+- Fix (debian-bootc `packages.yml`, both grub entries): up to 4 attempts with a growing pause, the partial `gnulib` directory removed between attempts; a persistent failure still fails the build.
+- To confirm: next debian-bootc Full Pipeline builds both grub debs and issue #58 is not re-opened.
