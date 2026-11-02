@@ -885,3 +885,13 @@ Gap: RSS cannot attribute the ~100 MiB of kernel-side memory. Harness now also d
 - Fix (debian-bootc `bootc-finalize`): after dracut, remove every other `/usr/lib/modules/<kver>` that has neither `kernel/` nor `modules.dep`.
 - To confirm: debian-bootc pipeline publishes `latest`, then a VE Full Pipeline: kernel cmdline shows `vmlinuz-7.0.14-26-pve`, tests pass.
 - VE arm64 (jobs 125111244698 and run 41378704407): `libpve-storage-perl 1:9.1.13+dcve1 Depends libpve-common-perl (>= 9.2.3)` but the arm64 PVE index stops at 9.2.2 (amd64 index: 9.2.5), plus `daemoncores-kernel-7.2.15-16k Conflicts: linux-image-arm64`. Pre-existing and identical in both runs; separate from this fix (mirror lag, see VE wiki Handoff-Changes.md).
+
+## Tick 40 - VE `networking.service` fails, `/etc/hosts` stays loopback, pve-cluster down (VE run 41402765789)
+
+- Symptom: VE amd64 boots the right kernel (`vmlinuz-7.0.14-26-pve`) but `networking.service`, `pve-cluster`, `pveproxy`, `pvedaemon`, `pvestatd`, `pve-firewall` are failed.
+- Proof (job 125139040481 log): addresses are up (`enp0s2 10.0.2.15/24`), then `networking[1403]: /usr/sbin/domain-set: line 16: dhcpcd: command not found`, `networking.service: Control process exited, code=exited, status=127/n/a`, then `pmxcfs[1416]: crit: Unable to resolve node name 'daemoncores-ve' to a non-loopback IP address`.
+- Cause: `domain-set` (ExecStartPost of networking) read the DHCP domain with `dhcpcd -U`, but the image runs ISC `dhclient` (log: `executing /sbin/dhclient ... new address detected`); `dhcpcd` is not installed. With `set -e` the script died before rendering `/etc/hosts`, so the host name only resolved to the loopback bootstrap entry.
+- Reproduced in `debian-bootc:latest` (container, fixture lease file): previous script `line 16: dhcpcd: command not found`, rc=127.
+- Fix (VE `ifupdown2/usr/sbin/domain-set`): take the interface of the first global IPv4 address and read `option domain-name` from `/var/lib/dhcp/dhclient.<iface>.leases`; fall back to `local` when there is no lease. After the fix: lease present renders `<ip> <host>.lan.example <host>`, no lease renders `<host>.local`, rc=0 in both cases.
+- Open point (not changed): `setdomaine || true` / `resetdomaine || true` in the same script swallow render errors.
+- To confirm: next VE Full Pipeline, amd64 tests `networking`, `pve-cluster`, `pveproxy` green.
