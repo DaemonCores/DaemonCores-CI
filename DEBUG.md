@@ -816,3 +816,11 @@ Gap: RSS cannot attribute the ~100 MiB of kernel-side memory. Harness now also d
 - Not reproduced: bootc-image-builder itself, which refuses rootless podman (`must be run in rootful (not rootless) podman`) and root is out of reach here; the link between that field and the error rests on the message and on the field flipping, not on a local run of the builder.
 - Fix: the base ships the default in `src/basepostinstall/usr/lib/bootc/install/00-debian-bootc.toml` (native bootc mechanism, same default as the installer recipe), instead of a `--rootfs` flag in the workflow.
 - Open until a run shows the ISO jobs passing.
+
+## Tick 32 - the base change was not built: the content hash ignored the copied files (run 41370486708)
+
+- Symptom: after pushing the default-rootfs file (`47b2a08`), the images job logged `image iso: skipped-unchanged (hash b666a8cc...)` for every image and the ISO jobs failed again with the same `no default root filesystem` error. The published `iso_amd64` was created 00:13 UTC, before the commit, and its `/usr/lib/bootc/install/` is still empty (`podman run ... ls /usr/lib/bootc/install/`).
+- Cause: `ci_image_hash` (scripts/image-ci/hash.sh) hashes the Containerfile bytes, the debs, the base digest and the tests manifest, but not the files the Containerfile copies in (`COPY ./src/basepostinstall /`). A change under `src/` never changed any image hash, so no image was rebuilt.
+- Fix: `scripts/context_hash.py` fingerprints the local COPY/ADD sources of a Containerfile and `ci_image_hash` adds it to the hash when there is one; a Containerfile copying nothing keeps the former formula (the parity test with the former step still passes). Test: editing a copied file changes the hash, an unrelated file does not.
+- Consequence: the next run rebuilds every image once (the hash formula changed on purpose).
+- Open until a run shows the ISO jobs passing.

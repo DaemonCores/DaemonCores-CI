@@ -365,6 +365,30 @@ def test_hash_is_identical_to_the_former_workflow_step(sb: Sandbox) -> None:
         assert new[key] == old[key], key
 
 
+@needs_jq
+def test_hash_follows_the_files_the_containerfile_copies(sb: Sandbox) -> None:
+    """Editing a copied file changes the hash; an unrelated file does not."""
+    (sb.root / 'src').mkdir()
+    (sb.root / 'src' / 'a.conf').write_text('one\n')
+    (sb.root / 'other.txt').write_text('x\n')
+    (sb.root / 'Containerfile').write_text('FROM scratch\nCOPY ./src /\n')
+    env = dict(sb.env, SUDO='sudo', ARCH='amd64', GITHUB_REPOSITORY=REPO,
+               GLOBAL_HASH='g' * 64, BOOTC_GPG_SHA256='key')
+
+    def image_hash() -> str:
+        script = (f'. {CI}/hash.sh; ci_hash_inputs; '
+                  'ci_image_hash Containerfile latest')
+        return subprocess.run(['bash', '-c', script], cwd=sb.root, env=env,
+                              check=True, capture_output=True,
+                              text=True).stdout.strip()
+
+    before = image_hash()
+    (sb.root / 'other.txt').write_text('y\n')
+    assert image_hash() == before
+    (sb.root / 'src' / 'a.conf').write_text('two\n')
+    assert image_hash() != before
+
+
 @pytest.mark.parametrize(
     ('prior', 'event', 'force', 'expected'),
     [

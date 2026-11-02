@@ -66,12 +66,21 @@ ci_hash_inputs() {
 }
 
 ci_image_hash() {
-  local cf_file="$1" cf_tag="$2" cf
+  local cf_file="$1" cf_tag="$2" cf ctx here
+  here=$(dirname "${BASH_SOURCE[0]}")
   cf=$(sha256sum "${cf_file}" | cut -d' ' -f1)
-  printf '%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n' \
-    "${DEBS}" "${BASE_DIGEST}" "${cf}" "${GLOBAL_HASH}" "${cf_tag}" \
-    "${ARCH}" "${SIGNING}" "${TESTS_HASH}" \
-    | sha256sum | cut -d' ' -f1
+  # The files the Containerfile copies in are build inputs as well: editing
+  # one must rebuild the image. A Containerfile that copies nothing local
+  # keeps the former formula.
+  ctx=$(python3 "${here}/../context_hash.py" "${cf_file}")
+  {
+    printf '%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n' \
+      "${DEBS}" "${BASE_DIGEST}" "${cf}" "${GLOBAL_HASH}" "${cf_tag}" \
+      "${ARCH}" "${SIGNING}" "${TESTS_HASH}"
+    if [[ -n "${ctx}" ]]; then
+      printf '%s\n' "${ctx}"
+    fi
+  } | sha256sum | cut -d' ' -f1
 }
 
 # The twin differs from its primary image by the kernel only.
