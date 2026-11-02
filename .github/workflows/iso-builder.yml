@@ -178,7 +178,7 @@ jobs:
           sudo podman run \
             --rm \
             --privileged \
-            -v /var/lib/containers/storage:/var/lib/containers/storage \
+            -v /run/containers/auth.json:/run/containers/auth.json \
             -v "$(pwd)/out:/output" \
             "${BIB_IMAGE}" \
             --type iso \
@@ -186,7 +186,10 @@ jobs:
             "${PAYLOAD_ARGS[@]}" \
             "${INSTALLER}"
 
-          # bootc-image-builder writes the ISO to /output/bootiso/
+          # bootc-image-builder writes the ISO to /output/bootiso/ — as root:
+          # give it back to the runner user, or the rename step and
+          # implantisomd5 (which opens the file r+w) hit permission denied.
+          sudo chown -R "$(id -u):$(id -g)" out
           ISO=$(find out -name "*.iso" | head -1)
           if [ -z "${ISO}" ]; then
             echo "ERROR: bootc-image-builder did not produce an .iso file" >&2
