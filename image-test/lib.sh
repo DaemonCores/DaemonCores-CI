@@ -1033,7 +1033,7 @@ wait_boot() {
   echo "Waiting for guest systemd startup to settle before testing..."
   local state
   state=$(ssh "${SSH_OPTS[@]}" root@localhost \
-    'timeout 180 systemctl is-system-running --wait >/dev/null 2>&1; \
+    'timeout 600 systemctl is-system-running --wait >/dev/null 2>&1; \
      systemctl is-system-running' 2>/dev/null || true)
   echo "  guest is-system-running: ${state:-unknown}"
 }
