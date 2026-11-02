@@ -39,14 +39,14 @@ def _discover_script() -> str:
 
 
 def _discover(tmp_path: Path,
-              nosign: bool,
+              nosign: bool = False,
               extra: dict[str, str] | None = None
               ) -> dict[str, list[dict[str, Any]]]:
     """Run the discover step on a repository with three Containerfiles.
 
     Args:
         tmp_path: Scratch repository root.
-        nosign: Value of the ``nosign_images`` input.
+        nosign: Accepted for compatibility; no twin exists since L1.
         extra: Additional Containerfiles (name to content).
 
     Returns:
@@ -63,12 +63,11 @@ def _discover(tmp_path: Path,
     for name, content in (extra or {}).items():
         (tmp_path / name).write_text(content)
     out = tmp_path / 'out'
-    env = dict(
-        os.environ,
-        GITHUB_OUTPUT=str(out),
-        GITHUB_REPOSITORY='DaemonCores/debian-bootc',
-        NOSIGN_IMAGES='true' if nosign else 'false'
-    )
+    env = dict(os.environ,
+               GITHUB_OUTPUT=str(out),
+               GITHUB_REPOSITORY='DaemonCores/debian-bootc',
+               NOSIGN_IMAGES='true' if nosign else 'false'
+               )
     subprocess.run(['bash', '-c', _discover_script()],
                    cwd=tmp_path,
                    env=env,
@@ -123,20 +122,22 @@ def test_images_are_grouped_by_architecture_in_build_order(
 
 @needs_jq
 def test_twin_only_for_the_generic_images(tmp_path: Path) -> None:
-    """The twin exists for amd64 and the 16 KB arm64 kernel, nothing else.
+    """One image per variant: NO twin, and the legacy label is ignored.
 
-    The twin is not a matrix entry of its own: it is built by the job of its
-    primary image, which learns the twin kernel from ``twin_suffix``.
+    The twin is not a matrix entry: even a Containerfile carrying the
+    ``org.daemoncores.unsigned-kernel-image`` LABEL of the former ``both``
+    mode gets one image per tag, on the enforced-at-install kernel.
 
     Args:
         tmp_path: Scratch repository root.
     """
     result = _discover(tmp_path, nosign=True)
     assert not [e for e in result['wave1'] if e['tag'].endswith('-nosign')]
-    twin = {(e['tag'], e['arch']): e['twin_suffix'] for e in result['wave1']}
-    assert twin == {
-        ('latest', 'amd64'): '-nosign',
-        ('latest', 'arm64'): '-16k-nosign',
+    twin_suffix = {(e['tag'], e['arch']): e['twin_suffix']
+                   for e in result['wave1']}
+    assert twin_suffix == {
+        ('latest', 'amd64'): '',
+        ('latest', 'arm64'): '',
         ('latest-4k', 'arm64'): '',
         ('board', 'amd64'): '',
         ('board', 'arm64'): '',
@@ -144,9 +145,9 @@ def test_twin_only_for_the_generic_images(tmp_path: Path) -> None:
         ('iso', 'arm64'): '',
     }
     manifest = {e['tag']: e['arches'] for e in result['manifest']}
-    assert manifest['latest-nosign'] == ['amd64', 'arm64']
-    assert 'latest-4k-nosign' not in manifest
-    assert 'board-nosign' not in manifest
+    assert manifest['latest'] == ['amd64', 'arm64']
+    assert manifest['latest-4k'] == ['arm64']
+    assert manifest['board'] == ['amd64', 'arm64']
     plain = {
         e['kernel_suffix']
         for e in result['wave1'] if e['tag'] == 'latest-4k'
@@ -156,7 +157,7 @@ def test_twin_only_for_the_generic_images(tmp_path: Path) -> None:
 
 @needs_jq
 def test_no_twin_without_the_input(tmp_path: Path) -> None:
-    """Without ``nosign_images`` no -nosign image is planned.
+    """Without ``nosign_images`` — actually under any mode — no twin is planned.
 
     Args:
         tmp_path: Scratch repository root.
@@ -164,6 +165,7 @@ def test_no_twin_without_the_input(tmp_path: Path) -> None:
     result = _discover(tmp_path, nosign=False)
     assert not [e for e in result['wave1'] if e['twin_suffix']]
     assert not [e for e in result['manifest'] if 'nosign' in e['tag']]
+    assert not [e for e in result['wave1'] if 'nosign' in e['tag']]
 
 
 def _expand(unsigned: str) -> list[str]:
@@ -207,14 +209,15 @@ def test_manifest_drops_the_twin_unless_asked() -> None:
 
 
 def test_pipeline_wires_the_twin_from_the_both_mode() -> None:
-    """Only the both mode with a key plans the twin kernel and images."""
-    text = (WORKFLOWS / 'full-pipeline.yml').read_text()
-    assert '[ "${mode}" = both ] && unsigned_kernel=yes' in text
-    assert text.count(
-        'unsigned_kernel: ${{ needs.prepare.outputs.unsigned_kernel }}'
-    ) == 2
-    twin_images = "nosign_images: ${{ needs.prepare.outputs.unsigned_kernel"
-    assert twin_images + " == 'yes' }}" in text
+    """L1: the pipelines carry no twin plumbing, only the signing mode."""
+    builder = (WORKFLOWS / 'bootc-debs-builder.yml').read_text()
+    build = (WORKFLOWS / 'bootc-build.yml').read_text()
+    full = (WORKFLOWS / 'full-pipeline.yml').read_text()
+    assert 'unsigned_kernel' not in full
+    assert 'nosign_images' not in build
+    assert "unsigned_kernel == 'yes'" not in builder
+    assert "unsigned-kernel: 'no'" in builder
+    assert '[ "${mode}" = both ] && unsigned_kernel=yes' not in full
 
 
 def test_one_apt_suite_and_one_deb_cache() -> None:

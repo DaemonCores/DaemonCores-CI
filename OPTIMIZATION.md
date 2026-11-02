@@ -224,7 +224,7 @@ Pushed: image-test split, `build-arch.sh`, `plan.py` / `build-all.sh` (one build
 | L19 | conditional rebuild cache carry-over + unpack gate | PROVEN in run 41243363879 (reuse in 30-90 s, corrupt deb discarded) | confirm a no-change run prints `unchanged; reused` for every package |
 | L20 | patch reference guard refreshed automatically | workflow repaired, validated locally and in run 41246396958 (branch pushed); PR creation refused by the repository setting | owner decision: enable "Allow GitHub Actions to create and approve pull requests" or push directly |
 | L14 | skip unchanged images | pushed, awaiting a green run | needed for the 15 min no-change target |
-| L1 | remove the `-nosign` twins | designed, step 1 (harness `kargs`) not merged | risks listed above; owner decision on migration |
+| L1 | remove the `-nosign` twins | implemented (one kernel per arch/page size, `KERNEL_SIGNING_ENFORCE: "no"`, install-time karg `module.sig_enforce=1` via the bootc-installer switch; harness categories boot the same tag once per category with/without the karg) | needs a Full Pipeline run as CI evidence; build count listed in OPTIMIZATION Results |
 | L5 | no per-layer `--cache-to` in a chain | not done | `build-arch.sh:199` |
 | L6 | smoke test for package-only variants | not done | |
 | L8 | per-package dependencies | not done | waves kept on the owner's order |
@@ -238,7 +238,7 @@ Pushed: image-test split, `build-arch.sh`, `plan.py` / `build-all.sh` (one build
 | tests | 100 % YAML tests with an `arch:` field | not done | |
 | bootloaders | two bootloaders (UEFI/U-Boot) | not done | criterion is U-Boot vs UEFI, not page size |
 
-## L1 design: remove the `-nosign` twins (DESIGNED, not yet coded)
+## L1 design: remove the `-nosign` twins (IMPLEMENTED 2026-11-02, awaiting CI run)
 - One kernel per (arch, page size), built with `MODULE_SIG_FORCE=n` (`KERNEL_SIGNING_ENFORCE: "no"` set once in the `linux-image` package `env:`; `scripts/kernel_signing.sh` is untouched). Enforcement is the install-time karg `module.sig_enforce=1`, added by the installer (switch on by default, `default-gpu-security.blp:74`), never shipped in the image (bootc: removing a shipped karg is undefined behaviour).
 - CI: each category of `tests.yml` gets a `kargs:` list; the harness installs and boots the same tag once per matching category. The `signed` category carries `module.sig_enforce=1`, the `unsigned-kernel` category carries none. The sig_enforce Y/N assertions (`tests.yml:205-325`) stay byte-identical.
 - Steps: 1 harness (`kargs`, one boot per category; additive), 2 debian-bootc (remove the variants, repack branches, `both` mode, twin wording), 3 DaemonCores-CI (remove `nosign_images`, `unsigned_kernel`, twin rows, tests).

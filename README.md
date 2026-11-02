@@ -77,7 +77,7 @@ workflows/
 docs -> ../<repo>.wiki (symlink; the wiki is the documentation)
 ```
 
-Each root-level `Containerfile*` becomes an image variant. `Containerfile` maps to the `latest` family; for example, `Containerfile.nvidia` maps to the `nvidia` family. Each tag has one image per architecture (`<tag>_<arch>`) and a multi-arch manifest list `<tag>`; automatic updates are a run-time choice, not an image variant. A Containerfile carrying the `org.daemoncores.unsigned-kernel-image` label also gets a `<tag>-nosign` twin when the `both` signing mode is active: the same image on the unsigned kernel package, for amd64 and the plain-tag arm64 kernel only. `Containerfile.base` is not an image variant: it is the shared base every other Containerfile builds on (`BASE_IMAGE`, default `localhost/debian-bootc-base`). Each build job builds it once, then the image, then its twin on the same layers, and pushes only the images the run asked for; the base is never pushed.
+Each root-level `Containerfile*` becomes an image variant. `Containerfile` maps to the `latest` family; for example, `Containerfile.nvidia` maps to the `nvidia` family. Each tag has one image per architecture (`<tag>_<arch>`) and a multi-arch manifest list `<tag>`; automatic updates are a run-time choice, not an image variant. There is ONE image per variant (L1): module-signature enforcement is an install-time choice made by the bootc-installer (`module.sig_enforce=1` kernel argument, default on), not a second `-nosign` kernel package or image; Secure Boot and the EFI signatures are identical on every image. `Containerfile.base` is not an image variant: it is the shared base every other Containerfile builds on (`BASE_IMAGE`, default `localhost/debian-bootc-base`). Each build job builds it once, then the image on the same layers, and pushes only the images the run asked for; the base is never pushed.
 
 Package dependencies declared in `packages.yml` are converted into build waves. Independent packages build in parallel; a package is scheduled after every declared dependency.
 
@@ -159,7 +159,7 @@ The complete pipeline currently uses the following Actions secrets when the corr
 | `APT_GPG_KEY` | Signs the generated APT repository. Auto-generated. |
 | `SB_SIGNING_KEY`, `SB_SIGNING_CERT` | Self-signed Secure Boot key and certificate (base64) for the custom EFI bootloader. Auto-generated. |
 | `COSIGN_PRIVATE_KEY`, `COSIGN_PASSWORD`, `COSIGN_PUBLIC_KEY` | The repository's own image signing key. Auto-generated. |
-| `MODULE_SIGNING_KEY`, `MODULE_SIGNING_CERT` | Kernel module signing key. Auto-generated when module signing is enabled. The modules are always signed and shared; in `both` mode only the kernel exists twice, as the signed `linux-image-common` and the `-nosign` twin (a manifest entry marked `when: {unsigned-kernel: true}`), published in the same APT suite. |
+| `MODULE_SIGNING_KEY`, `MODULE_SIGNING_CERT` | Kernel module signing key. Auto-generated when module signing is enabled. The modules are always signed and shared; the module-signature enforcement of an installed system is chosen at install by the bootc-installer (`module.sig_enforce=1` karg, default on) — one kernel and one image per variant, no `-nosign` twin. |
 
 ### Generated secrets and the `prepare` job
 

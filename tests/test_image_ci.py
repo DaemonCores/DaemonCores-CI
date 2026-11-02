@@ -890,6 +890,9 @@ def test_workflow_keeps_every_input() -> None:
     triggers = cast(dict[Any, Any], _workflow())[True]
     inputs = triggers['workflow_call']['inputs']
     assert set(inputs) == {
-        'force_no_cache', 'bootc_gpg_sha256', 'apt_url', 'nosign_images'
+        'force_no_cache', 'bootc_gpg_sha256', 'apt_url'
     }
+    # L1: the unsigned-kernel twin input (nosign_images) is gone; one image
+    # per variant, enforcement decided at install.
+    assert 'nosign_images' not in inputs
 

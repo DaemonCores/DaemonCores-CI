@@ -241,7 +241,6 @@ jobs:
     outputs:
       restart: ${{ steps.dispatch.outputs.restart }}
       signing_active: ${{ steps.need.outputs.signing_active }}
-      unsigned_kernel: ${{ steps.need.outputs.unsigned_kernel }}
       # The plan, forced to "nothing" when this run hands over to a new one.
       env: ${{ steps.dispatch.outputs.restart == 'yes' && 'false' || needs.changes.outputs.env }}
       debs: ${{ steps.dispatch.outputs.restart == 'yes' && 'false' || needs.changes.outputs.debs }}
@@ -275,7 +274,6 @@ jobs:
           ")
           fi
           active=no
-          unsigned_kernel=no
           groups=()
           if [ "${PLAN_IMAGE}" = true ] && [ "${HAS_COSIGN}" != true ]; then
             groups+=(cosign)
@@ -291,19 +289,17 @@ jobs:
             sign|both)
               if [ "${HAS_MODULES}" = true ]; then
                 active=yes
-                # both: the modules are signed once and shared; only the
-                # kernel (and the images on it) exists in a signed and an
-                # unsigned twin.
-                [ "${mode}" = both ] && unsigned_kernel=yes
+                # One image per variant: enforcement is decided at install by
+                # the bootc-installer (module.sig_enforce=1 karg), not by a
+                # second kernel package.
               elif [ "${PLAN_DEBS}" = true ]; then
                 groups+=(modules)
               fi
               ;;
           esac
           echo "signing_active=${active}" >>"$GITHUB_OUTPUT"
-          echo "unsigned_kernel=${unsigned_kernel}" >>"$GITHUB_OUTPUT"
           echo "groups=${groups[*]:-}" >>"$GITHUB_OUTPUT"
-          echo "module signing mode=${mode} active=${active} unsigned_kernel=${unsigned_kernel}; missing: ${groups[*]:-none}"
+          echo "module signing mode=${mode} active=${active}; missing: ${groups[*]:-none}"
       - name: Fetch the shared tooling
         if: ${{ steps.need.outputs.groups != '' }}
         uses: actions/checkout@v7
@@ -469,7 +465,6 @@ jobs:
     with:
       arch: amd64
       signing_active: ${{ needs.prepare.outputs.signing_active }}
-      unsigned_kernel: ${{ needs.prepare.outputs.unsigned_kernel }}
       gpu_driver: ${{ inputs.gpu_driver == 'true' && 'yes' || 'no' }}
       deploy_pages: false
     secrets: inherit
@@ -495,7 +490,6 @@ jobs:
     with:
       arch: arm64
       signing_active: ${{ needs.prepare.outputs.signing_active }}
-      unsigned_kernel: ${{ needs.prepare.outputs.unsigned_kernel }}
       gpu_driver: ${{ inputs.gpu_driver == 'true' && 'yes' || 'no' }}
       deploy_pages: false
     secrets: inherit
@@ -572,8 +566,6 @@ jobs:
       # committed to the Containerfiles).
       bootc_gpg_sha256: ${{ needs.apt_key.outputs.sha256 }}
       apt_url: ${{ needs.apt_key.outputs.url }}
-      # both mode: also build the unsigned-kernel twin images (<tag>-nosign).
-      nosign_images: ${{ needs.prepare.outputs.unsigned_kernel == 'yes' }}
     secrets: inherit
 
   iso:

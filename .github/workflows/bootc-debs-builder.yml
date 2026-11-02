@@ -20,11 +20,6 @@ on:
         required: false
         type: string
         default: 'no'
-      unsigned_kernel:
-        description: 'yes to also build the -nosign kernel twins (both signing mode); anything else drops them from the plan.'
-        required: false
-        type: string
-        default: 'no'
       gpu_driver:
         description: 'yes to also build the packages marked when.gpu-driver (opt-in GPU entries, e.g. the proprietary NVIDIA libs; private build); anything else drops them.'
         required: false
@@ -87,7 +82,9 @@ jobs:
         uses: DaemonCores/DaemonCores-CI/manifest-expand@main
         with:
           arch: ${{ inputs.arch }}
-          unsigned-kernel: ${{ inputs.unsigned_kernel == 'yes' && 'yes' || 'no' }}
+          # One kernel per (arch, page size): nothing in the manifest carries
+          # `when: {unsigned-kernel: true}` anymore (L1), the filter drops none.
+          unsigned-kernel: 'no'
           gpu-driver: ${{ inputs.gpu_driver == 'yes' && 'yes' || 'no' }}
 
       - name: Compute dependency waves
