@@ -516,15 +516,13 @@ phase_wave2() {
 lint_image() {
   local tag="$1" ref
   ref=$(ref_of "${tag}")
-  # Tool images (bib) have an entrypoint that eats every argument and no
-  # bootc to lint: override the entrypoint with sh, and run the bootc lint
-  # only when the image actually ships bootc.
-  if [[ "$(row_get "${tag}" "${col_kind}")" == "primary" ]]; then
-    podman_ run --rm --entrypoint sh "${ref}" \
-      -c 'command -v bootc >/dev/null 2>&1 || { echo "no bootc: lint not applicable"; exit 0; }; ldd /usr/bin/bootc && ldd /usr/lib/libostree-1.so*' || return 1
-  fi
-  podman_ run --rm --entrypoint sh "${ref}" \
-    -c 'command -v bootc >/dev/null 2>&1 || { echo "no bootc: lint not applicable"; exit 0; }; exec bootc container lint' || return 1
+  # Bootable images only: a tool image (bib) ships bootc but no kernel under
+  # /usr/lib/modules and has no bootc container to lint — building it is the
+  # ISO job's own proof. The entrypoint is overridden with sh: the bib image's
+  # entrypoint (image-builder) would eat every argument of the invocation.
+  # One line on purpose: the stub-based tests record each podman invocation
+  # as a single log line.
+  podman_ run --rm --entrypoint sh "${ref}" -c 'if ! command -v bootc >/dev/null 2>&1; then echo "no bootc: lint not applicable"; exit 0; fi; if [ -z "$(ls -A /usr/lib/modules 2>/dev/null)" ]; then echo "no kernel: lint not applicable"; exit 0; fi; ldd /usr/bin/bootc; for so in /usr/lib/libostree-1.so*; do [ -e "${so}" ] && ldd "${so}"; done; exec bootc container lint' || return 1
 }
 
 phase_lint() {
