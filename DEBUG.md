@@ -866,3 +866,12 @@ Gap: RSS cannot attribute the ~100 MiB of kernel-side memory. Harness now also d
 - Cause: transient server error of git.savannah.gnu.org; the build had no retry around `./bootstrap`.
 - Fix (debian-bootc `packages.yml`, both grub entries): up to 4 attempts with a growing pause, the partial `gnulib` directory removed between attempts; a persistent failure still fails the build.
 - To confirm: next debian-bootc Full Pipeline builds both grub debs and issue #58 is not re-opened.
+
+## Tick 38 - gallium and rpi `.img` jobs fail with exit 127 (debian-bootc run 41388536531)
+
+- Symptom: jobs 125108981314 (gallium arm64) and 125108981448 (rpi arm64) end with `bash: scripts/build-img.sh: No such file or directory`, `Process completed with exit code 127`.
+- Proof: the log shows the step `bash scripts/build-img.sh ...`; `img-builder.yml` checks out only the caller repository, and `scripts/build-img.sh` exists only in DaemonCores-CI (the caller has no `scripts/` directory).
+- Cause: the reusable workflow ran a DaemonCores-CI script from the caller's checkout.
+- Fix: `img-builder.yml` fetches DaemonCores-CI into `.ci-tooling` (same step as `bootc-build.yml`) and runs `.ci-tooling/scripts/build-img.sh`; the script resolves its `files/` directory from its own location.
+- To confirm: next Full Pipeline builds both `.img` files.
+- Same run, ISO jobs (amd64/arm64): `error: cannot build manifest: no dnf in container`, the `--type iso` failure already reproduced in Tick 35; handled by the ISO track (type `bootc-installer`).
