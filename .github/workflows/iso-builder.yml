@@ -208,10 +208,10 @@ jobs:
           # The manifest stage reads/pulls the payload refs from container
           # storage; the osbuild container-deploy stage rbinds the store into
           # the osbuild sandbox. Sharing the HOST store with the builder made
-          # that rbind fail with EPERM on the amd64 runner (foreign overlay
-          # mounts under /var/lib/containers/storage); a fresh store owned by
+          # that rbind fail with EPERM on the amd64 runner (overlay mounts of
+          # another podman instance under /var/lib/containers/storage); a fresh store owned by
           # the inner podman alone mounts fine (proven by the arm64 job).
-          mkdir -p run-store
+          mkdir -p run-store/overlay
           sudo podman run \
             --rm \
             --privileged \
