@@ -201,6 +201,17 @@ jobs:
           ARCH: ${{ matrix.group.arch }}
         run: bash .ci-tooling/scripts/image-ci/prepare.sh
 
+      # Boot-timeout calibration (DEBUG.md:565): image-test records the measured
+      # SSH wait per (arch, category) under this path; the restore-keys
+      # `restore-keys:` line picks the newest previous run's file so every run
+      # calibrates on the last one instead of a fixed multiplier.
+      - name: Restore the boot-timeout calibration
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ runner.temp }}/image-ci/image-test/boot-calibration.env
+          key: boot-calib-${{ matrix.group.arch }}-${{ github.run_id }}
+          restore-keys: boot-calib-${{ matrix.group.arch }}-
+
       - name: Log in to GHCR
         env:
           GHCR_TOKEN: ${{ github.token }}
@@ -253,6 +264,15 @@ jobs:
           name: image-logs-${{ matrix.group.arch }}
           path: ${{ runner.temp }}/image-ci/failed-logs
           if-no-files-found: ignore
+
+      # Persist the measured boot waits of this run for the next one — even
+      # when the run failed: a slow, aborted boot is still the freshest record.
+      - name: Save the boot-timeout calibration
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ runner.temp }}/image-ci/image-test/boot-calibration.env
+          key: boot-calib-${{ matrix.group.arch }}-${{ github.run_id }}
 
   # Promote per-arch images into multi-arch manifest lists. Runs once every
   # build-test-push job (one per architecture) is green.

@@ -76,7 +76,24 @@ CATEGORY="${CATEGORY:-}"
 # Multiplier applied to the manifest timeouts (tuned for KVM) when the guest is
 # emulated (TCG). Back to 5: the 330 s boots came from -cpu max, a neoverse-n1
 # arm64 guest reaches SSH in about 105 s (run 41191163442).
+# The scale only applies when a key has no calibration yet: from the second run
+# on, the timeout is computed from the last measured SSH wait instead.
 TCG_TIMEOUT_SCALE="${TCG_TIMEOUT_SCALE:-5}"
+# Boot-timeout calibration (DEBUG.md:565 TODO): a fixed multiplier is not a
+# measure. Each boot records its actual SSH wait per (arch, category[, phase])
+# in BOOT_CALIB_FILE; the next run replaces the manifest default (and the TCG
+# scale) with <measured x BOOT_TIMEOUT_MARGIN + BOOT_SSH_GRACE_S>, floored by
+# the manifest value and capped at BOOT_TIMEOUT_MAX so any guest keeps the
+# room the 600 s settle wait gave slow arm64 boots (8b6d023).
+BOOT_CALIB_FILE="${STATE}/boot-calibration.env"
+# Committed seed (measured values, see the file header): calibrates a key from
+# its very first run when no recorded measurement exists yet.
+BOOT_CALIB_SEED="${BOOT_CALIB_SEED:-${SCRIPT_DIR}/boot-calibration.env}"
+BOOT_TIMEOUT_MARGIN="${BOOT_TIMEOUT_MARGIN:-2}"
+BOOT_SSH_GRACE_S="${BOOT_SSH_GRACE_S:-5}"
+BOOT_TIMEOUT_MAX="${BOOT_TIMEOUT_MAX:-600}"
+# Last SSH wait measured by wait_ssh, in seconds (0 when it never answered).
+LAST_SSH_WAIT_S=0
 REFERENCE=0
 # 1 once we know /dev/kvm is present and usable, 0 otherwise (set in
 # install_deps, persisted by save_state). GitHub's hosted arm64 runners expose
@@ -105,6 +122,11 @@ state_init() {
     "" | /) echo "::error::refusing to use '${STATE}' as the image-test state directory"; return 1 ;;
   esac
   (umask 077 && mkdir -p "${STATE}" "${LOGS}" "${VARSTORES}")
+  # Calibration file lives in the state (shared with the job's cache): created
+  # empty here, never truncated — a restored cache seed of measured boots is
+  # what the first run of this job must build on.
+  BOOT_CALIB_FILE="${STATE}/boot-calibration.env"
+  [ -f "${BOOT_CALIB_FILE}" ] || : >"${BOOT_CALIB_FILE}"
 }
 
 #######################################
@@ -581,7 +603,8 @@ wait_ssh() {
       cat /proc/sys/kernel/random/boot_id 2>"${_ssh_log}") \
       && [ -n "${boot}" ] && [ "${boot}" != "${old_boot}" ]; then
       rm -f "${_ssh_log}"
-      echo "  … SSH reachable after $((SECONDS - started))s"
+      LAST_SSH_WAIT_S=$((SECONDS - started))
+      echo "  … SSH reachable after ${LAST_SSH_WAIT_S}s"
       return 0
     fi
     sleep 5
@@ -597,6 +620,80 @@ wait_ssh() {
   sed 's/^/    | /' "${_ssh_log}" || true
   rm -f "${_ssh_log}"
   return 1
+}
+
+#######################################
+# Last measured SSH wait for a calibration key, from the state file first,
+# then from the committed seed. Empty when nothing was measured yet.
+# Globals:
+#   BOOT_CALIB_FILE, BOOT_CALIB_SEED
+# Arguments:
+#   $1 - calibration key (arch:category[:phase])
+#######################################
+boot_calib_get() {
+  local file key="$1"
+  for file in "${BOOT_CALIB_FILE}" "${BOOT_CALIB_SEED}"; do
+    if [ -f "${file}" ] && grep -q "^${key}=" "${file}" 2>/dev/null; then
+      grep "^${key}=" "${file}" | tail -n 1 | cut -d= -f2
+      return 0
+    fi
+  done
+}
+
+#######################################
+# Record a measured SSH wait for a calibration key (upsert in the state file:
+# the newest measurement wins, previous entries move below it).
+# Globals:
+#   BOOT_CALIB_FILE
+# Arguments:
+#   $1 - calibration key (arch:category[:phase])
+#   $2 - measured seconds
+#######################################
+boot_calib_record() {
+  local key="$1" seconds="$2" other
+  other=$(grep -v "^${key}=" "${BOOT_CALIB_FILE}" 2>/dev/null || true)
+  printf '%s=%s\n' "${key}" "${seconds}" >>"${BOOT_CALIB_FILE}"
+  if [ -n "${other}" ]; then
+    printf '%s\n' "${other}" >>"${BOOT_CALIB_FILE}"
+  fi
+}
+
+#######################################
+# Compute the wait timeout for one boot phase from the calibration, and set
+# CALIBRATED_TIMEOUT. The manifest value only feeds the first run (scaled by
+# TCG_TIMEOUT_SCALE without KVM): a recorded, or seeded, measurement then
+# replaces it with measured x margin + SSH grace, never below the manifest
+# value, never above BOOT_TIMEOUT_MAX.
+# Globals:
+#   CALIBRATED_TIMEOUT (set), BOOT_TIMEOUT_MARGIN, BOOT_SSH_GRACE_S,
+#   BOOT_TIMEOUT_MAX, BOOT_CALIB_FILE, BOOT_CALIB_SEED, KVM, TCG_TIMEOUT_SCALE
+# Arguments:
+#   $1 - manifest timeout in seconds (boot_timeout / reboot_timeout)
+#   $2 - calibration key (arch:category[:phase])
+#######################################
+compute_timeout() {
+  local manifest="$1" key="$2" last t
+  if last=$(boot_calib_get "${key}") && [ -n "${last}" ]; then
+    t=$((last * BOOT_TIMEOUT_MARGIN + BOOT_SSH_GRACE_S))
+    [ "${t}" -lt "${manifest}" ] && t=${manifest}
+    if [ "${t}" -gt "${BOOT_TIMEOUT_MAX}" ]; then
+      t=${BOOT_TIMEOUT_MAX}
+    fi
+    echo "Calibrated ${key} timeout: ${t}s (last measured SSH wait ${last}s," \
+      "margin ${BOOT_TIMEOUT_MARGIN}x, grace ${BOOT_SSH_GRACE_S}s," \
+      "ceiling ${BOOT_TIMEOUT_MAX}s)"
+    CALIBRATED_TIMEOUT=${t}
+    return 0
+  fi
+  # No measurement yet: first run for this key, keep the manifest default
+  # (scaled by the TCG multiplier when emulated, as before calibration).
+  if [ "${KVM}" != "1" ]; then
+    manifest=$((manifest * TCG_TIMEOUT_SCALE))
+    echo "No calibration for ${key}: manifest timeout scaled to ${manifest}s"
+  else
+    echo "No calibration for ${key}: manifest timeout ${manifest}s"
+  fi
+  CALIBRATED_TIMEOUT=${manifest}
 }
 
 #######################################
@@ -1131,7 +1228,7 @@ cmd_prepare() {
 #   $2 - idle RAM budget in MiB (optional, default RAM_IDLE_MAX_MB)
 #######################################
 cmd_test() {
-  local timeout reboot_n old_boot reboot_timeout
+  local timeout reboot_n old_boot calib_key
   IMAGE="$1"
   RAM_IDLE_MAX_MB="${2:-${RAM_IDLE_MAX_MB}}"
   load_state || exit 1
@@ -1151,18 +1248,18 @@ cmd_test() {
     prepare_sb_varstore "${certdir}"
   fi
   boot_vm
+  # Boot-wait calibrated on the previous runs of this (arch, category): the
+  # manifest value only feeds the very first run (DEBUG.md:565).
+  calib_key="${ARCH}:${CATEGORY:-default}"
   timeout=$(yq '.boot_timeout // 600' "${TESTS_FILE}")
-  # TCG emulation is an order of magnitude slower than KVM, so the manifest's
-  # KVM-tuned boot timeout would trip on a boot that is merely slow. Scale it.
-  if [ "${KVM}" != "1" ]; then
-    timeout=$((timeout * TCG_TIMEOUT_SCALE))
-    echo "TCG emulation: boot timeout scaled to ${timeout}s"
-  fi
+  compute_timeout "${timeout}" "${calib_key}"
+  timeout=${CALIBRATED_TIMEOUT}
   if ! wait_ssh "${timeout}"; then
     echo "::error::VM did not become reachable within ${timeout}s"
     dump_serial
     exit 1
   fi
+  boot_calib_record "${calib_key}" "${LAST_SSH_WAIT_S}"
   wait_boot
   ram_gate
   run_tests "tests"
@@ -1179,14 +1276,14 @@ cmd_test() {
     # Brief pause so the VM starts going down before we poll SSH.
     sleep 5
     reboot_timeout=$(yq '.reboot_timeout // 300' "${TESTS_FILE}")
-    if [ "${KVM}" != "1" ]; then
-      reboot_timeout=$((reboot_timeout * TCG_TIMEOUT_SCALE))
-    fi
+    compute_timeout "${reboot_timeout}" "${calib_key}:reboot"
+    reboot_timeout=${CALIBRATED_TIMEOUT}
     if ! wait_ssh "${reboot_timeout}" "${old_boot}"; then
       echo "::error::VM did not come back after reboot within ${reboot_timeout}s"
       dump_serial
       exit 1
     fi
+    boot_calib_record "${calib_key}:reboot" "${LAST_SSH_WAIT_S}"
     wait_boot
     run_tests "reboot_tests"
   fi

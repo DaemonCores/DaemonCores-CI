@@ -130,8 +130,18 @@ parent_tag() {
 init_state() {
   STATE_DIR="${RUNNER_TEMP:-${TMPDIR:-/tmp}}/image-ci"
   STATE="${STATE_DIR}/state.tsv"
+  # The boot-timeout calibration survives this reset: it is recorded across
+  # runs (DEBUG.md:565), restored here by the cache steps of bootc-build.yml.
+  local calib_keep=""
+  if [[ -f "${STATE_DIR}/image-test/boot-calibration.env" ]]; then
+    calib_keep="${STATE_DIR}.boot-calibration.keep"
+    mv "${STATE_DIR}/image-test/boot-calibration.env" "${calib_keep}"
+  fi
   rm -rf "${STATE_DIR}"
-  mkdir -p "${STATE_DIR}/failed-logs"
+  mkdir -p "${STATE_DIR}/failed-logs" "${STATE_DIR}/image-test"
+  if [[ -n "${calib_keep}" ]]; then
+    mv "${calib_keep}" "${STATE_DIR}/image-test/boot-calibration.env"
+  fi
   : >"${STATE}"
   local -A seen=()
   local file tag ks ts nocache parent

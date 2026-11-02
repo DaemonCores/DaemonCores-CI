@@ -70,6 +70,192 @@ def manifest(tmp: Path, text: str = MANIFEST) -> Path:
     return p
 
 
+# --- boot-timeout calibration (DEBUG.md:565) --------------------------------
+
+
+def test_calibrated_timeout_caps_measured_plus_margin(stubs: Path) -> None:
+    """The calibrated timeout is measured x margin + SSH grace, capped at 600."""
+    r = sh(
+        f"""
+        BOOT_CALIB_FILE="{stubs}/calib.env"
+        printf 'arm64:signed=310\n' >"${{BOOT_CALIB_FILE}}"
+        KVM=0
+        compute_timeout 60 arm64:signed
+        echo "${{CALIBRATED_TIMEOUT}}"
+        """,
+        {"ARCH": "arm64", "TCG_TIMEOUT_SCALE": "5"},
+        stubs,
+    )
+    assert r.returncode == 0, r.stderr
+    assert r.stdout.strip().splitlines()[-1] == "600"
+
+
+def test_calibrated_timeout_not_scaled_when_calibrated(stubs: Path) -> None:
+    """A calibration entry replaces manifest x TCG_TIMEOUT_SCALE."""
+    r = sh(
+        f"""
+        BOOT_CALIB_FILE="{stubs}/calib.env"
+        printf 'arm64:signed=110\n' >"${{BOOT_CALIB_FILE}}"
+        KVM=0
+        compute_timeout 60 arm64:signed
+        echo "${{CALIBRATED_TIMEOUT}}"
+        """,
+        {"ARCH": "arm64", "TCG_TIMEOUT_SCALE": "5"},
+        stubs,
+    )
+    assert r.returncode == 0, r.stderr
+    assert r.stdout.strip().splitlines()[-1] == "225"  # 110 * 2 + 5, no TCG scale
+
+
+def test_uncalibrated_timeout_keeps_manifest_and_tcg_scale(stubs: Path) -> None:
+    """First run for a key: manifest value, scaled by TCG without KVM."""
+    r = sh(
+        f"""
+        BOOT_CALIB_FILE="{stubs}/calib.env"
+        BOOT_CALIB_SEED="{stubs}/absent.env"
+        KVM=0
+        compute_timeout 60 amd64:signed
+        echo "${{CALIBRATED_TIMEOUT}}"
+        """,
+        {"ARCH": "amd64", "TCG_TIMEOUT_SCALE": "5"},
+        stubs,
+    )
+    assert r.returncode == 0, r.stderr
+    assert r.stdout.strip().splitlines()[-1] == "300"
+
+
+def test_uncalibrated_kvm_timeout_is_the_manifest_value(stubs: Path) -> None:
+    r = sh(
+        f"""
+        BOOT_CALIB_FILE="{stubs}/calib.env"
+        BOOT_CALIB_SEED="{stubs}/absent.env"
+        KVM=1
+        compute_timeout 60 amd64:signed
+        echo "${{CALIBRATED_TIMEOUT}}"
+        """,
+        {"ARCH": "amd64", "TCG_TIMEOUT_SCALE": "5"},
+        stubs,
+    )
+    assert r.returncode == 0, r.stderr
+    assert r.stdout.strip().splitlines()[-1] == "60"
+
+
+def test_calibrated_timeout_never_below_manifest(stubs: Path) -> None:
+    """The manifest value floors the calibration (KVM boots measured faster)."""
+    r = sh(
+        f"""
+        BOOT_CALIB_FILE="{stubs}/calib.env"
+        printf 'amd64:signed=19\n' >"${{BOOT_CALIB_FILE}}"
+        KVM=1
+        compute_timeout 60 amd64:signed
+        echo "${{CALIBRATED_TIMEOUT}}"
+        """,
+        {"ARCH": "amd64", "TCG_TIMEOUT_SCALE": "5"},
+        stubs,
+    )
+    assert r.returncode == 0, r.stderr
+    assert r.stdout.strip().splitlines()[-1] == "60"
+
+
+def test_calibrated_timeout_ceiling_600(stubs: Path) -> None:
+    """Slow arm64 measured boots cap at 600 s (8b6d023 ceiling kept)."""
+    r = sh(
+        f"""
+        BOOT_CALIB_FILE="{stubs}/calib.env"
+        printf 'arm64:uboot=340\n' >"${{BOOT_CALIB_FILE}}"
+        KVM=0
+        compute_timeout 60 arm64:uboot
+        echo "${{CALIBRATED_TIMEOUT}}"
+        """,
+        {"ARCH": "arm64", "TCG_TIMEOUT_SCALE": "5"},
+        stubs,
+    )
+    assert r.returncode == 0, r.stderr
+    assert r.stdout.strip().splitlines()[-1] == "600"
+
+
+def test_calibration_seed_used_when_state_file_has_no_entry(stubs: Path) -> None:
+    """The committed seed file calibrates the first run after a job restart."""
+    seed = stubs / "seed.env"
+    seed.write_text("amd64:signed=19\n")
+    r = sh(
+        f"""
+        BOOT_CALIB_FILE="{stubs}/calib.env"
+        BOOT_CALIB_SEED="{seed}"
+        KVM=1
+        compute_timeout 60 amd64:signed
+        echo "${{CALIBRATED_TIMEOUT}}"
+        """,
+        {"ARCH": "amd64", "TCG_TIMEOUT_SCALE": "5"},
+        stubs,
+    )
+    assert r.returncode == 0, r.stderr
+    # 19 * 2 + 5 = 43 is below the manifest floor of 60.
+    assert r.stdout.strip().splitlines()[-1] == "60"
+
+
+def test_calibration_record_upserts_and_get_reads_it(stubs: Path) -> None:
+    r = sh(
+        f"""
+        BOOT_CALIB_FILE="{stubs}/calib.env"
+        boot_calib_record amd64:signed 19
+        boot_calib_record amd64:signed 21
+        boot_calib_record arm64:uboot 105
+        g1=$(boot_calib_get amd64:signed)
+        g2=$(boot_calib_get arm64:uboot)
+        g3=$(boot_calib_get missing:key)
+        echo "${{g1}}/${{g2}}/${{g3}}"
+        """,
+        {"ARCH": "amd64"},
+        stubs,
+    )
+    assert r.returncode == 0, r.stderr
+    assert r.stdout.strip().splitlines()[-1] == "21/105/"
+
+
+def test_calibration_reboot_key_recorded_separately(stubs: Path) -> None:
+    r = sh(
+        f"""
+        BOOT_CALIB_FILE="{stubs}/calib.env"
+        boot_calib_record arm64:signed 127
+        boot_calib_record arm64:signed:reboot 145
+        g1=$(boot_calib_get arm64:signed)
+        g2=$(boot_calib_get arm64:signed:reboot)
+        echo "${{g1}}/${{g2}}"
+        """,
+        {"ARCH": "arm64"},
+        stubs,
+    )
+    assert r.returncode == 0, r.stderr
+    assert r.stdout.strip().splitlines()[-1] == "127/145"
+
+
+def test_state_init_touches_the_calibration_file_and_seed_exists(stubs: Path) -> None:
+    """prepare leaves the calibration file ready for the record and the cache."""
+    r = sh(
+        f"""
+        STATE="{stubs}/st"
+        ARCH=amd64
+        state_init
+        [ -f "${{STATE}}/boot-calibration.env" ] && echo ok
+        """,
+        {},
+        stubs,
+    )
+    assert r.returncode == 0, r.stderr
+    assert r.stdout.strip() == "ok"
+    seed = ROOT / "boot-calibration.env"
+    assert seed.is_file(), "the committed boot-calibration.env seed must exist"
+
+
+def test_seed_entries_are_key_seconds_pairs(stubs: Path) -> None:
+    for line in (ROOT / "boot-calibration.env").read_text().splitlines():
+        if line == "" or line.startswith("#"):
+            continue
+        k, _, v = line.partition("=")
+        assert k and v.isdigit(), f"bad seed entry: {line}"
+
+
 # --- argument parsing ------------------------------------------------------
 
 
@@ -315,7 +501,7 @@ def test_secure_boot_env_overrides_category(stubs: Path) -> None:
     m = manifest(stubs)
     r = sh('IMAGE="img:x-4k_amd64"; select_category >/dev/null; echo "${SECURE_BOOT}"',
            {"TESTS_FILE": str(m), "SECURE_BOOT": "1"}, stubs)
-    assert r.stdout.strip() == "1"
+    assert r.stdout.strip().splitlines()[-1] == "1"
 
 
 @needs_yq

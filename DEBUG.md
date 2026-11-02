@@ -562,7 +562,7 @@ Conclusions (proved by these runs):
 - With `-cpu neoverse-n1` the arm64 4k guest answers SSH after 105 s and after 115 s on reboot (run 41191163442, job latest-4k-arm64), against 298-340 s with `-cpu max`. The x12 scale only compensated for the slow CPU model; it is reverted to the original x5.
 - Open proposal: replace the ceiling by a stall watchdog on the serial console (fail when the console is silent for N s) with SSH expected within seconds of boot end. Needs a boot-complete marker on the serial, not yet verified.
 
-## TODO (owner-approved): boot timeout calibrated on previous runs
+## TODO (owner-approved, closed): boot timeout calibrated on previous runs — see the calibrated-timeout tick at the end of this journal
 - Timeouts must never trip on a merely slow emulated boot, and a fixed multiplier is not a measure. Keep the manifest value as the first-run default, then use the last measured `SSH reachable after Ns` (per arch / page size) times a margin, persisted between runs (CI cache or artifact).
 - Context: arm64 runners have no /dev/kvm, so TCG is the only mode there (run 41191163442 log: "/dev/kvm unavailable on arm64"). Measured with neoverse-n1: 4k boot 105 s, reboot 115 s.
 - Related proposal: serial-console stall watchdog, SSH expected within 5 s of boot end (marker not yet verified).
@@ -978,3 +978,10 @@ Gap: RSS cannot attribute the ~100 MiB of kernel-side memory. Harness now also d
 - run list passe a -L 5 + jq select(.workflowName != "CI status monitor") pour ne plus lister le monitor lui-meme.
 - Preuve finale: run https://github.com/DaemonCores/DaemonCores-CI/actions/runs/41461084048 (succes, issue #1 'CI status' avec body complet). Cron */20 actif sur DaemonCores-CI.
 - L14 verifie uniquement (run 41448445484, jobs skipped/sucess hors ISO P-757); rien rebati.
+
+## Tick - boot timeout calibre (DEBUG.md:565 TODO ferme)
+- Attente du boot = temps reel mesure par cle (arch, categorie[, reboot]) au lieu des 60 s manifeste fixes multipliees par TCG_TIMEOUT_SCALE. compute_timeout: <mesure x BOOT_TIMEOUT_MARGIN (2) + BOOT_SSH_GRACE_S (5)>, plancher = valeur manifeste, plafond = 600 s (le settle wait lent arm64 de 8b6d023/eddc991 est concerve).
+- Premiere execution d'une cle sans mesure: valeur manifeste (x TCG_TIMEOUT_SCALE sans KVM), comportement anterieur conserve. wait_ssh exporte LAST_SSH_WAIT_S; cmd_test enregistre via boot_calib_record dans ${STATE}/boot-calibration.env.
+- Seed committé image-test/boot-calibration.env (valeurs mesurees des runs 41191163442 / 41199518844) pour calibrer la premiere execution; persistence inter-runs par cache actions/cache restore+save dans bootc-build.yml (cle boot-calib-<arch>, save always). init_state preserve le fichier restaure sur son rm -rf.
+- TDD: 12 tests calibration dans tests/test_image_test.py (RED 10 fails confirmes, puis VERT). make test: 255 passed local (243 + 12 nouveaux), 0 rouge (test_hash_follows vert aujourd'hui).
+- Changement du harness boot -> diags: la journalisation calibration est visible au log de chaque boot (lignes 'Calibrated ...' / 'No calibration for ...').
