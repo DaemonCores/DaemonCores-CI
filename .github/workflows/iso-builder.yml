@@ -175,18 +175,33 @@ jobs:
           # bootc-image-builder --type iso produces a dracut live-boot ISO.
           # The container's filesystem is squashfs'd; the kernel + initrd from
           # the container boot directly — no Anaconda, no kickstart needed.
-          # Rootful podman login may store GHCR creds at /run/containers/auth.json
-          # (runtime dir) or /root/.config/containers/auth.json; only mount
-          # what exists — a missing mount source kills the run (statfs, 125).
-          AUTH_ARGS=()
+          # The runner's `podman login` (rootful) may store GHCR creds at
+          # /run/containers/auth.json or /root/.config/containers/auth.json;
+          # a missing mount source kills the run (statfs, 125). The file is
+          # copied to the workspace and mounted INSIDE the builder at the
+          # inner podman's default authfile path — --authfile on `podman run`
+          # would only authenticate podman's own (already done) image pull.
+          AUTHFILE_SRC=""
           if [ -f /run/containers/auth.json ]; then
-            AUTH_ARGS+=(-v /run/containers/auth.json:/run/containers/auth.json)
+            AUTHFILE_SRC=/run/containers/auth.json
           elif [ -f /root/.config/containers/auth.json ]; then
-            AUTH_ARGS+=(--authfile /root/.config/containers/auth.json)
+            AUTHFILE_SRC=/root/.config/containers/auth.json
           fi
+          AUTH_ARGS=()
+          if [ -n "${AUTHFILE_SRC}" ]; then
+            sudo cp "${AUTHFILE_SRC}" auth.json
+            sudo chown "$(id -u)" auth.json
+            AUTH_ARGS+=(-v "$(pwd)/auth.json:/run/containers/auth.json:ro")
+          fi
+          # The manifest stage reads the payload refs from the host container
+          # storage (bib_main overlay); the osbuild container-deploy stage
+          # mounts the payload image. Ubuntu 24.04 runner kernels deny those
+          # mounts even under --privileged (apparmor), hence unconfined.
           sudo podman run \
             --rm \
             --privileged \
+            --security-opt apparmor=unconfined \
+            -v /var/lib/containers/storage:/var/lib/containers/storage \
             ${AUTH_ARGS[@]+${AUTH_ARGS[@]}} \
             -v "$(pwd)/out:/output" \
             "${BIB_IMAGE}" \
