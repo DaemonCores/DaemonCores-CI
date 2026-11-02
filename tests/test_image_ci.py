@@ -652,7 +652,9 @@ def test_the_derived_image_is_built_after_the_tests_on_the_local_parent(
     # The installer image has no SSH server: no boot test, lint only.
     assert not [t for t in sb.calls('image-test test') if '/iso' in t
                 or ':iso_' in t]
-    assert any(f'{IMAGE}:iso_amd64 bootc container lint' in c
+    assert any('--entrypoint sh' in c
+               and f'{IMAGE}:iso_amd64' in c
+               and 'bootc container lint' in c
                for c in sb.calls('podman run'))
 
 
