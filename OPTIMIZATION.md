@@ -104,6 +104,15 @@ modules configs (the CI step `ccache statistics` prints it for each job).
 - Run 41155245822 (`cb39aff`): wall clock 15 min 46 s (01:25:02 to 01:40:48), every deb reused (kernel jobs about 1 min,
   `linux-image (amd64) unchanged; reused cached deb(s)`), the 6 image jobs still fail. This is the first measured
   figure for the 15 min target on a push that rebuilds no deb.
+- L1 (run 41448445484, commits `2f95bce` CI + `faf5167` debian-bootc): the `-nosign`
+  twins are gone. Kernel image builds 4 → 2 (`linux-image` amd64; `linux-image` +
+  `linux-image-16k` arm64; no `linux-image-nosign` / `linux-image-16k-nosign` jobs) and the
+  manifest lists are latest, latest-4k, iso, nvidia (`latest-nosign` no longer planned);
+  `grep -ci nosign` over the whole run log is 0. The same tag `latest` booted twice on amd64:
+  category `signed` with `module.sig_enforce=1` on the cmdline (the unsigned-module refusal test
+  PASSes) and category `unsigned-kernel` with no karg on the identical image. The `both`
+  signing mode now behaves as `sign` (kept for compatibility). Only failures: the two ISO jobs
+  (`no dnf in container`), the pre-existing P-757 issue, unrelated to L1.
 
 ## L12: setup service steps to transpose (MEASURED, source read)
 
