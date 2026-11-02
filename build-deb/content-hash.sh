@@ -5,7 +5,8 @@
 # it. The hash formula must stay identical in both callers, which is why it
 # lives here once.
 # Consumed environment: PACKAGE, ARCH, SOURCES, UPSTREAM, BUILD, EXTRA_ENV,
-# PAGES_URL, GITHUB_REPOSITORY (see build-deb.sh).
+# PAGES_URL, GITHUB_REPOSITORY (see build-deb.sh), and optionally
+# CI_HELPER_SCRIPTS (files the build sources, default below; empty = none).
 
 DEBS_DIR="${DEBS_DIR:-/debs}"
 META_DIR="${DEBS_DIR}/.meta"
@@ -14,6 +15,16 @@ META_DIR="${DEBS_DIR}/.meta"
 # content hash: hashing a token/key would leak it into the public hashes.json
 # and churn the cache on every rotation. Build-affecting vars (versions, pinned
 # commits) deliberately do NOT match, so they still feed the hash.
+# Shared scripts every build sources (build-deb.sh runs `. deb_helpers.sh`, which
+# sources kernel_helpers.sh; deb_src_overlay calls patch_guard.py). A change to
+# them changes what a package contains, so they feed the hash like the sources:
+# without them a fixed helper never rebuilds a deb built by the broken one.
+if [[ -z "${CI_HELPER_SCRIPTS+x}" ]]; then
+  _ch_scripts="$(cd "$(dirname "${BASH_SOURCE[0]}")/../scripts" && pwd)"
+  CI_HELPER_SCRIPTS="${_ch_scripts}/deb_helpers.sh ${_ch_scripts}/kernel_helpers.sh ${_ch_scripts}/patch_guard.py"
+  unset _ch_scripts
+fi
+
 SECRET_KEY_RE='(TOKEN|SECRET|PASSWORD|PAT|CRED|SIGNING_KEY|SIGNING_CERT)'
 
 #######################################
@@ -62,6 +73,23 @@ sources_hash() {
   find ${SOURCES} -type f -print0 2>/dev/null \
     | sort -z | xargs -0 sha256sum 2>/dev/null \
     | sha256sum | cut -d' ' -f1
+}
+
+#######################################
+# Hash the contents of the shared build scripts, in the listed order.
+# Globals:
+#   CI_HELPER_SCRIPTS
+# Outputs:
+#   Hex digest on stdout, or "none" when the list is empty.
+#######################################
+helpers_hash() {
+  [[ -n "${CI_HELPER_SCRIPTS// /}" ]] || {
+    echo none
+    return 0
+  }
+  # Word-splitting of the list is intentional.
+  # shellcheck disable=SC2086
+  cat ${CI_HELPER_SCRIPTS} | sha256sum | cut -d' ' -f1
 }
 
 #######################################
@@ -129,15 +157,20 @@ env_hash() {
 #   Hex digest on stdout.
 #######################################
 content_hash() {
-  local src up env build arch
+  local src up env build arch helpers
   src=$(sources_hash)
   up=$(upstream_id)
   env=$(env_hash)
   build=$(printf '%s' "${BUILD:-}" | sha256sum | cut -d' ' -f1)
   arch="${ARCH:-amd64}"
-  echo "content-hash(${PACKAGE}/${arch}): src=${src} upstream=${up} env=${env}" >&2
-  printf '%s\n%s\n%s\n%s\n%s\n' "${src}" "${up}" "${env}" "${build}" "${arch}" \
-    | sha256sum | cut -d' ' -f1
+  helpers=$(helpers_hash)
+  echo "content-hash(${PACKAGE}/${arch}): src=${src} upstream=${up} env=${env} helpers=${helpers}" >&2
+  # No helper scripts: the formula is the one published hashes were made with.
+  if [[ "${helpers}" == none ]]; then
+    printf '%s\n%s\n%s\n%s\n%s\n' "${src}" "${up}" "${env}" "${build}" "${arch}"
+  else
+    printf '%s\n%s\n%s\n%s\n%s\n%s\n' "${src}" "${up}" "${env}" "${build}" "${arch}" "${helpers}"
+  fi | sha256sum | cut -d' ' -f1
 }
 
 #######################################

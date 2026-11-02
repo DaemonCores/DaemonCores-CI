@@ -77,6 +77,7 @@ def test_hash_matches_pre_split_script(fixture_env: dict[str, str]) -> None:
     new = f'. {LIB}'
     expected = run_hash(old, fixture_env)
     assert len(expected) == 64
+    fixture_env['CI_HELPER_SCRIPTS'] = ''
     assert run_hash(new, fixture_env) == expected
 
 
@@ -85,3 +86,36 @@ def test_secret_keys_do_not_feed_the_hash(fixture_env: dict[str, str]) -> None:
     first = run_hash(f'. {LIB}', fixture_env)
     fixture_env['EXTRA_ENV'] = 'VERSION=1.2\nGH_TOKEN=other\nB=2'
     assert run_hash(f'. {LIB}', fixture_env) == first
+
+
+def test_hash_follows_the_shared_build_scripts(
+        fixture_env: dict[str, str], tmp_path: Path) -> None:
+    """A change to a sourced helper script rebuilds the packages.
+
+    Without this, a fixed ``deb_helpers.sh`` never replaced a deb built by the
+    broken one: the published ``pve-manager`` kept a ``/tmp/overlays.*`` tree
+    and broke the image build that installs it.
+    """
+    helper = tmp_path / 'helper.sh'
+    helper.write_text('echo one\n')
+    fixture_env['CI_HELPER_SCRIPTS'] = str(helper)
+    first = run_hash(f'. {LIB}', fixture_env)
+    assert run_hash(f'. {LIB}', fixture_env) == first
+    helper.write_text('echo two\n')
+    assert run_hash(f'. {LIB}', fixture_env) != first
+    fixture_env['CI_HELPER_SCRIPTS'] = ''
+    assert run_hash(f'. {LIB}', fixture_env) != first
+
+
+def test_default_helper_scripts_exist_and_feed_the_hash(
+        fixture_env: dict[str, str]) -> None:
+    """With no override the hash covers the real scripts builds source."""
+    with_default = run_hash(f'. {LIB}', fixture_env)
+    fixture_env['CI_HELPER_SCRIPTS'] = ''
+    assert with_default != run_hash(f'. {LIB}', fixture_env)
+    listed = subprocess.run(
+        ['bash', '-c', f'. {LIB}; printf "%s" "$CI_HELPER_SCRIPTS"'],
+        env={'PATH': '/usr/bin:/bin'}, check=True, capture_output=True,
+        text=True).stdout.split()
+    assert listed
+    assert all(Path(f).is_file() for f in listed)
