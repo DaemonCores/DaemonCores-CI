@@ -895,3 +895,11 @@ Gap: RSS cannot attribute the ~100 MiB of kernel-side memory. Harness now also d
 - Fix (VE `ifupdown2/usr/sbin/domain-set`): take the interface of the first global IPv4 address and read `option domain-name` from `/var/lib/dhcp/dhclient.<iface>.leases`; fall back to `local` when there is no lease. After the fix: lease present renders `<ip> <host>.lan.example <host>`, no lease renders `<host>.local`, rc=0 in both cases.
 - Open point (not changed): `setdomaine || true` / `resetdomaine || true` in the same script swallow render errors.
 - To confirm: next VE Full Pipeline, amd64 tests `networking`, `pve-cluster`, `pveproxy` green.
+
+## Tick 41 - VE web UI down: `PVE::Bootc` imports a symbol PVE::Cluster does not export (VE run 41404609381)
+
+- Symptom: with networking and pve-cluster now healthy, the amd64 tests still fail: no failed systemd units (`pve-guests.service`), `pveproxy active`, `pvedaemon active`, `web UI answers on 8006`, `web UI serves the login page`.
+- Proof (job 125145115848 log): `"get_vmlist" is not exported by the PVE::Cluster module` / `Can't continue after import errors at /usr/share/perl5/PVE/Bootc.pm line 15`, already during the image build (`pveam`), then every PVE daemon dies on the same `require` chain.
+- Cause: `PVE/Bootc.pm:15` was `use PVE::Cluster qw(cfs_read_file get_vmlist)`; `pve-cluster` 9.1.7 `PVE/Cluster.pm:29-33` has `@EXPORT_OK = qw(cfs_read_file cfs_write_file cfs_register_file cfs_lock_file)`, `get_vmlist` is a plain sub (line 297).
+- Fix: import only `cfs_read_file` and call `PVE::Cluster::get_vmlist()` (the form `API2/Bootc.pm` and the pvestatd patch already use).
+- To confirm: next VE Full Pipeline, the five tests above pass.
