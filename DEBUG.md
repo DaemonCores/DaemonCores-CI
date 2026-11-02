@@ -1053,3 +1053,10 @@ Gap: RSS cannot attribute the ~100 MiB of kernel-side memory. Harness now also d
 - debian-bootc `bfd1e25` (A2): lint.yml workflow_dispatch + make-targets explicites 'admission check docs-check'. Le Lint persistant rouge (R-783) = hadolint Containerfile.bib:48 DL3022 -> ignore posé + push (bib COPY overlay, contexte déclaré), Lint re-dispatché.
 - DROPPED (owner decision 03/11 ~00h): G2 (câblage gpu/nvidia dans bootc-build.yml — nvidia MOVED dans debian-bootc, VE installe depuis ce repo APT), G7 (prune kernel inline VE = délibérée, debian-bootc est le côté pas à jour ici, pas l'inverse), G4 (ifupdown2 = forks délibérés), G6 (packages.yml: rien avant le GO de découpe). Aucun commit de ces axes.
 - Preuves: make test DaemonCores-CI 256 passed (55s); Lint dispatch post-push VE 41542105061, bootc 41542111465; push VE 7352137..2a222c2 via pre-push docs-sync (wiki 2 commits bbacfa3, a5c922e).
+
+## Tick - Lint green both repos; wiki default branch is `master`
+
+- R-783 root cause updated: Lint bootc échouait sur docs-check, PAS seulement hadolint. docs-check clone le wiki de SA branche DÉFAUT = `master` (GitHub wiki), et `master` était resté à 16f1f1d («Wiki rebuild») pendant que les handoffs récents ne poussaient que sur `refs/heads/main`: les citations relisaient l'état périmé (pipeline.yml:17 etc.). Fix: master fast-forwardé sur main (debian-bootc.wiki bdfe260, DaemonCores-VE.wiki a5c922e) — à l'avenir pousser main:master OU travailler sur master.
+- hadolint Containerfile.bib DL3022 posé (bootc, bibliothèque de citations) → bootc Lint 41543343602 SUCCESS; hadolint ignores DL3007/DL4006 posés sur Containerfile.base VE → VE Lint 41543630517 SUCCESS (tête 2a222c2).
+- Preuve locale permanente: make test DaemonCores-CI 256 passed (x2).
+- En vol: VE Full Pipeline 41542099345 (push 2a222c2) — exercera la consommation du build-arg dérivé (G1) à l'étape image.
