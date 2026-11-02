@@ -212,6 +212,21 @@ jobs:
           # another podman instance under /var/lib/containers/storage); a fresh store owned by
           # the inner podman alone mounts fine (proven by the arm64 job).
           mkdir -p run-store/overlay
+          # containers-storage: refs do not pull — the builder's fresh store
+          # only contains what this job pulls INTO it. Pull the payload and
+          # the installer into the store the builder will mount, or the
+          # manifest stage dies on "does not resolve to an image ID"
+          # (run 41543534089, job Build ISO amd64).
+          if [ -f auth.json ]; then
+            sudo podman --root "$(pwd)/run-store" \
+              --runroot "$(pwd)/run-store/runroot" \
+              --authfile "$(pwd)/auth.json" \
+              pull "${PAYLOAD}" "${INSTALLER}"
+          else
+            sudo podman --root "$(pwd)/run-store" \
+              --runroot "$(pwd)/run-store/runroot" \
+              pull "${PAYLOAD}" "${INSTALLER}"
+          fi
           sudo podman run \
             --rm \
             --privileged \
