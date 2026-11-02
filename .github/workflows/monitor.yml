@@ -50,9 +50,9 @@ jobs:
 
           FAILING=0
           for repo in $REPOS; do
-            row=$(gh run list -R "$repo" -L 1 \
-              --json displayTitle,status,conclusion,createdAt,url \
-              --jq '.[0] | [.displayTitle, (if .status == "completed" then .conclusion else .status end), .createdAt, .url] | @tsv' \
+            row=$(gh run list -R "$repo" -L 5 \
+              --json displayTitle,status,conclusion,createdAt,url,workflowName \
+              --jq '[.[] | select(.workflowName != "CI status monitor")][0] | [.displayTitle, (if .status == "completed" then .conclusion else .status end), .createdAt, .url] | @tsv' \
               || printf 'UNKNOWN\tUNKNOWN\t\t')
             title=$(echo "$row" | cut -f1)
             state=$(echo "$row" | cut -f2)
