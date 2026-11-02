@@ -911,3 +911,13 @@ Gap: RSS cannot attribute the ~100 MiB of kernel-side memory. Harness now also d
 - Fix: PC/SP extracted with `awk` accepting `PC|RIP` and `SP|RSP`; checked on x86, arm64 and no-match samples (`pc=[ffffffff81000000]`, `pc=[0000aaaa]`, `pc=[]`, exit 0).
 - Cause of the refused key: NOT proven yet. Lead (not a cause): `PVE::Cluster::Setup::ssh_merge_keys`/`pvecm updatecerts` (libpve-cluster-api-perl 9.1.7, `Setup.pm:97-210`) replaces `/root/.ssh/authorized_keys` by a symlink to `/etc/pve/priv/authorized_keys` once pmxcfs runs; the key is injected by `bootc install --root-ssh-authorized-keys` (`image-test/install-fs.sh:172`). The full serial capture of the next run decides.
 - To confirm: next VE Full Pipeline prints the serial groups; read the `pvecm updatecerts` / pmxcfs lines.
+
+## Tick 43 - VE pveproxy/pvedaemon down: unknown standard option 'timeout-schema' (VE run 41410493501)
+
+- Symptom: amd64 boots and SSH works (`SSH reachable after 20s`); remaining failures: `no failed systemd units` (pve-guests), `pveproxy active`, `pvedaemon active`, `web UI answers on 8006`, `web UI serves the login page`. pmxcfs, pve-cluster, pvestatd, pve-firewall now pass.
+- Proof (job 125164050516 diag): `pveproxy[2231]: no such standard option 'timeout-schema'` then `Compilation failed in require at /usr/share/perl5/PVE/API2/Bootc.pm line 23`.
+- Cause: `API2/Bootc/Status.pm:164` used `get_standard_option('timeout-schema', ...)`. Searching libpve-common-perl 9.2.5, pve-manager 9.2.9, libpve-storage-perl 9.1.9 and qemu-server 9.2.9 (Proxmox trixie index) finds no such standard option; qemu-server defines `timeout` inline (`API2/Qemu.pm:3702-3707`).
+- Fix: inline schema for `timeout` (integer, minimum 0, default 30, optional), same shape as qemu-server.
+- Not run locally: the PVE perl stack is not installable here without network changes; the other Bootc modules were never loadable before Tick 41, so further load errors are possible.
+- Observation: in the previous run (41406540225) the same amd64 test VM refused the SSH key for 900 s; in this run it was reachable after 20 s with the same image logic. The refused-key case is intermittent and unexplained (Tick 42 stays open); the serial dump fix of Tick 42 will show it if it recurs.
+- To confirm: next VE Full Pipeline, the five tests above pass.
