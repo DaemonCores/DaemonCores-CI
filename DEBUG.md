@@ -801,3 +801,10 @@ Gap: RSS cannot attribute the ~100 MiB of kernel-side memory. Harness now also d
 - Cause (reproduced locally, podman 6.1.4): `podman manifest inspect ghcr.io/daemoncores/debian-bootc:latest_amd64` prints `"manifests": null` with no `layers`. The registry manifest does carry them: fetching it directly and applying the same jq gives 1186106015 bytes.
 - Fix: read the registry manifest with `skopeo inspect --raw` (iso-builder.yml). Same jq expression.
 - Open until a run shows the ISO jobs passing. The preceding jobs of that run (images, manifests, tests) passed, which closes Tick 28 for the `iso` manifest list.
+
+## Tick 30 - bootc-image-builder rejected the payload flag (run 41363929488)
+
+- Symptom: both `Build ISO` jobs failed at the build step: `error: unknown flag: --bootc-installer-payload-ref`. Everything before passed in that run: images, all manifest lists with the job token (closes the `write_package` denial once the package Actions access was granted), and the payload size probe of Tick 29.
+- Cause (reproduced locally with the same image, config sha256:e5382bfe..., the one the runner pulled): `podman run quay.io/centos-bootc/bootc-image-builder:latest --type iso --target-arch amd64 --bootc-installer-payload-ref x <image>` prints the same error; `build --help` lists `--installer-payload-ref`. The flag was renamed upstream and the image is pulled as `:latest`. With `--installer-payload-ref` the flags parse and the tool reaches its "requires a privileged container" check (a privileged run is not possible locally).
+- Fix: use `--installer-payload-ref` (iso-builder.yml, Containerfile.iso comment).
+- Open until a run shows the ISO jobs passing. Tick 28 and Tick 29 are closed by run 41363929488 (every tag tested and pushed, every manifest list created, size probe passed).
