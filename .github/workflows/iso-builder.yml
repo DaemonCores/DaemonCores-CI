@@ -9,7 +9,7 @@ name: iso
 #
 # Two modes, determined by the compressed size of the payload image:
 #   - offline (< 1.8 GiB): ISO embeds the clean base image as the install
-#     payload via --bootc-installer-payload-ref; no network needed at install.
+#     payload via --installer-payload-ref; no network needed at install.
 #   - net-install (>= 1.8 GiB): ISO is too large for GitHub Releases; the ISO
 #     carries only the live env and all installs require network.
 #
@@ -154,10 +154,10 @@ jobs:
           OFFLINE="${{ steps.mode.outputs.offline }}"
 
           # Offline: embed the clean base as the install payload (no network needed).
-          # Net-install: no --bootc-installer-payload-ref; image is pulled at install time.
+          # Net-install: no --installer-payload-ref; image is pulled at install time.
           PAYLOAD_ARGS=()
           if [ "${OFFLINE}" = "true" ]; then
-            PAYLOAD_ARGS=(--bootc-installer-payload-ref "${PAYLOAD}")
+            PAYLOAD_ARGS=(--installer-payload-ref "${PAYLOAD}")
           fi
 
           # bootc-image-builder --type iso produces a dracut live-boot ISO.
