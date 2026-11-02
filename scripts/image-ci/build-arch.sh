@@ -31,7 +31,8 @@
 #   TESTS_FILE, MEM, VCPUS    boot test settings (passed to image-test.sh)
 #   BOOT_TEST_TIMEOUT  per image boot test limit, timeout(1) syntax
 #                      (default 2700)
-#   BOOT_TEST_SKIP_TAGS  tags with no boot test (default iso: no SSH server)
+#   BOOT_TEST_SKIP_TAGS  tags with no boot test (default "iso bib": the ISO
+#                        has no SSH server, bib is a CI tool image)
 #   RAM_GATE_TAG_PREFIX, RAM_GATE_MB   idle RAM target (default 15 MiB) of the
 #                      tags starting with the prefix; the default prefix is
 #                      empty: every tag is measured and reported (the figure
@@ -239,6 +240,38 @@ apt_build_args() {
     || APT_ARGS+=(--build-arg "BOOTC_APT_URL=${APT_URL}")
 }
 
+# Extra named build contexts of a Containerfile: every `COPY --from=<name>`
+# that is not a stage of the file needs `--context <name>=<path>`. `ci` is the
+# builtin DaemonCores-CI scripts checkout (deb_helpers.sh, kernel_helpers.sh,
+# patch_guard.py at its root); any other context is declared on the file with
+#   LABEL org.daemoncores.extra-contexts=name1:path1,name2:path2
+# (path relative to the repository root; context_hash.py hashes those files).
+extra_ctx_args() {
+  local file="$1" declarations stage name root
+  local -A stages=()
+  while IFS= read -r stage; do
+    [[ -n "${stage}" ]] && stages["${stage,,}"]=1
+  done < <(sed -nE 's/^[[:space:]]*[Ff][Rr][Oo][Mm].*[[:space:]][Aa][Ss][[:space:]]+([A-Za-z_][A-Za-z0-9_]*).*/\1/p' "${file}")
+  declarations=$(sed -nE "s/^[[:space:]]*LABEL[[:space:]]+org\\.daemoncores\\.extra-contexts=//p" "${file}")
+  EXTRA_CTX=()
+  while IFS= read -r name; do
+    name="${name,,}"
+    [[ -n "${name}" ]] || continue
+    [[ -v stages["${name}"] ]] && continue
+    if [[ "${name}" == "ci" ]]; then
+      EXTRA_CTX+=(--build-context "ci=${CI_ROOT}/scripts")
+    else
+      root=$(printf '%s\n' "${declarations}" | tr ',' '\n' \
+        | sed -nE "s/^${name}://p" | awk 'NF { print $1 }' | head -n1)
+      if [[ -z "${root}" ]]; then
+        echo "ERROR: ${file} copies from context ${name} without an org.daemoncores.extra-contexts declaration" >&2
+        return 1
+      fi
+      EXTRA_CTX+=(--build-context "${name}=${root}")
+    fi
+  done < <(sed -nE 's/.*[Cc][Oo][Pp][Yy][[:space:]]+(--[[:alnum:]]+(=[^ ]+)?[[:space:]]+)*--from=([A-Za-z_][A-Za-z0-9_]*).*/\3/p' "${file}")
+}
+
 # The shared base (SSL prerequisites, trusted APT repository) is built once.
 # It stays local to the runner and is never pushed.
 build_base() {
@@ -369,12 +402,14 @@ build_image() {
     done <<<"${canonical}"
   fi
   boot_stack "${file}" "${suffix}"
+  extra_ctx_args "${file}"
   # The twin carries the version stamp of its primary image.
   stamp_tag="${tag}"
   if [[ "${kind}" == "twin" ]]; then stamp_tag="${tag%-nosign}"; fi
   apt_build_args
   run_build "${log}" \
     "${flags[@]}" \
+    "${EXTRA_CTX[@]}" \
     --build-arg "BASE_IMAGE=localhost/debian-bootc-base" \
     --build-arg "ARCH=${ARCH}" \
     --build-arg "KERNEL_SUFFIX=${suffix}" \
@@ -563,7 +598,7 @@ phase_test() {
   local tag ref rc cat failed
   local -a cats
   while IFS= read -r tag; do
-    if in_list "${tag}" "${BOOT_TEST_SKIP_TAGS:-iso}"; then
+    if in_list "${tag}" "${BOOT_TEST_SKIP_TAGS:-iso bib}"; then
       set_state "${tag}" ok "no boot test for this image"
       continue
     fi

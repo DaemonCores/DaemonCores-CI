@@ -160,16 +160,27 @@ jobs:
             PAYLOAD_ARGS=(--installer-payload-ref "${PAYLOAD}")
           fi
 
+          # The product may ship its own Debian-capable bootc-image-builder
+          # (Containerfile.bib, tag bib_<arch>); prefer it, fall back to the
+          # upstream image otherwise.
+          BIB="ghcr.io/${GITHUB_REPOSITORY,,}:bib_${ARCH}"
+          BIB_IMAGE="quay.io/centos-bootc/bootc-image-builder:latest"
+          if sudo podman pull "${BIB}" >/dev/null 2>&1; then
+            BIB_IMAGE="${BIB}"
+          else
+            echo "::warning::no bib_${ARCH} image — falling back to the upstream builder"
+          fi
+          echo "Builder image: ${BIB_IMAGE}"
+
           # bootc-image-builder --type iso produces a dracut live-boot ISO.
           # The container's filesystem is squashfs'd; the kernel + initrd from
           # the container boot directly — no Anaconda, no kickstart needed.
           sudo podman run \
             --rm \
             --privileged \
-            --pull=newer \
             -v /var/lib/containers/storage:/var/lib/containers/storage \
             -v "$(pwd)/out:/output" \
-            quay.io/centos-bootc/bootc-image-builder:latest \
+            "${BIB_IMAGE}" \
             --type iso \
             --target-arch "${ARCH}" \
             "${PAYLOAD_ARGS[@]}" \

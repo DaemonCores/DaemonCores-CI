@@ -24,7 +24,7 @@ detect_arch() {
 packages() {
   local arch="${ARCH:-}"
   [[ -n "${arch}" ]] || arch=$(detect_arch)
-  local -a pkgs=(skopeo jq python3-venv openssl)
+  local -a pkgs=(skopeo jq python3-venv python3-yaml openssl)
   case "${arch}" in
     amd64) pkgs+=(qemu-system-x86 ovmf) ;;
     arm64) pkgs+=(qemu-system-arm qemu-efi-aarch64) ;;

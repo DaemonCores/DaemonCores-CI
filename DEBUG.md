@@ -1002,3 +1002,24 @@ Gap: RSS cannot attribute the ~100 MiB of kernel-side memory. Harness now also d
 - Seule lane en echec: Build ISO amd64/arm64 = P-757 connu (osbuild n'a ni stage apt/deb ni source; bloquant documente Ticks 44-47).
 - Fix EROFS (VE e566948): le binaire pvefw-logger appartient au deb pve-firewall (pas a pve-manager), son unite upstream est DefaultDependencies=no + After=local-fs.target seulement; local-fs.target ne Req pas ses monts (Wants=). Drop-in VE RequiresMountsFor=/var/log -> le mont /var/log devient requis explicite, l'echec de mont nomme l'unite au lieu d'un EROFS composefs. Nouveau test boot 'pvefw-logger requires the /var/log mount' (systemctl show -p RequiresMountsFor).
 - Drift hash resolu plus haut (dd933b5): la suite re-verifiera sur le prochain run que le skip s'applique (hash stable si la base ne change pas).
+
+## Tick 2026-11-02T17:19:11+01:00 — run 41479031479 (7cc00ba, drop-ins daemons + timeout >=600s, Full Pipeline dispatch)
+- 17:12 pipeline plan OK, signing secrets OK; builds amd64+arm64 in progress
+- 2026-11-02T17:30:25+01:00: Build images (amd64) success; arm64 build in progress
+- 2026-11-02T17:44:02+01:00: FINAL run 41479031479: images amd64+arm64+manifest success; boot tests 94 PASS / 0 FAIL (amd64+arm64), incl new "Proxmox daemons start past the arm64 TCG window"; only Build ISO (amd64+arm64) failed = P-757 hors périmètre (ghcr manifest unknown iso_amd64/iso_arm64, exit 125, identique run précédent)
+
+## Tick 2026-11-02 — P-757 ISO lane: bib image wired into the image pipeline
+- bib_<arch> devient une image normale: Containerfile.bib (base upstream
+  pinnee par digest sha256:4d8a0d...f05) + LABEL org.daemoncores.extra-contexts
+  declare le contexte overlay; build-arch.sh fournit les extra build contexts
+  (ci = .ci-tooling/scripts builtin, overlay = label) via --build-context.
+- context_hash.py inclut les fichiers des contextes declares (extension du
+  mecanisme existant, zero changement de formule pour les images sans label).
+- iso-builder.yml prefere ghcr bib_<arch> puis retombe sur l'image upstream.
+- bib exclu du boot test (BOOT_TEST_SKIP_TAGS default "iso bib").
+- Latent bug adjacent: prepare.sh n'installait pas python3-yaml —
+  ci_image_hash (context_hash.py -> check_build_context import yaml) echouait
+  silencieusement hors venv; python3-yaml ajoute aux paquets du job image.
+- Preuves locales: 256 pytest PASS (PATH shim venv pour yaml), shellcheck +
+  shfmt OK, extra_ctx_args bib=2 contexts / iso=0, check_build_context OK,
+  build podman bib relance (log scratch).

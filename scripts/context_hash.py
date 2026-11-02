@@ -12,11 +12,36 @@ copies none (the hash formula is then left as it was).
 
 import argparse
 import hashlib
+import re
 import sys
 from pathlib import Path
 from typing import cast
 
 from check_build_context import local_sources
+
+# Extra build contexts declared on a Containerfile, e.g. an overlay root the
+# build mounts with --context: the files reached by the declared path are
+# build inputs exactly like local COPY sources.
+EXTRA_CTX_RE = re.compile(
+    r"^LABEL\s+org\.daemoncores\.extra-contexts=(\S+)", re.MULTILINE
+)
+
+
+def extra_context_roots(containerfile: Path) -> list[str]:
+    """List the context roots declared on a Containerfile.
+
+    Args:
+        containerfile: Image definition to scan.
+
+    Returns:
+        The declared directory paths (name:path pairs, path part only).
+    """
+    roots: list[str] = []
+    for m in EXTRA_CTX_RE.findall(containerfile.read_text()):
+        for pair in m.split(","):
+            if ":" in pair:
+                roots.append(pair.split(":", 1)[1].strip())
+    return roots
 
 
 def files_of(root: Path, source: str) -> list[Path]:
@@ -48,7 +73,7 @@ def context_hash(containerfile: Path, root: Path) -> str:
     Returns:
         The hex digest, or an empty string when nothing local is copied.
     """
-    sources = local_sources(containerfile)
+    sources = local_sources(containerfile) + extra_context_roots(containerfile)
     if not sources:
         return ""
     digest = hashlib.sha256()
