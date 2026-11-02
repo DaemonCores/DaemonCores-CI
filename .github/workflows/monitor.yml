@@ -36,14 +36,17 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          set -u
+          # GITHUB_STEP_SUMMARY is per-step; keep the report in a
+          # job-scoped file so later steps (and the issue) can reuse it.
+          REPORT="$RUNNER_TEMP/ci-status.md"
+          echo "REPORT=$REPORT" >> "$GITHUB_ENV"
           {
             echo "# DaemonCores CI status"
             echo "_Run: ${GITHUB_RUN_ID} — $(date -u '+%Y-%m-%d %H:%M UTC')_"
             echo
             echo '| Repo | Latest run | Status | Age |'
             echo '|---|---|---|---|'
-          } >> "$GITHUB_STEP_SUMMARY"
+          } > "$REPORT"
 
           FAILING=0
           for repo in $REPOS; do
@@ -61,18 +64,19 @@ jobs:
               skipped|neutral) icon='⏭️';;
               *) icon='🔴'; FAILING=1;;
             esac
-            echo "| [$repo]($url) | ${icon} $title | $state | $age |" >> "$GITHUB_STEP_SUMMARY"
+            echo "| [$repo]($url) | ${icon} $title | $state | $age |" >> "$REPORT"
           done
 
-          echo
-          echo '## Open issues' >> "$GITHUB_STEP_SUMMARY"
-          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          echo >> "$REPORT"
+          echo '## Open issues' >> "$REPORT"
+          echo '```' >> "$REPORT"
           for repo in $REPOS; do
-            echo "## $repo" >> "$GITHUB_STEP_SUMMARY"
-            gh issue list -R "$repo" --state open --limit 20 >> "$GITHUB_STEP_SUMMARY" || true
+            echo "## $repo" >> "$REPORT"
+            gh issue list -R "$repo" --state open --limit 20 >> "$REPORT" || true
           done
-          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$REPORT"
 
+          cat "$REPORT" >> "$GITHUB_STEP_SUMMARY"
           echo "FAILING=$FAILING" >> "$GITHUB_ENV"
 
       - name: Open or refresh the CI status issue
@@ -80,7 +84,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          body=$(cat "$GITHUB_STEP_SUMMARY")
+          body=$(cat "$REPORT")
           url=$(gh issue list -R DaemonCores/DaemonCores-CI --state open \
                 --search 'CI status in:title' --json number \
                 --jq '.[0].number // empty')

@@ -969,3 +969,4 @@ Gap: RSS cannot attribute the ~100 MiB of kernel-side memory. Harness now also d
 ## Tick - monitor durable (P-10/P-11)
 - Verification L14 sur run 41448445484 (debian-bootc) au niveau jobs: base + build-env + deb-env skipped, images conteneur amd64/arm64 success, seuls build-iso amd64/arm64 FAIL = P-757 connu. Rien a rebatir cote cache/skip.
 - Ajout .github/workflows/monitor.yml (DaemonCores-CI, commit 23ce1bf): cron */20, workflow_dispatch, permissions contents:read + issues:write + actions:read, job unique qui lit le dernier run des 3 repos (gh run list -L 1) + gh issue list, ecrit un job summary, FAILING==1 -> ouvre/refresh une issue 'CI status' dans DaemonCores-CI.
+- Fix monitor.yml: GITHUB_STEP_SUMMARY etant per-step, l'issue #1 avait un body vide; le rapport passe par un fichier partage $RUNNER_TEMP/ci-status.md. Re-dispatch pour preuve.
