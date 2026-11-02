@@ -213,20 +213,20 @@ jobs:
           # the inner podman alone mounts fine (proven by the arm64 job).
           mkdir -p run-store/overlay
           # containers-storage: refs do not pull — the builder's fresh store
-          # only contains what this job pulls INTO it. Pull the payload and
-          # the installer into the store the builder will mount, or the
-          # manifest stage dies on "does not resolve to an image ID"
-          # (run 41543534089, job Build ISO amd64).
-          if [ -f auth.json ]; then
-            sudo podman --root "$(pwd)/run-store" \
-              --runroot /run/iso-rr \
-              --authfile "$(pwd)/auth.json" \
-              pull "${PAYLOAD}" "${INSTALLER}"
-          else
-            sudo podman --root "$(pwd)/run-store" \
-              --runroot /run/iso-rr \
-              pull "${PAYLOAD}" "${INSTALLER}"
-          fi
+          # only contains what is pulled INTO it, and the libpod DB records
+          # the paths it was written under. Pulling from the job recorded
+          # run-store/libpod while the builder expects
+          # /var/lib/containers/storage/libpod ("database configuration
+          # mismatch", run 41545038779): pull with the builder's own podman,
+          # inside a container bound to the same store layout it will use.
+          sudo podman run \
+            --rm \
+            --privileged \
+            -v "$(pwd)/run-store:/var/lib/containers/storage" \
+            ${AUTH_ARGS[@]+${AUTH_ARGS[@]}} \
+            --entrypoint /usr/bin/podman \
+            "${BIB_IMAGE}" \
+            pull "${PAYLOAD}" "${INSTALLER}"
           sudo podman run \
             --rm \
             --privileged \
