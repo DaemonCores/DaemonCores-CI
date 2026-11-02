@@ -205,11 +205,18 @@ jobs:
           sudo podman info --format '{{.Store.GraphDriverName}} {{.Store.GraphRoot}}' || true
           echo "== mounts under the store =="
           cat /proc/self/mountinfo | grep containers/storage | head -5 || true
+          # The manifest stage reads/pulls the payload refs from container
+          # storage; the osbuild container-deploy stage rbinds the store into
+          # the osbuild sandbox. Sharing the HOST store with the builder made
+          # that rbind fail with EPERM on the amd64 runner (foreign overlay
+          # mounts under /var/lib/containers/storage); a fresh store owned by
+          # the inner podman alone mounts fine (proven by the arm64 job).
+          mkdir -p run-store
           sudo podman run \
             --rm \
             --privileged \
             --security-opt apparmor=unconfined \
-            -v /var/lib/containers/storage:/var/lib/containers/storage \
+            -v "$(pwd)/run-store:/var/lib/containers/storage" \
             ${AUTH_ARGS[@]+${AUTH_ARGS[@]}} \
             -v "$(pwd)/out:/output" \
             "${BIB_IMAGE}" \
