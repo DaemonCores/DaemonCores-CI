@@ -13,6 +13,8 @@ from pathlib import Path
 
 import pytest
 
+import issues_api
+
 ROOT = Path(__file__).resolve().parents[1]
 
 pytestmark = pytest.mark.skipif(
@@ -84,11 +86,12 @@ def _sandbox(tmp_path: Path) -> Path:
     return tmp_path
 
 
-def _run(root: Path) -> subprocess.CompletedProcess:
+def _run(root: Path, env_extra: dict[str, str] | None = None) -> subprocess.CompletedProcess:
     """Run build-all.sh in the sandbox.
 
     Args:
         root: Sandbox root.
+        env_extra: Variables that override or extend the base environment.
 
     Returns:
         The completed process.
@@ -105,6 +108,8 @@ def _run(root: Path) -> subprocess.CompletedProcess:
                GITHUB_SERVER_URL='http://127.0.0.1:9',
                GITHUB_RUN_ID='1',
                SECRETVAL_GITHUB_TOKEN='t')
+    if env_extra:
+        env.update(env_extra)
     (root / 'build').mkdir(exist_ok=True)
     (root / 'tmp').mkdir(exist_ok=True)
     return subprocess.run(
@@ -173,3 +178,74 @@ def test_cleanup_keeps_what_the_build_image_ships(tmp_path: Path) -> None:
     assert 'result app: built' in done.stdout, done.stderr
     assert (root / 'build' / 'rust' / 'env').exists()
     assert not (root / 'build' / 'work').exists()
+
+
+def test_repeat_failure_refreshes_the_issue_body_without_a_comment(
+        tmp_path: Path) -> None:
+    """A broken build with an open issue PATCHes its body, never comments.
+
+    Args:
+        tmp_path: Scratch directory.
+    """
+    root = _sandbox(tmp_path)
+    api = issues_api.FakeIssuesApi(
+        open_issues=[issues_api.broken_issue(7, 'broken')])
+    try:
+        done = _run(root, issues_api.actions_env(api, 'broken'))
+        assert 'result broken: kept' in done.stdout, done.stderr
+        patches = api.calls('PATCH', '/repos/o/r/issues/7')
+        assert len(patches) == 1, api.requests
+        assert 'title' not in patches[0]['data']
+        assert 'the fix will be retried' in patches[0]['data']['body']
+        assert 'Run: http://127.0.0.1:9/o/r/actions/runs/42' in \
+            patches[0]['data']['body']
+        assert api.calls('POST', '/comments') == []
+        assert api.calls('POST', '/repos/o/r/issues') == []
+    finally:
+        api.stop()
+
+
+def test_first_failure_opens_one_issue_in_english(tmp_path: Path) -> None:
+    """Without an open issue, the breakage creates exactly one English issue.
+
+    Args:
+        tmp_path: Scratch directory.
+    """
+    root = _sandbox(tmp_path)
+    api = issues_api.FakeIssuesApi()
+    try:
+        done = _run(root, issues_api.actions_env(api, 'broken'))
+        assert 'result broken: kept' in done.stdout, done.stderr
+        created = api.calls('POST', '/repos/o/r/issues')
+        assert len(created) == 1, api.requests
+        assert created[0]['data']['title'] == \
+            '⚠️ Broken build: broken (last valid .deb reused)'
+        body = created[0]['data']['body']
+        assert 'build failed (compilation or post-patch content check)' in body
+        assert 'last published .deb was reused' in body
+        assert api.calls('PATCH', '/issues') == []
+    finally:
+        api.stop()
+
+
+def test_recovery_comments_once_and_closes_the_issue(tmp_path: Path) -> None:
+    """A rebuilt package posts one recovery comment and closes its issue.
+
+    Args:
+        tmp_path: Scratch directory.
+    """
+    root = _sandbox(tmp_path)
+    api = issues_api.FakeIssuesApi(
+        open_issues=[issues_api.broken_issue(5, 'app')])
+    try:
+        done = _run(root, issues_api.actions_env(api, 'app'))
+        assert 'result app: built' in done.stdout, done.stderr
+        comments = api.calls('POST', '/repos/o/r/issues/5/comments')
+        assert len(comments) == 1, api.requests
+        body = comments[0]['data']['body']
+        assert 'Build of `app` succeeded in run 42' in body
+        patches = api.calls('PATCH', '/repos/o/r/issues/5')
+        assert len(patches) == 1, api.requests
+        assert patches[0]['data'] == {'state': 'closed'}
+    finally:
+        api.stop()

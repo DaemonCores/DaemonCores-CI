@@ -224,7 +224,10 @@ jobs:
 
       # The build failed but the last-good published deb was kept, so the
       # pipeline is not blocked. Record the breakage as an issue (deduped by
-      # title). gh is absent in the build container, so use the REST API.
+      # title, English body). A repeat failure refreshes the issue body with
+      # the latest failing run instead of appending a comment per run, so the
+      # thread stays noise-free. gh is absent in the build container, so use
+      # the REST API.
       - name: Flag broken build
         if: steps.build.outputs.build_failed == 'true'
         shell: bash
@@ -246,7 +249,7 @@ jobs:
             | jq -r --arg t "${title}" \
               'map(select(.title == $t)) | .[0].number // empty')
           if [ -n "${num}" ]; then
-            curl -fsSL "${auth[@]}" -X POST "${api}/issues/${num}/comments" \
+            curl -fsSL "${auth[@]}" -X PATCH "${api}/issues/${num}" \
               -d "$(jq -n --arg b "${body}" '{body: $b}')" >/dev/null
           else
             curl -fsSL "${auth[@]}" -X POST "${api}/issues" \

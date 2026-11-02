@@ -201,8 +201,6 @@ jobs:
       contents: read
       packages: write
       id-token: write
-      # Lets the duplicate-image guard open/append a "suspicious pipeline" issue.
-      issues: write
     strategy:
       fail-fast: false
       matrix:

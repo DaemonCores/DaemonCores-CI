@@ -111,7 +111,10 @@ prepare() {
 }
 
 #######################################
-# Open or update the "Broken build" issue of a package, or close it.
+# Open or update the "Broken build" issue of a package, or close it. Deduped
+# by exact title. A repeat failure refreshes the issue body with the latest
+# failing run instead of appending a comment per run, and success closes the
+# issue with a single recovery comment.
 # Arguments:
 #   $1 - package
 #   $2 - open | close
@@ -130,7 +133,7 @@ issue() {
     body+="The cache hash is left unchanged so the fix will be retried on the next run. "
     body+="Run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
     if [[ -n "${num}" ]]; then
-      curl -fsSL "${auth[@]}" -X POST "${api}/issues/${num}/comments" \
+      curl -fsSL "${auth[@]}" -X PATCH "${api}/issues/${num}" \
         -d "$(jq -n --arg b "${body}" '{body: $b}')" >/dev/null
     else
       curl -fsSL "${auth[@]}" -X POST "${api}/issues" \
