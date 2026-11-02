@@ -1,0 +1,92 @@
+# CI status monitor — scheduled 24/7 health check across the three
+# DaemonCores repos.  Reads the last runs of each repo plus the open
+# issues, writes a job summary, and opens or refreshes a single
+# 'CI status' issue when anything is failing.  Nothing is rebuilt and
+# nothing is committed: this is a watchdog, not a pipeline.
+#
+# P-757 (ISO jobs fail with 'no dnf in container') is a known failure;
+# the monitor records it but treats it as tracked, not new.
+
+name: CI status monitor
+
+on:
+  schedule:
+    # Every 20 minutes (GitHub applies some jitter, which is fine here).
+    - cron: '*/20 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+  actions: read
+
+concurrency:
+  group: ci-status-monitor
+  cancel-in-progress: false
+
+env:
+  REPOS: 'DaemonCores/debian-bootc DaemonCores/DaemonCores-VE DaemonCores/DaemonCores-CI'
+
+jobs:
+  monitor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Collect latest runs and open issues
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -u
+          {
+            echo "# DaemonCores CI status"
+            echo "_Run: ${GITHUB_RUN_ID} — $(date -u '+%Y-%m-%d %H:%M UTC')_"
+            echo
+            echo '| Repo | Latest run | Status | Age |'
+            echo '|---|---|---|---|'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          FAILING=0
+          for repo in $REPOS; do
+            row=$(gh run list -R "$repo" -L 1 \
+              --json displayTitle,status,conclusion,createdAt,url \
+              --jq '.[0] | [.displayTitle, (if .status == "completed" then .conclusion else .status end), .createdAt, .url] | @tsv' \
+              || printf 'UNKNOWN\tUNKNOWN\t\t')
+            title=$(echo "$row" | cut -f1)
+            state=$(echo "$row" | cut -f2)
+            created=$(echo "$row" | cut -f3)
+            url=$(echo "$row" | cut -f4)
+            age=$(python3 -c "import sys,datetime; print(datetime.datetime.utcnow()-datetime.datetime.fromisoformat(sys.argv[1].replace('Z','+00:00')).replace(tzinfo=None))" "$created" 2>/dev/null | cut -d, -f1 || echo '?')
+            case "$state" in
+              success) icon='✅';;
+              skipped|neutral) icon='⏭️';;
+              *) icon='🔴'; FAILING=1;;
+            esac
+            echo "| [$repo]($url) | ${icon} $title | $state | $age |" >> "$GITHUB_STEP_SUMMARY"
+          done
+
+          echo
+          echo '## Open issues' >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          for repo in $REPOS; do
+            echo "## $repo" >> "$GITHUB_STEP_SUMMARY"
+            gh issue list -R "$repo" --state open --limit 20 >> "$GITHUB_STEP_SUMMARY" || true
+          done
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+
+          echo "FAILING=$FAILING" >> "$GITHUB_ENV"
+
+      - name: Open or refresh the CI status issue
+        if: env.FAILING == '1'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          body=$(cat "$GITHUB_STEP_SUMMARY")
+          url=$(gh issue list -R DaemonCores/DaemonCores-CI --state open \
+                --search 'CI status in:title' --json number \
+                --jq '.[0].number // empty')
+          if [ -n "$url" ]; then
+            gh issue edit "$url" -R DaemonCores/DaemonCores-CI --body "$body"
+          else
+            gh issue create -R DaemonCores/DaemonCores-CI \
+              --title 'CI status' --body "$body"
+          fi
