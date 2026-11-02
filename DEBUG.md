@@ -972,7 +972,7 @@ Gap: RSS cannot attribute the ~100 MiB of kernel-side memory. Harness now also d
 - Fix monitor.yml: GITHUB_STEP_SUMMARY etant per-step, l'issue #1 avait un body vide; le rapport passe par un fichier partage $RUNNER_TEMP/ci-status.md. Re-dispatch pour preuve.
 
 ## Tick - re-fix body issue #1
-- Preuve: run <URL-ICI>. Issue #1 body non vide (tableau 3 repos + issues ouvertes).
+- Preuve: run (précédente) — preuve finale: https://github.com/DaemonCores/DaemonCores-CI/actions/runs/41461192579. Issue #1 body non vide (tableau 3 repos + issues ouvertes).
 
 ## Tick - monitor self-exclusion (final)
 - run list passe a -L 5 + jq select(.workflowName != "CI status monitor") pour ne plus lister le monitor lui-meme.
