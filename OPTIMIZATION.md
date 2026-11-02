@@ -327,18 +327,12 @@ This section is the single tracking location for the owner's demands. Do not mov
 - VE `Full Pipeline` was `startup_failure` because its caller passed the removed input `gpu_driver_images`; removed in the caller (VE `86c81d4`), the next run starts normally (run 41267556092 in progress).
 - Still open for the 15-minute target: `chain:`, L1, L12, L5, L6, L8, calibrated boot timeout, xz/zstd, build-once `arch: all`, partial publication, MOK, YAML tests `arch:`, bootloaders (see the consolidated lever list above); no green run under 15 minutes exists yet.
 
-## bootc-image-builder with apt (P-757, DESIGNED, not yet coded)
+## bootc-image-builder on a base without dnf (P-757, patch written, local proof pending)
 
-Order: keep `--type iso` (bootc-image-builder) and make it work on a Debian base by patching it the same way bootupd and fisherman are patched, not by changing the ISO tool.
+Order: keep `--type iso` (bootc-image-builder) and make it work on a Debian base by patching it, not by changing the ISO tool.
 
-Source: `osbuild/image-builder` (cmd/image-builder, pkg/bootc, pkg/distro/defs). Measured scope is in `DEBUG.md` Tick 45.
+Measured outcome (DEBUG.md Ticks 45-47): osbuild has no apt/deb source or stage, and the legacy `iso` type is Anaconda + lorax by construction, so an apt solver is not buildable. The `bootc-installer` type already builds the installer from containers with no package manager. Final design: when the base has no dnf and no `--build-container` is given, `iso`/`anaconda-iso` is switched to `bootc-installer`; the rpm path is untouched otherwise.
 
-Mechanism (same as the other patched packages): a `bootc-image-builder-src/` overlay in `workflows/bootc-debs-builder/` that mirrors the source paths, one `.patch` per file, `patches.lock.json` with the sha256 of each patched file, applied by `deb_src_overlay`/`patch_guard.py` (dry-run first; drift means skip and keep the last-good package). The result is a Debian-built `bootc-image-builder` binary shipped in the installer image; no rpm container is needed.
+Mechanism (same as the other patched packages): overlay `workflows/bootc-debs-builder/bootc-image-builder-src/` (new files `cmd/image-builder/bib_nodnf.go`, `pkg/bootc/hasdnf.go`, one `.patch` on `bib_main.go`, `patches.lock.json` with its sha256), applied by `deb_src_overlay`/`patch_guard.py` (dry-run first; drift fails loudly). `debian-bootc/Containerfile.bib` builds the binary from the git tag matching the rpm version found in the upstream bib image.
 
-Patch points:
-1. `pkg/bootc/resolver.go` `InitDNF`/`ErrNoDnf`: detect the package manager of the build container (apt when `dpkg` exists, dnf otherwise) instead of requiring dnf; `NewContainerSolver` returns an apt solver for Debian.
-2. A solver that resolves the installer package set with `apt-get`/`apt-cache` inside the build container (repos from its `sources.list`) and emits the package list with its URLs and checksums for the osbuild manifest.
-3. Manifest: use the osbuild deb/apt source and stage (to be verified in osbuild itself before coding) in place of the rpm stages for the installer root.
-4. `data/distrodefs/debian/` (YAML, loaded through `distroDefPaths`): `debian-13` with the ISO image type and its installer package set (fisherman, bootc-installer and their dependencies), not Anaconda.
-
-Not decided by this note, to be proven before coding: whether the installed osbuild version provides the deb/apt stages, and whether the existing `bootc-installer` image type already covers the package-set step. Proof of the finished patch: local rootful run of `--type iso` on `ghcr.io/daemoncores/debian-bootc:iso_amd64` producing an ISO (one pkexec popup), then the CI ISO job.
+Remaining: (1) rootful proof of `--type iso` on `ghcr.io/daemoncores/debian-bootc:iso_amd64`; (2) podman >= 5.8 in the installer image (trixie ships 5.4.2) through the deb builder of `packages.yml`; (3) CI step building `Containerfile.bib` and `iso-builder.yml` using that image.
