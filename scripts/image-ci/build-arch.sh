@@ -521,12 +521,10 @@ lint_image() {
   # only when the image actually ships bootc.
   if [[ "$(row_get "${tag}" "${col_kind}")" == "primary" ]]; then
     podman_ run --rm --entrypoint sh "${ref}" \
-      -c 'command -v bootc >/dev/null 2>&1 || { echo "no bootc: lint not applicable"; exit 0; }
-ldd /usr/bin/bootc && ldd /usr/lib/libostree-1.so*' || return 1
+      -c 'command -v bootc >/dev/null 2>&1 || { echo "no bootc: lint not applicable"; exit 0; }; ldd /usr/bin/bootc && ldd /usr/lib/libostree-1.so*' || return 1
   fi
   podman_ run --rm --entrypoint sh "${ref}" \
-    -c 'command -v bootc >/dev/null 2>&1 || { echo "no bootc: lint not applicable"; exit 0; }
-exec bootc container lint' || return 1
+    -c 'command -v bootc >/dev/null 2>&1 || { echo "no bootc: lint not applicable"; exit 0; }; exec bootc container lint' || return 1
 }
 
 phase_lint() {

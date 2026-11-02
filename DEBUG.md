@@ -1035,3 +1035,9 @@ Gap: RSS cannot attribute the ~100 MiB of kernel-side memory. Harness now also d
   6. mksquashfs/xorrisofs/implantisomd5 absents du tree Debian → Containerfile.iso: + python3-mako squashfs-tools xorriso isomd5sum.
 - Concurrent lane: Containerfile.bib avait reçu BIB_UPSTREAM épinglé sha256 + LABEL global extra-contexts — LABEL avant le premier FROM casse le parser podman 6 ("stage 1 requires a FROM"); déplacé dans la stage finale.
 - État manifest: build/anaconda-tree = container-deploy payload; build root runner = payload Debian (python3.13): tous les outils de stage (setfiles/mako/dracut/mksquashfs/xorrisofs/implantisomd5) résolvent dans le tree → les binaires doivent être dans la payload.
+
+## Tick - P-757 CI: build images amd64 rouge, cause prouvée et corrigée
+- Run 41515360896: images latest/iso/nvidia construites + push + sign OK; échec final = lint-failed de l'image bib ("error: unknown shorthand flag: 'c' in -c"): lint_image runnait `podman run <ref> bootc container lint` — l'entrypoint de l'image bib (le binaire bootc-image-builder) avale les args, et l'image n'a pas de bootc. BOOT_TEST_SKIP_TAGS couvrait déja bib pour les boot tests, pas pour le lint.
+- Fix build-arch.sh lint_image: --entrypoint sh + guard `command -v bootc` (lint non applicable aux images sans bootc); assertion test mise a jour. Make test: 256 passed.
+- Fix collatéral (rouge concurrent): check_build_context.py importait yaml au top-level; hash.sh (python3 bare, sans PyYAML) obtenait ctx vide → hash d'image constant → pas de skip. import yaml rendu lazy (local_sources n'en dépend pas); test_hash_follows... redevient vert.
+- debian-bootc 7f3f6ea poussé (bib fixes + iso packages), re-dispatch Full Pipeline.

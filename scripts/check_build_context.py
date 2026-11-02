@@ -17,8 +17,6 @@ import sys
 from pathlib import Path
 from typing import cast
 
-import yaml
-
 COPY_RE = re.compile(
     r"^(?:COPY|ADD)\s+(?!--from)(?:--\S+\s+)*(\S+)\s+\S+", re.MULTILINE
 )
@@ -94,6 +92,8 @@ def check_packages(packages_dir: Path) -> list[str]:
     manifest = packages_dir / "packages.yml"
     if not manifest.is_file():
         return []
+    import yaml
+
     loaded = cast(dict[str, object], yaml.safe_load(manifest.read_text()))
     entries = cast(list[dict[str, object]], loaded["packages"])
     names = [str(e["name"]) for e in entries]
