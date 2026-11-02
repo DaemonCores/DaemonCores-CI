@@ -37,13 +37,20 @@ ci_hash_inputs() {
   pages="https://${owner,,}.github.io/${repo}"
   DEBS=$(curl -fsSL "${pages}/debs-cache/hashes.json" 2>/dev/null \
     | jq -cS . 2>/dev/null || echo '{}')
-  # The external base image is the one Containerfile.base starts from.
+  # The base image is the one Containerfile.base starts from.
   base=$(grep -m1 -iE '^FROM ' Containerfile.base | awk '{ print $2 }')
-  # Resolve the base image's per-arch digest (--override-arch) so amd64
-  # and arm64 get distinct, correct digests even when the base is a
-  # multi-arch manifest list.
+  # Identity of the base build input. The former digest-of-:latest formula
+  # floated: an upstream pipeline rebuilt ghcr.io/daemoncores/debian-bootc
+  # :latest with identical content (measured 2026-11-02 13:32Z) and the new
+  # manifest digest moved every downstream content hash, so no run could skip
+  # a rebuild and the boot results moved under identical content. For bases
+  # built by a DaemonCores pipeline the org.daemoncores.content-hash label IS
+  # the content identity; an external base carries no label and falls back to
+  # its manifest digest, which is its genuine identity. Formula change on
+  # purpose: every published image rebuilds once after this commit.
   BASE_DIGEST=$(_hash_sudo skopeo inspect --override-arch "${ARCH}" \
-    --format '{{.Digest}}' "docker://${base}" 2>/dev/null || echo none)
+    --format '{{or (index .Labels "org.daemoncores.content-hash") .Digest}}' \
+    "docker://${base}" 2>/dev/null || echo none)
   # The APT key hash and the signing public key are build inputs too:
   # a rotation must not be mistaken for an identical image.
   SIGNING=$(printf '%s\n%s' "${BOOTC_GPG_SHA256:-}" "${COSIGN_PUBLIC_KEY:-}" \

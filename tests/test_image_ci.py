@@ -76,6 +76,7 @@ exit 0
 SKOPEO = r"""#!/bin/bash
 echo "skopeo $*" >>"${STUB_LOG}"
 case " $* " in
+  *"or (index .Labels"*) echo "${BASE_LABEL:-sha256:base-label}" ;;
   *"{{.Digest}}"*) echo "sha256:base" ;;
   *)
     ref="${@: -1}"
@@ -330,7 +331,15 @@ def _old_chash_script() -> str:
 
 @needs_jq
 def test_hash_is_identical_to_the_former_workflow_step(sb: Sandbox) -> None:
-    """The moved formula yields the hashes the workflow step produced."""
+    """The DEBS fingerprints still match the former workflow step.
+
+    The image hash itself intentionally diverged from the former step when
+    the base input became the content-hash label: a base rebuild with
+    identical content floated the manifest digest and moved every image
+    hash (measured 2026-11-02, runs of session 41451549641/41455682594).
+    The DEBS / kernel-debs fingerprints are base-independent and must stay
+    byte-identical to the formula the published hashes came from.
+    """
     out = sb.root.parent / 'old.out'
     env = dict(sb.env,
                SUDO='sudo',
@@ -360,9 +369,40 @@ def test_hash_is_identical_to_the_former_workflow_step(sb: Sandbox) -> None:
                           capture_output=True,
                           text=True)
     new = dict(ln.split('=', 1) for ln in done.stdout.splitlines())
-    for key in ('hash', 'twin_hash', 'debs_hash', 'kernel_debs_hash'):
+    for key in ('debs_hash', 'kernel_debs_hash'):
         assert len(old[key]) == 64
         assert new[key] == old[key], key
+
+
+@needs_jq
+def test_hash_ignores_a_base_rebuild_with_identical_content(
+        sb: Sandbox) -> None:
+    """A rebuilt base moves only its digest, not its content-hash label.
+
+    The debian-bootc base pipeline rebuilds :latest with identical content;
+    the manifest digest changes each time. The image content hash must
+    follow the content-hash label and stay stable across such a rebuild,
+    then move when the base content genuinely changes.
+    """
+    (sb.root / 'Containerfile').write_text('FROM scratch\n')
+
+    def image_hash(label: str | None = None) -> str:
+        script = (f'. {CI}/hash.sh; ci_hash_inputs; '
+                  'ci_image_hash Containerfile latest')
+        envv: dict[str, str] = dict(sb.env, SUDO='sudo', ARCH='amd64')
+        if label:
+            envv['BASE_LABEL'] = label
+        return subprocess.run(['bash', '-c', script], cwd=sb.root, env=envv,
+                              check=True, capture_output=True,
+                              text=True).stdout.strip()
+
+    first = image_hash()
+    # A rebuild: the manifest digest changes, the label stays.
+    assert image_hash() == first, \
+        'a base digest float must not move the image hash'
+    # The default label stub value differs from the changed label below.
+    assert image_hash('sha256:' + 'b' * 64) != first, \
+        'a changed base label must move the image hash'
 
 
 @needs_jq
