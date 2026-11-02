@@ -903,3 +903,11 @@ Gap: RSS cannot attribute the ~100 MiB of kernel-side memory. Harness now also d
 - Cause: `PVE/Bootc.pm:15` was `use PVE::Cluster qw(cfs_read_file get_vmlist)`; `pve-cluster` 9.1.7 `PVE/Cluster.pm:29-33` has `@EXPORT_OK = qw(cfs_read_file cfs_write_file cfs_register_file cfs_lock_file)`, `get_vmlist` is a plain sub (line 297).
 - Fix: import only `cfs_read_file` and call `PVE::Cluster::get_vmlist()` (the form `API2/Bootc.pm` and the pvestatd patch already use).
 - To confirm: next VE Full Pipeline, the five tests above pass.
+
+## Tick 42 - VE amd64: SSH key refused, and the serial dump never prints (VE run 41406540225)
+
+- Symptom: job 125151136600 (amd64): `VM did not become reachable within 900s`; the last SSH attempt reaches sshd (`Authentications that can continue: publickey,password`, `Permission denied`), the guest log shows `Failed password for root` repeatedly. The PVE services now run (`pvestatd` logs), so this appears only since pve-cluster started.
+- Proof of the harness defect: after `guest state (QEMU monitor)` the log goes straight to `poweroff requested` / `test-failed`; none of the `serial console:` groups of `dump_serial` is printed. In `guest_state` (`image-test/lib.sh`) `pc=$(grep -aoE ' PC=...' | head | cut)` returns 1 on x86-64 (register names are RIP/RSP, not PC/SP); under `set -euo pipefail` the failed assignment aborts the script before the serial console is dumped.
+- Fix: PC/SP extracted with `awk` accepting `PC|RIP` and `SP|RSP`; checked on x86, arm64 and no-match samples (`pc=[ffffffff81000000]`, `pc=[0000aaaa]`, `pc=[]`, exit 0).
+- Cause of the refused key: NOT proven yet. Lead (not a cause): `PVE::Cluster::Setup::ssh_merge_keys`/`pvecm updatecerts` (libpve-cluster-api-perl 9.1.7, `Setup.pm:97-210`) replaces `/root/.ssh/authorized_keys` by a symlink to `/etc/pve/priv/authorized_keys` once pmxcfs runs; the key is injected by `bootc install --root-ssh-authorized-keys` (`image-test/install-fs.sh:172`). The full serial capture of the next run decides.
+- To confirm: next VE Full Pipeline prints the serial groups; read the `pvecm updatecerts` / pmxcfs lines.

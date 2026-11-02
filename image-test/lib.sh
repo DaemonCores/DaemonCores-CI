@@ -618,8 +618,11 @@ guest_state() {
   local regs pc sp
   regs=$(sudo python3 -I "${SCRIPT_DIR}/hmp.py" "${MONITOR}" "info registers" 2>&1)
   grep -aE '^(X[0-9]+|.* X[0-9]+=)' <<<"${regs}" || true
-  pc=$(grep -aoE ' PC=[0-9a-f]+' <<<"${regs}" | head -n 1 | cut -d= -f2)
-  sp=$(grep -aoE ' SP=[0-9a-f]+' <<<"${regs}" | head -n 1 | cut -d= -f2)
+  # The register names differ by architecture (PC/SP on arm64, RIP/RSP on
+  # x86-64); awk exits 0 when none matches, so a missing name leaves the
+  # variable empty instead of aborting the caller under errexit/pipefail.
+  pc=$(awk 'match($0, /(^| )(PC|RIP)=[0-9a-f]+/) {s = substr($0, RSTART, RLENGTH); sub(/.*=/, "", s); print s; exit}' <<<"${regs}")
+  sp=$(awk 'match($0, /(^| )(SP|RSP)=[0-9a-f]+/) {s = substr($0, RSTART, RLENGTH); sub(/.*=/, "", s); print s; exit}' <<<"${regs}")
   if [ -n "${pc}" ] && [ -n "${sp}" ]; then
     sudo python3 -I "${SCRIPT_DIR}/hmp.py" "${MONITOR}" "gva2gpa 0x${pc}" "gva2gpa 0x${sp}" \
       "x /32xw 0x${pc}" "x /16xg 0x${sp}" 2>&1 \
