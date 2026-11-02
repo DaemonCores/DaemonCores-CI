@@ -1023,3 +1023,15 @@ Gap: RSS cannot attribute the ~100 MiB of kernel-side memory. Harness now also d
 - Preuves locales: 256 pytest PASS (PATH shim venv pour yaml), shellcheck +
   shfmt OK, extra_ctx_args bib=2 contexts / iso=0, check_build_context OK,
   build podman bib relance (log scratch).
+
+## Tick - P-757: proof ISO rootful local PASS
+- Run rootful (sudo, /tmp/bib-proof): exit 0, /tmp/bib-proof/out/bootiso/install.iso 2.4G (bootiso 54152d02a696...), payload=ghcr.io/daemoncores/debian-bootc:iso_amd64 (4c2134aacf21, local rebuild) via localhost/bib-debian (82e86e...→2f28c89558d0? dernière rebuild) build depuis Containerfile.bib.
+- Chaîne de fixes itérée (chaque échec prouvé par log):
+  1. payload rootful stale (digest 09:55Z vs 16:42Z) → sudo podman pull.
+  2. setfiles "Regex version mismatch" (PCRE2 10.46 bib vs .bin Debian 10.44) → patch osbuild/util/selinux.py dans l'image bib (drop file_contexts*.bin) via RUN python3 dans Containerfile.bib final stage.
+  3. lorax-script: python3-mako absent → RUN dnf python3-mako (stage finale bib).
+  4. lorax-script: template 99-generic/runtime-postinstall.tmpl absent (pas de lorax sous Debian) → overlay patch pkg/distro/bootc/shared.go (LoraxTemplates → nil pour base debian/idLike debian; LoraxTemplatePackage laissé non-vide car le bloc copy anaconda-shell@.service en dépend et le fichier est absent de l'arbre Debian), patches.lock.json + sha pristine 184fbc36...
+  5. dracut: --add qemu-net/anaconda/prefixdevname-tools absents du dracut Debian (97biosdevname/90qemu/98pollcdrom/01fips présents) → patch stage osbuild org.osbuild.dracut dans l'image bib: filtre add_modules/modules sur usr/lib/dracut/modules.d du tree.
+  6. mksquashfs/xorrisofs/implantisomd5 absents du tree Debian → Containerfile.iso: + python3-mako squashfs-tools xorriso isomd5sum.
+- Concurrent lane: Containerfile.bib avait reçu BIB_UPSTREAM épinglé sha256 + LABEL global extra-contexts — LABEL avant le premier FROM casse le parser podman 6 ("stage 1 requires a FROM"); déplacé dans la stage finale.
+- État manifest: build/anaconda-tree = container-deploy payload; build root runner = payload Debian (python3.13): tous les outils de stage (setfiles/mako/dracut/mksquashfs/xorrisofs/implantisomd5) résolvent dans le tree → les binaires doivent être dans la payload.
