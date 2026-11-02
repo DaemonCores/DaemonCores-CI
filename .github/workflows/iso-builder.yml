@@ -197,6 +197,14 @@ jobs:
           # storage (bib_main overlay); the osbuild container-deploy stage
           # mounts the payload image. Ubuntu 24.04 runner kernels deny those
           # mounts even under --privileged (apparmor), hence unconfined.
+          # DEBUG(P-757 amd64 mount denial): environment proof of the store
+          # filesystems and podman driver, per arch.
+          echo "== findmnt /var/lib/containers/storage =="
+          findmnt -no FSTYPE,SOURCE,OPTIONS -T /var/lib/containers/storage || true
+          echo "== podman info (driver, graph root) =="
+          sudo podman info --format '{{.Store.GraphDriverName}} {{.Store.GraphRoot}}' || true
+          echo "== mounts under the store =="
+          cat /proc/self/mountinfo | grep containers/storage | head -5 || true
           sudo podman run \
             --rm \
             --privileged \
