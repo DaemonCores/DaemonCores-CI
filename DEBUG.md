@@ -1130,3 +1130,22 @@ Gap: RSS cannot attribute the ~100 MiB of kernel-side memory. Harness now also d
   FERMEE. Reste du run: unique failure = Publish .deb (amd64),
   download-artifact ECONNRESET infra transitoire (pas code) -> run clean
   41573076156 dispatched (run_iso=true).
+
+## Tick 2026-11-03 nuit (cron Hermes) — garde ISO au plan du full-pipeline
+
+Cause VE (run 41542099345): Build ISO fail `manifest unknown iso_amd64` — VE ne
+shipe pas `Containerfile.iso`, le plan mettait iso=true des que pipeline.yml ou
+l'image/debs changeait. Fix DaemonCores-CI 95e8cfb: le garde imgcascade est
+suivi d'un check `git cat-file -e $SHA:Containerfile.iso` -> iso=false pour un
+repo sans ce fichier (debian-bootc le garde, simulation locale verifiee).
+Run VE 41576191794 dispatche: job Build ISO absent du graphe (0 match iso),
+pipeline en vol. Prochain cron: verdict du run VE (images verts + aucun job ISO),
+puis vague-2 du registre.
+
+Terminal: debian-bootc Full Pipeline 41573076156 VERT 100% (2 Build ISO SUCCESS) -> P-757 FERME.
+
+## Tick 2026-11-03T05:5x (cron nuit) — verdicts P-757 + VE
+- debian-bootc Full Pipeline 41573076156 SUCCESS 100% (lue gh run view): Publish .deb SUCCESS, Build images amd64+arm64 SUCCESS, les 2 Build ISO amd64/arm64 SUCCESS = P-757 FERME (déjà journalisé R-791/792).
+- VE Full Pipeline 41576191794 SUCCESS (lue gh run view): Build images + Manifest latest verts, stage Build ISO ABSENT/skipped = garde `cat-file Containerfile.iso` (95e8cfb) prouvée en run réel. Preuve VE bootc chain complète.
+- Skip/cache live: run VE = wave1/wave2/wave3 skipped, wave1 debian-bootc = succès complet (cache debs réutilisé).
+- Rien poussé ce tick (tout déjà pushed, night goal 1+2 atteints). Prochaine file cron: vague-2 arbitre (re-preuves par row).
