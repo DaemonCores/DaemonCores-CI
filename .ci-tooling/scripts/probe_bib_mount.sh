@@ -1,55 +1,36 @@
 #!/bin/sh
-# Probe for the amd64-only osbuild mount EPERM (P-757).
-# Replicates the osbuild-193 buildroot sandbox (bwrap, no userns) and the
-# shipped mount sequence from osbuild/util/containers.py:
-#   rbind RW of the store, then remount RW ("dirty fix").
+# Probe bisection for the amd64-only bwrap+mount EPERM (P-757).
+# Run 41563999100 proved: inside bwrap (ipc/pid/net) ANY rbind+make-rprivate
+# mount of the WORKSPACE-bound store fails with EPERM on amd64 only, while
+# arm64 does the same mounts fine. No userns involved (caps identical).
+# This run: (1) which unshare flag flips amd64 to EPERM, (2) LSM state
+# of both runner VMs.
 set -u
-BIB=ghcr.io/daemoncores/debian-bootc:bib_$2
+BIB=ghcr.io/daemoncores/debian-bootc:bib_$1
 echo "== kernel =="
 uname -r
+echo "== LSM =="
+cat /sys/kernel/security/lsm 2>/dev/null || echo LSM_NONE
 sudo podman pull "$BIB" >/dev/null 2>&1 || true
 mkdir -p run-store/overlay
-
-echo "== PROBE F: bwrap sandbox, store bound RO, shipped sequence =="
 sudo podman run -i --rm --privileged --security-opt apparmor=unconfined \
+    --entrypoint /bin/sh \
     -v "$(pwd)/run-store:/var/lib/containers/storage:rshared" \
-    --entrypoint /bin/sh "$BIB" -s <<'EOF_BIB'
-mkdir -p /tmp/orig /tmp/sb-in &&
-mount --rbind -o ro,0755 --make-rprivate /var/lib/containers/storage /tmp/orig &&
-bwrap --ro-bind / / --tmpfs /run --chdir / --die-with-parent --new-session \
-      --unshare-ipc --unshare-pid --unshare-net \
-      --ro-bind /tmp/orig /var/lib/containers/storage \
-      --proc /proc --dev /dev \
-      /bin/sh -c '
-        mkdir -p /run/osbuild/containers/storage;
-        mount --rbind -o rw,0755 --make-rprivate /var/lib/containers/storage /run/osbuild/containers/storage && echo F_RBIND_RW_OK || echo F_RBIND_RW_FAIL;
-        mount -o remount,bind,rw /run/osbuild/containers/storage && echo F_REMOUNT_RW_OK || echo F_REMOUNT_RW_FAIL
-      ' || echo F_BWRAP_FAIL
+    "$BIB" -s <<'EOF_BIB'
+echo "== bwrap version =="; bwrap --version
+BW="bwrap --ro-bind / / --tmpfs /run --tmpfs /tmp --proc /proc --dev /dev"
+echo "== H0: no unshare =="
+$BW sh -c 'mkdir -p /tmp/osp && mount --rbind -o rw,0755 --make-rprivate /var/lib/containers/storage /tmp/osp && echo H0_OK || echo H0_FAIL'
+echo "== H1: unshare-ipc only =="
+$BW --unshare-ipc sh -c 'mkdir -p /tmp/osp && mount --rbind -o rw,0755 --make-rprivate /var/lib/containers/storage /tmp/osp && echo H1_OK || echo H1_FAIL'
+echo "== H2: unshare-pid only =="
+$BW --unshare-pid sh -c 'mkdir -p /tmp/osp && mount --rbind -o rw,0755 --make-rprivate /var/lib/containers/storage /tmp/osp && echo H2_OK || echo H2_FAIL'
+echo "== H3: unshare-net only =="
+$BW --unshare-net sh -c 'mkdir -p /tmp/osp && mount --rbind -o rw,0755 --make-rprivate /var/lib/containers/storage /tmp/osp && echo H3_OK || echo H3_FAIL'
+echo "== H4: unshare trio =="
+$BW --unshare-net --unshare-pid --unshare-ipc sh -c 'mkdir -p /tmp/osp && mount --rbind -o rw,0755 --make-rprivate /var/lib/containers/storage /tmp/osp && echo H4_OK || echo H4_FAIL'
+echo "== H5: mount ns alone, no bwrap =="
+unshare -m sh -c 'mkdir -p /tmp/osp && mount --rbind -o rw,0755 --make-rprivate /var/lib/containers/storage /tmp/osp && echo H5_OK || echo H5_FAIL'
 EOF_BIB
-
-echo "== PROBE G: bwrap sandbox, store bound RW =="
-sudo podman run -i --rm --privileged --security-opt apparmor=unconfined \
-    -v "$(pwd)/run-store:/var/lib/containers/storage:rshared" \
-    --entrypoint /bin/sh "$BIB" -s <<'EOF_BIB'
-bwrap --ro-bind / / --tmpfs /run --chdir / --die-with-parent --new-session \
-      --unshare-ipc --unshare-pid --unshare-net \
-      --bind /var/lib/containers/storage /var/lib/containers/storage \
-      --proc /proc --dev /dev \
-      /bin/sh -c '
-        mkdir -p /run/osbuild/containers/storage;
-        mount --rbind -o rw,0755 --make-rprivate /var/lib/containers/storage /run/osbuild/containers/storage && echo G_RBIND_RW_OK || echo G_RBIND_RW_FAIL;
-        mount -o remount,bind,rw /run/osbuild/containers/storage && echo G_REMOUNT_RW_OK || echo G_REMOUNT_RW_FAIL
-      ' || echo G_BWRAP_FAIL
-EOF_BIB
-
-echo "== caps inside bwrap =="
-sudo podman run -i --rm --privileged --security-opt apparmor=unconfined \
-    -v "$(pwd)/run-store:/var/lib/containers/storage:rshared" \
-    --entrypoint /bin/sh "$BIB" -s <<'EOF_BIB'
-bwrap --ro-bind / / --tmpfs /run --chdir / --new-session --unshare-ipc --unshare-pid --unshare-net \
-      --proc /proc --dev /dev \
-      /bin/sh -c 'grep -A1 Cap /proc/self/status | head -6; echo user-ns-limit=$(cat /proc/sys/user/max_user_namespaces)'
-EOF_BIB
-
 echo "== kernel ring buffer =="
-sudo dmesg | tail -40 || true
+sudo dmesg | tail -20 || true
