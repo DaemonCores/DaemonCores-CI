@@ -83,6 +83,27 @@ truncate -s "${SIZE_MB}M" "${IMG_PATH}"
 DEV=$(losetup -f --show -P "${IMG_PATH}")
 echo ">>> Loop device: ${DEV}"
 
+# Container /dev does not propagate nodes created by the kernel AFTER the
+# mount (sfdisk's own re-read confirmed it: "/dev/loop0p2 does not exist").
+# The /sys partition entries are always visible, so recreate the /dev nodes
+# from sysfs major:minor before any ${DEV}pN use.
+ensure_part_nodes() {
+  base="$(basename "$1")"
+  for part in "$@"; do
+    node="$1p${part}"
+    sysdev="/sys/class/block/$(basename "$1")p${part}/dev"
+    if [ ! -e "${sysdev}" ]; then
+      echo "::error::partition ${part} of ${base} not present in /sys (partscan failed)" >&2
+      return 1
+    fi
+    if [ ! -e "${node}" ]; then
+      mm="$(cat "${sysdev}")"
+      mknod "${node}" b "${mm% *}" "${mm#* }"
+      echo ">>> (re)created device node ${node} (${mm})"
+    fi
+  done
+}
+
 #######################################
 # Release the mounts and the loop device on exit.
 # Globals:
@@ -109,6 +130,7 @@ type=0fc63daf-8483-4772-8e79-3d69d8477de4, name="root"
 PART
   partprobe "${DEV}" 2>/dev/null || true
   udevadm settle 2>/dev/null || sleep 1
+  ensure_part_nodes "${DEV}" 1 2
 
   mkfs.vfat -n BOOT "${DEV}p1" >/dev/null
   mkfs.ext4 -q -L root "${DEV}p2"
@@ -222,6 +244,7 @@ type=0fc63daf-8483-4772-8e79-3d69d8477de4, name="root"
 PART
     partprobe "${DEV}" 2>/dev/null || true
     udevadm settle 2>/dev/null || sleep 1
+    ensure_part_nodes "${DEV}" 1
 
     mkfs.ext4 -q -L root "${DEV}p1"
 
@@ -248,6 +271,7 @@ type=0fc63daf-8483-4772-8e79-3d69d8477de4, name="root"
 PART
     partprobe "${DEV}" 2>/dev/null || true
     udevadm settle 2>/dev/null || sleep 1
+    ensure_part_nodes "${DEV}" 1 2
 
     mkfs.ext4 -q -L root "${DEV}p2"
 
