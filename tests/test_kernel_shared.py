@@ -61,6 +61,42 @@ def test_shared_data_files_present() -> None:
         assert (SHARED_DATA / "kconfig-shared" / "gpu" / name).is_file()
 
 
+def test_arch_overlays_folded_into_the_base_config() -> None:
+    """The bare arch overlays are gone; their content lives in kernel/config.
+
+    The fold (owner 2026-11-03): modules/arm and modules/x86_64 do not exist
+    anymore, the base config carries the '# arm64 built-in' and
+    '# amd64 built-in' sections, and the former =m drivers are =y (a
+    modules-only build can never add a built-in to an existing kernel). The
+    per-device fragments and the page-size overlays stay untouched.
+    """
+    for gone in ("arm", "x86_64"):
+        assert not (SHARED_DATA / "modules" / gone).exists(), gone
+    cfg = (SHARED_DATA / "config").read_text(encoding="utf-8")
+    for section in ("# arm64 built-in", "# amd64 built-in"):
+        assert section in cfg, section
+    for promoted in (
+        "CONFIG_DRM_AMDGPU=y",
+        "CONFIG_DRM_I915=y",
+        "CONFIG_E1000=y",
+        "CONFIG_R8169=y",
+        "CONFIG_DRM_VC4=y",
+        "CONFIG_DRM_ROCKCHIP=y",
+        "CONFIG_NR_CPUS=512",
+        "# CONFIG_HWPOISON_INJECT is not set",
+    ):
+        assert promoted in cfg, promoted
+    # The device fragments and the page-size overlays are NOT touched by the
+    # fold: one fragment per SoC family, one overlay per page size.
+    for device in (
+        "rpi3", "rpi4", "rpi5", "rk3588", "rk3566",
+        "rk3399", "h616", "imx8m", "mt8183",
+    ):
+        assert (SHARED_DATA / "modules" / device).is_file(), device
+    for pages in ("4k", "16k"):
+        assert (SHARED_DATA / "pages" / pages).is_file(), pages
+
+
 def test_no_local_copy_in_consumer_repos() -> None:
     """The sibling consumer repos carry NO copy of the shared data: their
     former locations are gone (the engine checkout is the single source)."""
