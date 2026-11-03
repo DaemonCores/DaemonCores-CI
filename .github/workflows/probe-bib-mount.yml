@@ -1,0 +1,60 @@
+name: probe-mount
+on:
+  workflow_dispatch:
+
+# Probe for the amd64-only osbuild mount EPERM (P-757, runs
+# 41543534089..41557034878). Reproduces the osbuild containers_storage_source
+# rbind of the runtime store under the debian-bootc bib_amd64 builder image,
+# inside and outside a user/mount namespace, and captures the kernel verdicts.
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install podman
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends podman
+
+      - name: Probe the rbind in bib_amd64
+        run: |
+          set -uo pipefail
+          echo "== runner kernel =="
+          uname -r
+          echo "== apparmor =="
+          sysctl kernel.apparmor_restrict_unprivileged_userns || true
+          echo "== pull bib =="
+          sudo podman pull ghcr.io/daemoncores/debian-bootc:bib_amd64 >/dev/null 2>&1 \
+            || { echo "PULL_FAILED (fine for a probe)"; }
+          mkdir -p run-store/overlay
+          BIB=ghcr.io/daemoncores/debian-bootc:bib_amd64
+
+          echo "== PROBE A: mount --rbind plain (root in container) =="
+          sudo podman run --rm --privileged --security-opt apparmor=unconfined \
+            --entrypoint /bin/sh \
+            -v "$(pwd)/run-store:/var/lib/containers/storage:rshared" \
+            "${BIB}" -c \
+            'mkdir -p /run/osp && mount --rbind -o ro,0755 --make-rprivate /var/lib/containers/storage /run/osp && echo PLAIN_BIND_OK || echo PLAIN_BIND_FAIL'
+
+          echo "== PROBE B: rbind from user+mount ns (unshare -Urm, root) =="
+          sudo podman run --rm --privileged --security-opt apparmor=unconfined \
+            --entrypoint /bin/sh \
+            -v "$(pwd)/run-store:/var/lib/containers/storage:rshared" \
+            "${BIB}" -c \
+            'unshare -Urm sh -c "mkdir -p /run/osp && mount --rbind -o ro,0755 --make-rprivate /var/lib/containers/storage /run/osp && echo UNSHARE_BIND_OK || echo UNSHARE_BIND_FAIL"'
+
+          echo "== PROBE C: rbind from bwrap userns sandbox (closest to osbuild) =="
+          sudo podman run --rm --privileged --security-opt apparmor=unconfined \
+            --entrypoint /bin/sh \
+            -v "$(pwd)/run-store:/var/lib/containers/storage:rshared" \
+            "${BIB}" -c \
+            'command -v bwrap >/dev/null && bwrap --dev /tmp --proc /proc --chdir / \
+              sh -c "mount --rbind -o ro,0755 --make-rprivate /var/lib/containers/storage /tmp/osp && echo BWRAP_BIND_OK || echo BWRAP_BIND_FAIL" \
+              || echo BWRAP_ABSENT'
+
+          echo "== kernel ring buffer =="
+          sudo dmesg | tail -60 || true
+          echo "== audit log (AppArmor denials) =="
+          sudo journalctl -k 2>/dev/null | grep -iE "apparmor|audit" | tail -30 || true
