@@ -327,6 +327,19 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
+          # A previously interrupted multipart upload can leave a pending
+          # asset with the same name that gh release upload --clobber cannot
+          # replace (HTTP 422 already_exists, run 41565502790 amd64): delete
+          # the stale asset by name first.
+          RELEASE_ID=$(gh api "repos/${{ github.repository }}/releases/tags/install-iso" --jq .id)
+          ASSET_NAME=$(basename "${ISO_FINAL}")
+          for ext in "" ".sha256"; do
+            ASSET_ID=$(gh api "repos/${{ github.repository }}/releases/${RELEASE_ID}/assets" \
+              --jq ".[] | select(.name == \"${ASSET_NAME}${ext}\") | .id" || true)
+            if [ -n "${ASSET_ID}" ]; then
+              gh api -X DELETE "repos/${{ github.repository }}/releases/assets/${ASSET_ID}" >/dev/null
+            fi
+          done
           gh release upload install-iso \
             --repo "${{ github.repository }}" \
             "${ISO_FINAL}" \
