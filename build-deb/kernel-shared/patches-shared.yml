@@ -115,8 +115,15 @@ patches:
       # (SCHED_BORE) lives in kconfig/x86-common.cfg, so both kernels get the
       # sched profile from the same source. CachyOS serves the series dir per
       # {series}; a series without a bore sibling fails the consumer build
-      # (dry-run, all-or-nothing) and keeps the last-good deb.
+      # (dry-run, all-or-nothing) and keeps the last-good deb. Series
+      # exclusion (owner arbitration 2026-11-03 13:05 lane, series probe
+      # R-801-style): CachyOS carries NO 7.0 sibling (the PVE 7.0.x packaging
+      # tree) and the patch does not apply to it (run 41628726241) — the
+      # entry is excluded on that series only (helper filter exclude-series);
+      # the SCHED_BORE pin simply resolves as absent there. A series bump
+      # re-arms it automatically.
       - name: bore
         url: https://raw.githubusercontent.com/CachyOS/kernel-patches/master/{series}/sched/0001-bore.patch
         stage: common
+        exclude-series: ["7.0"]
         license: GPL-2.0-only
