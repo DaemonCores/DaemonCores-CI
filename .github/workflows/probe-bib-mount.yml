@@ -2,12 +2,13 @@ name: probe-mount
 on:
   workflow_dispatch:
 
-# Probe 2 for the amd64-only osbuild mount EPERM (P-757). Probe run 1
-# (41559582446, kernel 7.0.0-1017-azure): plain rbind RW = OK, rbind RW from
-# unshare -Urm = OK. So the userns knob is NOT the cause. This run tests the
-# REAL osbuild scenario: the store is first bound READ-ONLY (the osbuild
-# sandbox binds its inputs ro), then containers_storage_source rbinds/mounts
-# it READ_WRITE from inside that read-only mount.
+# Probe 3 for the amd64-only osbuild mount EPERM (P-757). Run 1: plain
+# rbind RW and unshare -Urm rbind both OK -> not an AppArmor userns issue.
+# Run 2 (41559933932): WITHOUT userns the remount RW of a read-only bind is
+# OK; FROM a user namespace it is denied by kernel 7.0-azure. osbuild 193
+# bwrap does NOT unshare-user, so reproduce the exact buildroot sandbox
+# (ipc+pid+net only, caps retained) and the shipped sequence rbind-RW +
+# remount-RW inside it, on the read-only bound store.
 permissions:
   contents: read
 
@@ -20,7 +21,7 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends podman
 
-      - name: Probe ro-then-rw rbind in bib_amd64
+      - name: Probe the exact bwrap sandbox mount sequence
         run: |
           set -uo pipefail
           echo "== kernel =="
@@ -29,27 +30,47 @@ jobs:
           sudo podman pull ghcr.io/daemoncores/debian-bootc:bib_amd64 >/dev/null 2>&1 || true
           BIB=ghcr.io/daemoncores/debian-bootc:bib_amd64
 
-          echo "== PROBE D: sandbox binds the store RO, then rbind RW of that RO tree =="
+          echo "== PROBE F: osbuild-193 bwrap sandbox, store bound RO, shipped mount sequence =="
           sudo podman run --rm --privileged --security-opt apparmor=unconfined \
             --entrypoint /bin/sh \
             -v "$(pwd)/run-store:/var/lib/containers/storage:rshared" \
-            "${BIB}" -c \
-            'mkdir -p /tmp/orig && mount --rbind -o ro,0755 --make-rprivate /var/lib/containers/storage /tmp/orig &&
-             unshare -Urm sh -c "mkdir -p /tmp/osp &&
-               mount --rbind -o ro,0755 --make-rprivate /tmp/orig /tmp/osp && echo D_RO_BIND_OK || echo D_RO_BIND_FAIL;
-               mount -o remount,bind,rw /tmp/osp && echo D_REMOUNT_RW_OK || echo D_REMOUNT_RW_FAIL;
-               rm -rf /tmp/osp2; mkdir -p /tmp/osp2;
-               mount --rbind -o rw,0755 --make-rprivate /tmp/orig /tmp/osp2 && echo D_FRESHRW_BIND_OK || echo D_FRESHRW_BIND_FAIL"'
+            "${BIB}" -c '
+            mkdir -p /tmp/orig /tmp/sb-in &&
+            mount --rbind -o ro,0755 --make-rprivate /var/lib/containers/storage /tmp/orig &&
+            mount --rbind -o ro /tmp/orig /tmp/sb-in &&
+            command -v bwrap &&
+            bwrap --chdir / --die-with-parent --new-session \
+                  --unshare-ipc --unshare-pid --unshare-net \
+                  --bind /tmp/orig /var/lib/containers/storage \
+                  --proc /proc --dev /dev \
+                  sh -c "
+                    mkdir -p /run/osbuild/containers/storage;
+                    mount --rbind -o rw,0755 --make-rprivate /var/lib/containers/storage /run/osbuild/containers/storage && echo F_RBIND_RW_OK || echo F_RBIND_RW_FAIL;
+                    mount -o remount,bind,rw /run/osbuild/containers/storage && echo F_REMOUNT_RW_OK || echo F_REMOUNT_RW_FAIL
+                  " || echo F_BWRAP_FAIL"
 
-          echo "== PROBE E: same, no unshare (mount ns only) =="
+          echo "== PROBE G: same but store bound RW in the sandbox (no ro input) =="
           sudo podman run --rm --privileged --security-opt apparmor=unconfined \
             --entrypoint /bin/sh \
             -v "$(pwd)/run-store:/var/lib/containers/storage:rshared" \
-            "${BIB}" -c \
-            'mkdir -p /tmp/orig && mount --rbind -o ro,0755 --make-rprivate /var/lib/containers/storage /tmp/orig &&
-             unshare -m sh -c "mkdir -p /tmp/osp &&
-               mount --rbind -o ro,0755 --make-rprivate /tmp/orig /tmp/osp && echo E_RO_BIND_OK || echo E_RO_BIND_FAIL;
-               mount -o remount,bind,rw /tmp/osp && echo E_REMOUNT_RW_OK || echo E_REMOUNT_RW_FAIL"'
+            "${BIB}" -c '
+            bwrap --chdir / --die-with-parent --new-session \
+                  --unshare-ipc --unshare-pid --unshare-net \
+                  --bind /var/lib/containers/storage /var/lib/containers/storage \
+                  --proc /proc --dev /dev \
+                  sh -c "
+                    mkdir -p /run/osbuild/containers/storage;
+                    mount --rbind -o rw,0755 --make-rprivate /var/lib/containers/storage /run/osbuild/containers/storage && echo G_RBIND_RW_OK || echo G_RBIND_RW_FAIL;
+                    mount -o remount,bind,rw /run/osbuild/containers/storage && echo G_REMOUNT_RW_OK || echo G_REMOUNT_RW_FAIL
+                  " || echo G_BWRAP_FAIL'
+
+          echo "== capabilities inside bwrap =="
+          sudo podman run --rm --privileged --security-opt apparmor=unconfined \
+            --entrypoint /bin/sh \
+            -v "$(pwd)/run-store:/var/lib/containers/storage:rshared" \
+            "${BIB}" -c '
+            bwrap --chdir / --new-session --unshare-ipc --unshare-pid --unshare-net \
+                  --proc /proc --dev /dev /bin/sh -c "grep -A1 Cap /proc/self/status | head -6; echo user-ns-limit=\$(cat /proc/sys/user/max_user_namespaces)"'
 
           echo "== kernel ring buffer =="
           sudo dmesg | tail -40 || true
