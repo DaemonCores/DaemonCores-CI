@@ -128,7 +128,13 @@ jobs:
           # lists: on a single-image tag it prints `manifests: null`).
           PAYLOAD_SIZE=$(sudo skopeo inspect --raw "docker://${PAYLOAD}" \
             | jq '[.layers[].size] | add // 0')
-          THRESHOLD=$((1800 * 1024 * 1024))  # 1.8 GiB
+          THRESHOLD=$((1073741824))  # 1.0 GiB
+          # Budget: GitHub release assets cap at 2 GiB (422 already_exists is
+          # its failure mode; the amd64 offline ISO hit it at 2.2G, run
+          # 41567748715). The ISO ≈ compressed payload + the uncompressed
+          # installer live env + squashfs/xorriso overhead (~2x the payload),
+          # so the payload must stay well under 2 GiB: 1.0 GiB leaves the
+          # margin.
 
           if [ "${PAYLOAD_SIZE}" -lt "${THRESHOLD}" ]; then
             echo "Payload ${PAYLOAD_SIZE} bytes < ${THRESHOLD} — offline ISO mode"
