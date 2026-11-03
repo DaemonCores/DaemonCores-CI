@@ -164,6 +164,7 @@ kernel_patch_list() {
         yq -r '
       '"${filter}"' | select(.stage == strenv(STAGE))
         | select(strenv(CLASS) == "-" or .class == strenv(CLASS))
+        | select(.exclude-series == null or ((.exclude-series) | any_c(. == strenv(SERIES)) | not))
         | . as $e | .name + " " +
           (.url | sub("{seriesdir}"; strenv(SDIR))
                   | sub("{series}"; strenv(SERIES))
@@ -289,6 +290,9 @@ kernel_flavour_kcflags() {
     x64v2) echo "-march=x86-64-v2" ;;
     x64v3) echo "-march=x86-64-v3" ;;
     x64v4) echo "-march=x86-64-v4" ;;
+    # arm64 flavours (coded, kernel-arm lane): baseline v8.0 = no flag.
+    armv8.2-lse) echo "-march=armv8.2-a+lse" ;;
+    armv9-sve2)  echo "-march=armv9-a+sve2" ;;
     *)     echo "" ;;
   esac
 }
