@@ -203,14 +203,16 @@ jobs:
           findmnt -no FSTYPE,SOURCE,OPTIONS -T /var/lib/containers/storage || true
           echo "== podman info (driver, graph root) =="
           sudo podman info --format '{{.Store.GraphDriverName}} {{.Store.GraphRoot}}' || true
-          # amd64-only osbuild EPERM (runs 41543534089, 41544677135,
-          # 41546441824, 41546867443: arm64 identical code mounts fine):
-          # the osbuild bwrap sandbox mounts from a user namespace and the
-          # ubuntu-24.04 amd64 runner kernel gates unprivileged user
-          # namespaces behind AppArmor, zero-capability userns -> mount
-          # EPERM. Lift the gate on the ephemeral runner VM.
-          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
-          sudo sysctl -w kernel.unprivileged_userns_clone=1
+          # amd64-only osbuild EPERM (runs 41543534089..41557034878; arm64
+          # mounts fine): the ubuntu-24.04 amd64 runner image loads an
+          # AppArmor "bwrap" profile (bwrap-userns-restrict / unpriv_bwrap)
+          # that denies CAP_SYS_ADMIN to the children of bubblewrap, so the
+          # osbuild buildroot sandbox cannot mount. Probes 41565044610:
+          # BEFORE_FAIL -> apparmor_parser -R -> AFTER_OK on the same kernel.
+          sudo apparmor_parser -R /etc/apparmor.d/unpriv_bwrap 2>/dev/null || true
+          for p in /etc/apparmor.d/*bwrap*; do
+            [ -e "$p" ] && sudo apparmor_parser -R "$p" || true
+          done
           echo "== mounts under the store =="
           cat /proc/self/mountinfo | grep containers/storage | head -5 || true
           # The manifest stage reads/pulls the payload refs from container
