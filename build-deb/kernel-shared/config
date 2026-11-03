@@ -561,30 +561,41 @@ CONFIG_USB_XHCI_HCD=y
 # USB EHCI: USB 2.0 host controller. Same rationale.
 CONFIG_USB_EHCI_HCD=y
 # =============================================================================
-# Graphics — physical GPU drivers as modules. The base config enables DRM as a
-# module; these load only when matching hardware is present, so a machine
-# without the
-# device pays nothing for them.
+# Graphics — physical GPU drivers as modules. GPU FINAL (owner 2026-11-03):
+# the fold is undone — the drivers are back to =m. A modules-only build CAN
+# add a module to an existing kernel (the reason the fold promoted them to =y
+# does not apply to drivers delivered as module packages anyway), and the
+# four GPU module sets (gpu-ia, gpu-gaming and their NVIDIA variants) rebuild
+# the profile build on top of the standard kernel. The base build itself keeps
+# them as =m so the live installer session and every consumer that merges no
+# further fragment still gets a loadable driver for the hardware it finds.
+# CONFIG_DRM_AMD_DC left out of the base: the display-core build is a PROFILE
+# choice (gpu-gaming builds it, gpu-ia does not), not a base value — the
+# kernel build's transverse gpu/amd.cfg fragment sets the kernel-level
+# default (DC on) while the overlay of each module set wins on top of it.
+# The device/arch folds (arm64 SoC platforms, USB/EHCI… built-ins) stay
+# untouched — ONLY this GPU block changed.
 # =============================================================================
 # Intel integrated and discrete GPUs (i915 for legacy and Xe-era, xe for newer).
-CONFIG_DRM_I915=y
-CONFIG_DRM_XE=y
+CONFIG_DRM_I915=m
+CONFIG_DRM_XE=m
 # AMD Radeon / Ryzen integrated GPUs, including the older Southern/Sea Islands
-# parts and the display core.
-CONFIG_DRM_AMDGPU=y
-CONFIG_DRM_AMDGPU_SI=y
-CONFIG_DRM_AMDGPU_CIK=y
-CONFIG_DRM_AMD_DC=y
+# parts. DC and its dependencies are NOT set here: profile-owned (the kernel-
+# level default comes from the transverse gpu fragments, the per-set module
+# overlays decide the shipped build).
+CONFIG_DRM_AMDGPU=m
+CONFIG_DRM_AMDGPU_SI=m
+CONFIG_DRM_AMDGPU_CIK=m
 # Legacy AMD/ATI Radeon.
-CONFIG_DRM_RADEON=y
+CONFIG_DRM_RADEON=m
 # NVIDIA GPUs through the in-tree nouveau driver.
-CONFIG_DRM_NOUVEAU=y
+CONFIG_DRM_NOUVEAU=m
 # Older and server adapters.
-CONFIG_DRM_GMA500=y
-CONFIG_DRM_MGAG200=y
-CONFIG_DRM_AST=y
-CONFIG_DRM_UDL=y
-CONFIG_DRM_VBOXVIDEO=y
+CONFIG_DRM_GMA500=m
+CONFIG_DRM_MGAG200=m
+CONFIG_DRM_AST=m
+CONFIG_DRM_UDL=m
+CONFIG_DRM_VBOXVIDEO=m
 # =============================================================================
 # Disable debug/testing modules that reference x86-specific kernel symbols
 # (e.g. __x86_return_thunk, hwpoison_filter_register) only resolvable from

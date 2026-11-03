@@ -82,8 +82,6 @@ def test_arch_overlays_folded_into_the_base_config() -> None:
     for section in ('# arm64 built-in', '# amd64 built-in'):
         assert section in cfg, section
     for promoted in (
-        'CONFIG_DRM_AMDGPU=y',
-        'CONFIG_DRM_I915=y',
         'CONFIG_E1000=y',
         'CONFIG_R8169=y',
         'CONFIG_DRM_VC4=y',
@@ -92,6 +90,8 @@ def test_arch_overlays_folded_into_the_base_config() -> None:
         '# CONFIG_HWPOISON_INJECT is not set',
     ):
         assert promoted in cfg, promoted
+
+
     # The device fragments are NOT engine data anymore: they moved back to the
     # debian-bootc lane (KERNEL FINAL v2). The page-size overlays stay here.
     assert not (SHARED_DATA / 'modules').exists()
@@ -107,6 +107,43 @@ def test_arch_overlays_folded_into_the_base_config() -> None:
             'rk3399', 'h616', 'imx8m', 'mt8183',
         ):
             assert (bootc_modules / device).is_file(), device
+
+
+def test_gpu_fold_undone_drivers_are_modules() -> None:
+    """GPU FINAL (owner 2026-11-03): the folded =y GPU drivers are back to
+    =m in the base config, and CONFIG_DRM_AMD_DC left the base — the
+    display-core build is a PROFILE choice of the four GPU module sets
+    (gpu-ia, gpu-gaming and their NVIDIA variants), not a base value.
+
+    The device/arch folds are untouched: the arm64 SoC built-ins, the
+    network/USB built-ins and the disables section keep their values.
+    """
+    cfg = (SHARED_DATA / 'config').read_text(encoding='utf-8')
+    for modular in (
+        'CONFIG_DRM_I915=m',
+        'CONFIG_DRM_XE=m',
+        'CONFIG_DRM_AMDGPU=m',
+        'CONFIG_DRM_AMDGPU_SI=m',
+        'CONFIG_DRM_AMDGPU_CIK=m',
+        'CONFIG_DRM_RADEON=m',
+        'CONFIG_DRM_NOUVEAU=m',
+        'CONFIG_DRM_GMA500=m',
+        'CONFIG_DRM_MGAG200=m',
+        'CONFIG_DRM_AST=m',
+        'CONFIG_DRM_UDL=m',
+        'CONFIG_DRM_VBOXVIDEO=m',
+    ):
+        assert modular in cfg, modular
+        assert modular.replace('=m', '=y') not in cfg, modular
+    for folded in (
+        'CONFIG_DRM_I915=y',
+        'CONFIG_DRM_AMDGPU=y',
+        'CONFIG_DRM_AMD_DC=y',
+    ):
+        assert folded not in cfg, folded
+    # The arm64 device fold of the same file keeps its built-ins.
+    for kept in ('CONFIG_DRM_VC4=y', 'CONFIG_DRM_ROCKCHIP=y'):
+        assert kept in cfg, kept
 
 
 def test_no_local_copy_in_consumer_repos() -> None:
