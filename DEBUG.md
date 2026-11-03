@@ -1149,3 +1149,4 @@ Terminal: debian-bootc Full Pipeline 41573076156 VERT 100% (2 Build ISO SUCCESS)
 - VE Full Pipeline 41576191794 SUCCESS (lue gh run view): Build images + Manifest latest verts, stage Build ISO ABSENT/skipped = garde `cat-file Containerfile.iso` (95e8cfb) prouvée en run réel. Preuve VE bootc chain complète.
 - Skip/cache live: run VE = wave1/wave2/wave3 skipped, wave1 debian-bootc = succès complet (cache debs réutilisé).
 - Rien poussé ce tick (tout déjà pushed, night goal 1+2 atteints). Prochaine file cron: vague-2 arbitre (re-preuves par row).
+DEBUG: tick 2026-11-03 06:1x - night goal closed: VE Full Pipeline 41576191794 SUCCESS (Build ISO absent by garde 95e8cfb), debian-bootc Full Pipeline 41573076156 SUCCESS (P-757), Lint green both repos (bootc 41543343602, VE 41543630517); vague-2 next step = L14 proof run (skipped-unchanged needs an unchanged re-run).
