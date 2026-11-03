@@ -940,3 +940,34 @@ def test_workflow_keeps_every_input() -> None:
     # per variant, enforcement decided at install.
     assert 'nosign_images' not in inputs
 
+
+
+@needs_jq
+def test_the_thin_twin_is_derived_with_the_owner_tags(sb: Sandbox) -> None:
+    """A thin twin (twin_suffix without a dash) is a wave-2 derived layer.
+
+    Owner GO, 2026-11-03 12:50: it keeps the SAME kernel (no second kernel
+    build), builds on the tested parent and carries the owner's twin tags:
+    the per-arch ref is <primary>_<arch>-<twin>, the manifest list is
+    <primary>-<twin>.
+    """
+    (sb.root / 'Containerfile.thpalways').write_text(ISO_CF)
+    done = sb.run([entry('latest'),
+                   entry('latest', 'Containerfile.thpalways',
+                         twin='thpalways')])
+    assert done.returncode == 0, done.stderr
+    states = sb.states()
+    assert states['latest-thpalways'] == 'ok'
+    builds = [b for b in sb.calls('podman build')
+              if 'Containerfile.thpalways' in b]
+    assert len(builds) == 1
+    assert f'--build-arg BASE_IMAGE={IMAGE}:latest_amd64' in builds[0]
+    assert '--pull=never' in builds[0]
+    tests = [c.split()[1:4]
+             for c in sb.calls('image-test')
+             if c.startswith('image-test test') and 'thpalways' in c]
+    assert tests == [['test', f'{IMAGE}:latest_amd64-thpalways', '15']]
+    # The boot test of the twin comes after the boot test of its parent.
+    log = sb.log.read_text()
+    assert log.index('image-test test') < log.rindex(
+        f'{IMAGE}:latest_amd64-thpalways')

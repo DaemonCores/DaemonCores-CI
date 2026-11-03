@@ -103,7 +103,22 @@ tags_in_state() {
 }
 
 is_derived() { [[ "$(row_get "$1" "${col_parent}")" != "-" ]]; }
-ref_of() { echo "${IMAGE}:${1}_${ARCH}"; }
+
+# Registry ref of a row. A thin twin row (tag "<primary>-<ts>", ts without a
+# leading dash) carries the owner's twin spelling: <primary>_<arch>-<ts>
+# (suffix AFTER the arch). A kernel-suffix twin (ts starts with "-": the
+# legacy -16k-nosign lane) and every other row keep <tag>_<arch>.
+ref_of() {
+  local ts
+  if [[ "$(row_get "$1" "${col_kind}")" == "twin" ]]; then
+    ts=$(undash "$(row_get "$1" "${col_suffix}")")
+    if [[ -n "${ts}" && "${ts}" != -* ]]; then
+      echo "${IMAGE}:${1%-"${ts}"}_${ARCH}-${ts}"
+      return
+    fi
+  fi
+  echo "${IMAGE}:${1}_${ARCH}"
+}
 
 # The image the Containerfile starts from, when it is an image of this very
 # repository: its tag without the architecture suffix (empty otherwise).
@@ -149,9 +164,28 @@ init_state() {
   while IFS=$'\t' read -r file tag ks ts; do
     ks=$(undash "${ks}")
     ts=$(undash "${ts}")
-    if [[ -n "$(row_get "${tag}" 1)" ]]; then
+    local -i thin=0
+    # A thin twin (ts without a leading dash, owner GO 2026-11-03 12:50) IS
+    # the twin entry alone: its file is the thin Containerfile and no
+    # primary row comes from this entry (see below).
+    [[ -n "${ts}" && "${ts}" != -* ]] && thin=1
+    if ((thin)); then
+      if [[ -n "$(row_get "${tag}-${ts}" 1)" ]]; then
+        echo "::error::duplicate image tag in ENTRIES: ${tag}-${ts}" >&2
+        return 1
+      fi
+    elif [[ -n "$(row_get "${tag}" 1)" ]]; then
       echo "::error::duplicate image tag in ENTRIES: ${tag}" >&2
       return 1
+    fi
+    if ((thin)); then
+      # Thin twin (owner GO, 2026-11-03 12:50): the entry IS the twin — its
+      # file is the thin Containerfile, tagged <primary>-<ts> and built ON
+      # the primary image (derived, after the parent passed its tests): one
+      # thin layer, the SAME kernel — never a second kernel build.
+      printf '%s\t%s\t%s\ttwin\tno\t%s\t-\tpending\t-\n' \
+        "${tag}-${ts}" "${file}" "${ts}" "${tag}" >>"${STATE}"
+      continue
     fi
     # --no-cache applies to the first image of a Containerfile only: its
     # -4k sibling and the twin share the layers before the kernel.
@@ -165,8 +199,22 @@ init_state() {
       "${tag}" "${file}" "$(dash "${ks}")" "${nocache}" \
       "$(dash "${parent}")" >>"${STATE}"
     if [[ -n "${ts}" ]]; then
-      printf '%s\t%s\t%s\ttwin\tno\t-\t-\tpending\t-\n' \
-        "${tag}-nosign" "${file}" "${ts}" >>"${STATE}"
+      if [[ "${ts}" == -* ]]; then
+        # Kernel-suffix twin (the legacy lane: e.g. the -16k-nosign kernel
+        # variant): SAME Containerfile, wave 1, primary kernel build args.
+        # The entry still carries the primary image: create both rows.
+        printf '%s\t%s\t%s\ttwin\tno\t-\t-\tpending\t-\n' \
+          "${tag}-nosign" "${file}" "${ts}" >>"${STATE}"
+      else
+        # Thin twin (owner GO, 2026-11-03 12:50): the entry IS the twin —
+        # its file is the thin Containerfile, tagged <primary>-<ts> and
+        # built ON the primary image (derived, after the parent passed its
+        # tests): one thin layer, the SAME kernel — never a second kernel
+        # build. No primary row comes from this entry.
+        printf '%s\t%s\t%s\ttwin\tno\t%s\t-\tpending\t-\n' \
+          "${tag}-${ts}" "${file}" "${ts}" "${tag}" >>"${STATE}"
+        continue
+      fi
     fi
   done < <(printf '%s' "${ENTRIES}" | jq -r '.[]
     | [.file, .tag, (.kernel_suffix // ""), (.twin_suffix // "")]
@@ -405,7 +453,11 @@ build_image() {
   extra_ctx_args "${file}"
   # The twin carries the version stamp of its primary image.
   stamp_tag="${tag}"
-  if [[ "${kind}" == "twin" ]]; then stamp_tag="${tag%-nosign}"; fi
+  if [[ "$(row_get "${tag}" "${col_suffix}")" == -* && "${kind}" == "twin" ]]; then
+    stamp_tag="${tag%-nosign}"
+  elif [[ "${kind}" == "twin" ]]; then
+    stamp_tag="${tag%-"$(undash "$(row_get "${tag}" "${col_suffix}")")"}"
+  fi
   apt_build_args
   run_build "${log}" \
     "${flags[@]}" \

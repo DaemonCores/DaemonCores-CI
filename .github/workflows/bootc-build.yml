@@ -82,6 +82,21 @@ jobs:
               global_inputs+="${name} $(sha256sum "$name" | cut -d' ' -f1)"$'\n'
               continue
             fi
+            # A Containerfile with `LABEL org.daemoncores.twin=<primary>` builds
+            # a THIN TWIN of that primary image (owner GO, 2026-11-03 12:50:
+            # both OCI tags published): it is NOT its own image — it is added
+            # to the matrix as the primary's twin row (same file, one thin
+            # derived layer, no second kernel build), so the per-arch tags are
+            # `<primary>_<arch>-<suffix>` and the manifest list is
+            # `<primary>-<suffix>`). This is the tag-mirror of the -4k
+            # mechanism below: discover only re-targets the twin file to its
+            # primary.
+            twin_ts=""
+            twin_primary=$(sed -nE 's/^[[:space:]]*LABEL[[:space:]]+org\.daemoncores\.twin="?([a-z0-9._-]+)"?.*/\1/p' "$name" \
+              | head -n1)
+            if [[ -n "${twin_primary}" ]]; then
+              twin_ts="${name#Containerfile.}"
+            fi
             if [[ "$name" == "Containerfile" ]]; then
               tag="latest"
             else
@@ -92,6 +107,21 @@ jobs:
             has_4k=false
             if grep -qE '^[[:space:]]*LABEL[[:space:]]+org\.daemoncores\.arm64-4k-image' "$name"; then
               has_4k=true
+            fi
+            if [[ -n "${twin_ts}" ]]; then
+              # Twin of the primary: ONE thin per-arch image entry, no manifest
+              # on its own file — the manifest list is the primary-minus-twin
+              # name below. The twin is built (wave 2, derived) after its
+              # parent passed its boot tests.
+              matrix=$(printf '%s' "$matrix" | jq -c \
+                --arg file "$name" --arg tag "${twin_primary}" --arg ts "${twin_ts}" \
+                '. += [{file: $file, tag: $tag, arch: "amd64", kernel_suffix: "", twin_suffix: $ts}]')
+              manifest_matrix=$(printf '%s' "$manifest_matrix" | jq -c \
+                --arg tag "${twin_primary}-${twin_ts}" --arg p "${twin_primary}" --arg t "${twin_ts}" \
+                --argjson arches '["amd64"]' \
+                '. += [{tag: $tag, arches: $arches, primary: $p, twin: $t}]')
+              global_inputs+="${name} $(sha256sum "$name" | cut -d' ' -f1)"$'\n'
+              continue
             fi
             # ONE kernel image per variant: module-signature enforcement is an
             # install-time bootc-installer choice (module.sig_enforce=1 karg),
@@ -309,6 +339,8 @@ jobs:
         env:
           CF_TAG: ${{ matrix.entry.tag }}
           ARCHES: ${{ join(matrix.entry.arches, ' ') }}
+          TWIN: ${{ matrix.entry.twin || '' }}
+          PRIMARY: ${{ matrix.entry.primary || '' }}
           IMAGE: ghcr.io/${{ github.repository }}
         run: |
           set -euo pipefail
@@ -322,13 +354,18 @@ jobs:
           list="${IMAGE}:${CF_TAG}"
           refs=()
           for arch in "${arches[@]}"; do
-            refs+=("${IMAGE}:${CF_TAG}_${arch}")
+            if [ -n "${TWIN}" ]; then
+              # Thin twin (owner GO 2026-11-03 12:50): the per-arch tags keep
+              # the owner spelling <primary>_<arch>-<twin>.
+              refs+=("${IMAGE}:${PRIMARY}_${arch}-${TWIN}")
+            else
+              refs+=("${IMAGE}:${CF_TAG}_${arch}")
+            fi
           done
           docker manifest create "${list}" "${refs[@]}"
           for arch in "${arches[@]}"; do
             if [ "${arch}" = "arm64" ]; then
-              docker manifest annotate --arch arm64 "${list}" \
-                "${IMAGE}:${CF_TAG}_arm64"
+              docker manifest annotate --arch arm64 "${list}" "${refs[1]}"
             fi
           done
           docker manifest push "${list}"
