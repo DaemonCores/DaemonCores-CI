@@ -40,12 +40,10 @@ def test_helper_shell_syntax():
 
 
 def test_patch_list_from_native_manifest():
-    """The debian-bootc native `patches:` entries (packages.yml): class
-    filtering works; since the patch-parity arbitration (owner
-    2026-11-03 12:30) the kernel-class anchor holds ONLY the debian-lane
-    module entries (the shared XanMod set lives in
-    build-deb/kernel-shared/patches-shared.yml — the engine checkout,
-    exported as CI_KERNEL_SHARED)."""
+    """The engine manifest drives the class filtering; the bootc packages.yml
+    carries NO native patch data (owner arbitration 2026-11-03: production
+    packages.yaml list no `patches:` — the canonical set lives in
+    build-deb/kernel-shared/patches-shared.yml, exported as CI_KERNEL_SHARED)."""
     import json
 
     import yaml
@@ -56,21 +54,31 @@ def test_patch_list_from_native_manifest():
     )
     if not manifest.is_file():
         return
-    entry = yaml.safe_load(manifest.read_text())["packages"]
-    entry = [p for p in entry if p["name"] == "linux-image"][0]
-    patches = json.dumps(entry["patches"])
+    assert not [
+        p for p in yaml.safe_load(manifest.read_text())["packages"]
+        if p["name"] == "linux-image" and "patches" in p
+    ]
+    patches = json.dumps(
+        yaml.safe_load(VE_MANIFEST.read_text())["patches"])
     r = run_helper(
         'kernel_patch_list - amd64 6.12.107 kernel', PATCHES_JSON=patches
     )
     assert r.returncode == 0, r.stderr
-    # The shared set moved to the canonical kernel/patches-shared.yml: the
-    # debian-lane kernel-class set is EMPTY on amd64 (no in-repo anchor).
+    # The amd64 kernel class of the shared set is EMPTY (the module carrier
+    # rides on the arm64 tree only).
     assert r.stdout.strip() == ""
     r = run_helper(
         'kernel_patch_list - arm64 6.12.107 module', PATCHES_JSON=patches
     )
     assert r.returncode == 0, r.stderr
-    assert r.stdout.strip().startswith("rocknix-btrtl-rtl8733bu ")
+    # arm64 module class: the RTL8733BU carrier when the manifest carries it
+    # (owner arbitration 2026-11-03 13:05 moved it lane-side).
+    carrier = any(p.get("name") == "rocknix-btrtl-rtl8733bu"
+                  for p in yaml.safe_load(VE_MANIFEST.read_text())["patches"])
+    if carrier:
+        assert r.stdout.strip().startswith("rocknix-btrtl-rtl8733bu ")
+    else:
+        assert r.stdout.strip() == ""
 
 
 def test_patch_list_from_file_ve():
@@ -98,14 +106,18 @@ def test_patch_list_from_native_patches_json():
         "kernel_patch_list - amd64 7.0.14 | wc -l", PATCHES_JSON=patches
     )
     assert r.returncode == 0, r.stderr
-    # One line per patch entry the series actually carries: an entry whose
-    # exclude-series lists the resolved series (7.0 here) is dropped by the
-    # helper (e.g. bore, which CachyOS does not publish for 7.0).
+    # One line per patch entry the amd64 series actually carries: an entry
+    # whose exclude-series lists the resolved series (7.0 here) is dropped by
+    # the helper (e.g. bore, which CachyOS does not publish for 7.0), and an
+    # entry staged arm64 does not ride a common/amd64 filter (e.g. the
+    # RTL8733BU module carrier).
     import json as _json
 
     entries = _json.loads(patches)
     expected = sum(
-        1 for p in entries if "7.0" not in (p.get("exclude-series") or [])
+        1 for p in entries
+        if "7.0" not in (p.get("exclude-series") or [])
+        and p.get("stage", "common") in ("common", "amd64")
     )
     assert int(r.stdout.strip()) == expected
 
