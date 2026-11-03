@@ -203,6 +203,14 @@ jobs:
           findmnt -no FSTYPE,SOURCE,OPTIONS -T /var/lib/containers/storage || true
           echo "== podman info (driver, graph root) =="
           sudo podman info --format '{{.Store.GraphDriverName}} {{.Store.GraphRoot}}' || true
+          # amd64-only osbuild EPERM (runs 41543534089, 41544677135,
+          # 41546441824, 41546867443: arm64 identical code mounts fine):
+          # the osbuild bwrap sandbox mounts from a user namespace and the
+          # ubuntu-24.04 amd64 runner kernel gates unprivileged user
+          # namespaces behind AppArmor, zero-capability userns -> mount
+          # EPERM. Lift the gate on the ephemeral runner VM.
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          sudo sysctl -w kernel.unprivileged_userns_clone=1
           echo "== mounts under the store =="
           cat /proc/self/mountinfo | grep containers/storage | head -5 || true
           # The manifest stage reads/pulls the payload refs from container

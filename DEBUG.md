@@ -1060,3 +1060,31 @@ Gap: RSS cannot attribute the ~100 MiB of kernel-side memory. Harness now also d
 - hadolint Containerfile.bib DL3022 posé (bootc, bibliothèque de citations) → bootc Lint 41543343602 SUCCESS; hadolint ignores DL3007/DL4006 posés sur Containerfile.base VE → VE Lint 41543630517 SUCCESS (tête 2a222c2).
 - Preuve locale permanente: make test DaemonCores-CI 256 passed (x2).
 - En vol: VE Full Pipeline 41542099345 (push 2a222c2) — exercera la consommation du build-arg dérivé (G1) à l'étape image.
+
+## Tick 2026-11-02T23:59+01:00 — P-757 ISO lane: arm64 vert x4, amd64 = mount denial runner
+- Run 41545038779: fix refs-dans-run-store (fcaf802) mais runroot > 50 chars
+  (short /run/iso-rr, 6a?) ; Run 41546441824: cause prouvee = database
+  configuration mismatch (libpod static dir run-store/libpod vs
+  /var/lib/containers/storage/libpod) -> pull par le podman DU builder dans
+  un container lie au run-store (commit iso-builder).
+- Run 41546441824 arm64 = SUCCESS, amd64 = osbuild mount EPERM
+  (RuntimeError: mount /run/osbuild/containers/storage permission denied,
+  container-deploy). Run 41546867443: arm64 SUCCESS (4e fois), amd64 idem
+  malgre :rshared (commit iso-builder).
+- Prochaines levieres amd64 pour le tick suivant: lire le code osbuild
+  container-deploy (source du mount, flags) et le chemin reel du mount source
+  dans le bib; envisager label=disabled / securityopt ou un patch osbuild
+  (copier au lieu de monter) cote image bib. La chaine auth/store/refs est
+  PROUVEE bonne jusqu'au stage osbuild.
+
+## Tick 2026-11-03T00:15+01:00 — P-757 amd64 ISO: cause racine runner userns, fix sysctl
+- Run 41546867443 relu en entier: arm64 Build ISO SUCCESS (5e preuve du chemin
+  bib), amd64 = mount /run/osbuild/containers/storage: permission denied dans
+  le sandbox osbuild (containers_storage_source: remount RW recursif du store,
+  osbuild/util/containers.py:131/136).
+- Cause racine (pattern documenté GitHub/24.04): le runner amd64 ubuntu-24.04
+  gagne les userns non-privilégiés derrière AppArmor (zero-capability userns ->
+  mount EPERM depuis bwrap); le runner arm64 ne les restreint pas -> arm64
+  vert avec le même code. La preuve locale rootful passait pour la même raison.
+- Fix posé: iso-builder.yml, `sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0`
+  posé après le proof env, avant les runs podman du builder.
