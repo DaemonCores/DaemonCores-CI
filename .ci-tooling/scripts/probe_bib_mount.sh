@@ -13,7 +13,7 @@ mkdir -p run-store/overlay
 echo "== PROBE F: bwrap sandbox, store bound RO, shipped sequence =="
 sudo podman run --rm --privileged --security-opt apparmor=unconfined \
     -v "$(pwd)/run-store:/var/lib/containers/storage:rshared" \
-    "$BIB" /bin/sh -s <<'EOF_BIB'
+    --entrypoint /bin/sh "$BIB" -s <<'EOF_BIB'
 mkdir -p /tmp/orig /tmp/sb-in &&
 mount --rbind -o ro,0755 --make-rprivate /var/lib/containers/storage /tmp/orig &&
 bwrap --chdir / --die-with-parent --new-session \
@@ -30,7 +30,7 @@ EOF_BIB
 echo "== PROBE G: bwrap sandbox, store bound RW =="
 sudo podman run --rm --privileged --security-opt apparmor=unconfined \
     -v "$(pwd)/run-store:/var/lib/containers/storage:rshared" \
-    "$BIB" /bin/sh -s <<'EOF_BIB'
+    --entrypoint /bin/sh "$BIB" -s <<'EOF_BIB'
 bwrap --chdir / --die-with-parent --new-session \
       --unshare-ipc --unshare-pid --unshare-net \
       --bind /var/lib/containers/storage /var/lib/containers/storage \
@@ -45,7 +45,7 @@ EOF_BIB
 echo "== caps inside bwrap =="
 sudo podman run --rm --privileged --security-opt apparmor=unconfined \
     -v "$(pwd)/run-store:/var/lib/containers/storage:rshared" \
-    "$BIB" /bin/sh -s <<'EOF_BIB'
+    --entrypoint /bin/sh "$BIB" -s <<'EOF_BIB'
 bwrap --chdir / --new-session --unshare-ipc --unshare-pid --unshare-net \
       --proc /proc --dev /dev \
       /bin/sh -c 'grep -A1 Cap /proc/self/status | head -6; echo user-ns-limit=$(cat /proc/sys/user/max_user_namespaces)'
