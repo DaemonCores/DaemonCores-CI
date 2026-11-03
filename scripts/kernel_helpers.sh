@@ -10,8 +10,9 @@
 # class/topic) entries, fetched from their official upstream at build time
 # and applied in file order. The helpers accept the set from TWO shapes,
 # same data:
-#   - a patches.yml FILE (e.g. the VE kernel-pve manifest): passed as
-#     the manifest path argument;
+#   - a patches.yml FILE (reference mode: e.g. the canonical
+#     debian-bootc kernel-pve/patches.yml, consumed by the VE build by
+#     pinned commit + sha256): passed as the manifest path argument;
 #   - a NATIVE entry key: packages.yml may carry `patches:` (identical
 #     structure, copy-pasted verbatim); build-deb exports it as compact
 #     JSON in PATCHES_JSON and a "-" manifest argument selects it.
@@ -126,7 +127,7 @@ kernel_fetch_source() {
 # FILE (manifest argument) or the native PATCHES_JSON entry data ("-" as
 # the manifest argument; an array whose items share the file schema).
 # class filters the debian-bootc manifests (.class field); pass an empty
-# class for the VE kernel-pve manifest (entries carry no class).
+# class for a shared manifest (entries carry no class).
 # Arguments:
 #   $1 - manifest path (patches.yml), or "-" for the PATCHES_JSON data
 #   $2 - architecture/stage filter (amd64 or arm64)

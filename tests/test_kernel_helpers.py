@@ -13,9 +13,12 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
 HELPER = REPO / "scripts" / "kernel_helpers.sh"
+# Reference mode (patch parity, owner 2026-11-03): the canonical shared
+# manifest lives in debian-bootc; the VE build consumes it by pinned
+# commit + sha256 and defines no local patch data.
 VE_MANIFEST = Path(__file__).resolve().parents[
     2
-] / "DaemonCores-VE" / "workflows" / "bootc-debs-builder" / "kernel-pve" / "patches.yml"
+] / "debian-bootc" / "workflows" / "bootc-debs-builder" / "kernel-pve" / "patches.yml"
 BOOTC_MANIFEST = Path(__file__).resolve().parents[
     2
 ] / "debian-bootc" / "workflows" / "bootc-debs-builder" / "kernel" / "patches.yml"
@@ -39,8 +42,9 @@ def test_helper_shell_syntax():
 
 def test_patch_list_from_native_manifest():
     """The debian-bootc native `patches:` entries (packages.yml): class
-    filtering works and no patches.yml file is needed anywhere (owner,
-    2026-11-03)."""
+    filtering works; since the patch-parity change the kernel-class anchor
+    holds ONLY the debian-lane module entries (the shared XanMod set lives
+    at kernel-pve/patches.yml — reference mode, owner 2026-11-03)."""
     import json
 
     import yaml
@@ -55,11 +59,17 @@ def test_patch_list_from_native_manifest():
     entry = [p for p in entry if p["name"] == "linux-image"][0]
     patches = json.dumps(entry["patches"])
     r = run_helper(
-        f'kernel_patch_list - amd64 6.12.107 kernel', PATCHES_JSON=patches
+        'kernel_patch_list - amd64 6.12.107 kernel', PATCHES_JSON=patches
     )
     assert r.returncode == 0, r.stderr
-    out = r.stdout.strip()
-    assert out and out.splitlines()[0].startswith("bore ")
+    # The shared set moved to the canonical kernel-pve/patches.yml: the
+    # debian-lane kernel-class set is EMPTY on amd64 (no in-repo anchor).
+    assert r.stdout.strip() == ""
+    r = run_helper(
+        'kernel_patch_list - arm64 6.12.107 module', PATCHES_JSON=patches
+    )
+    assert r.returncode == 0, r.stderr
+    assert r.stdout.strip().startswith("rocknix-btrtl-rtl8733bu ")
 
 
 def test_patch_list_from_file_ve():
