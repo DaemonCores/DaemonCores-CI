@@ -11,7 +11,7 @@
 # and applied in file order. The helpers accept the set from TWO shapes,
 # same data:
 #   - a patches.yml FILE (reference mode: e.g. the canonical
-#     debian-bootc kernel-pve/patches.yml, consumed by the VE build by
+#     debian-bootc kernel/patches-shared.yml, consumed by the VE build by
 #     pinned commit + sha256): passed as the manifest path argument;
 #   - a NATIVE entry key: packages.yml may carry `patches:` (identical
 #     structure, copy-pasted verbatim); build-deb exports it as compact
@@ -370,7 +370,7 @@ kernel_pve_clone_packaging() {
 # the seed .config is the Ubuntu mirror tree config plus the PVE packaging
 # deltas (the same scripts/config pass debian/rules runs).
 # Globals:
-#   KERNEL_DATA_DIR: set before the call, the repo's kernel-pve data dir
+#   KERNEL_DATA_DIR: set before the call, the repo's shared kernel data dir
 #   KERNEL_VERSION: read, resolved from the Proxmox repo when empty
 #   PVE_SEED_CONFIG: set, the seed config path (empty when the tree has none)
 #   SRCDIR: set, the extracted kernel source tree

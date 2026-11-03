@@ -18,7 +18,7 @@ HELPER = REPO / "scripts" / "kernel_helpers.sh"
 # commit + sha256 and defines no local patch data.
 VE_MANIFEST = Path(__file__).resolve().parents[
     2
-] / "debian-bootc" / "workflows" / "bootc-debs-builder" / "kernel-pve" / "patches.yml"
+] / "debian-bootc" / "workflows" / "bootc-debs-builder" / "kernel" / "patches-shared.yml"
 BOOTC_MANIFEST = Path(__file__).resolve().parents[
     2
 ] / "debian-bootc" / "workflows" / "bootc-debs-builder" / "kernel" / "patches.yml"
@@ -44,7 +44,7 @@ def test_patch_list_from_native_manifest():
     """The debian-bootc native `patches:` entries (packages.yml): class
     filtering works; since the patch-parity change the kernel-class anchor
     holds ONLY the debian-lane module entries (the shared XanMod set lives
-    at kernel-pve/patches.yml — reference mode, owner 2026-11-03)."""
+    at kernel/patches-shared.yml — reference mode, owner 2026-11-03)."""
     import json
 
     import yaml
@@ -62,7 +62,7 @@ def test_patch_list_from_native_manifest():
         'kernel_patch_list - amd64 6.12.107 kernel', PATCHES_JSON=patches
     )
     assert r.returncode == 0, r.stderr
-    # The shared set moved to the canonical kernel-pve/patches.yml: the
+    # The shared set moved to the canonical kernel/patches-shared.yml: the
     # debian-lane kernel-class set is EMPTY on amd64 (no in-repo anchor).
     assert r.stdout.strip() == ""
     r = run_helper(
@@ -73,7 +73,7 @@ def test_patch_list_from_native_manifest():
 
 
 def test_patch_list_from_file_ve():
-    """The VE kernel-pve manifest resolves {seriesdir} (7.0.x → eol/)."""
+    """The VE kernel manifest resolves {seriesdir} (7.0.x → eol/)."""
     if not VE_MANIFEST.exists():
         return
     r = run_helper(f'kernel_patch_list "{VE_MANIFEST}" amd64 7.0.14')
