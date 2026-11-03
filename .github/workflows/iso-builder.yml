@@ -267,7 +267,38 @@ jobs:
           # Re-implant ISO MD5 for media verification
           implantisomd5 "${ISO}" || true
 
-      # ─── RENAME AND CHECKSUM ─────────────────────────────────────────────
+      # Reproduce the osbuild mount on failure (amd64 EPERM, runs
+      # 41543534089..41551945087): the exact rbind of the builder store from
+      # a user/mount namespace, plus the kernel verdicts, so the next fix is
+      # a proof, not a guess.
+      - name: Diagnose the osbuild mount failure
+        if: failure()
+        run: |
+          set -uo pipefail
+          echo "== runner kernel =="
+          uname -r
+          echo "== apparmor state =="
+          cat /sys/module/apparmor/parameters/enabled 2>/dev/null || true
+          sysctl kernel.apparmor_restrict_unprivileged_userns || true
+          echo "== bwrap present? =="
+          command -v bwrap || true
+          echo "== PROBE: rbind of the store in the bib image, plain =="
+          BIB="${GITHUB_REPOSITORY,,}:bib_${{ matrix.arch }}"
+          sudo podman run --rm --privileged --security-opt apparmor=unconfined \
+            -v "$(pwd)/run-store:/var/lib/containers/storage:rshared" \
+            "${BIB}" sh -c \
+            'mkdir -p /run/osp && mount --rbind /var/lib/containers/storage /run/osp -o ro,0755 && echo PLAIN_BIND_OK || echo PLAIN_BIND_FAIL'
+          echo "== PROBE: same from a user+mount namespace (bwrap-like, as root) =="
+          sudo podman run --rm --privileged --security-opt apparmor=unconfined \
+            -v "$(pwd)/run-store:/var/lib/containers/storage:rshared" \
+            "${BIB}" sh -c \
+            'unshare -Urm sh -c "mkdir -p /run/osp && mount --rbind /var/lib/containers/storage /run/osp -o ro,0755 && echo UNSHARE_BIND_OK || echo UNSHARE_BIND_FAIL"'
+          echo "== kernel ring buffer =="
+          sudo dmesg | tail -60 || true
+          echo "== audit log (AppArmor denials) =="
+          sudo journalctl -k 2>/dev/null | grep -iE "apparmor|audit" | tail -30 || true
+
+      # ─── RENAME AND CHECKSUM ──────────────────────────────────────────────
 
       - name: Rename ISO and compute checksum
         run: |
