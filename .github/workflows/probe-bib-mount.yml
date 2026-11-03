@@ -25,5 +25,4 @@ jobs:
 
       - name: Run the mount probes
         run: |
-          sudo -n .ci-tooling/scripts/probe_bib_mount.sh "" "${{ matrix.arch }}" 2>/dev/null \
-            || .ci-tooling/scripts/probe_bib_mount.sh "" "${{ matrix.arch }}"
+          sh .ci-tooling/scripts/probe_bib_mount.sh "" "${{ matrix.arch }}"
