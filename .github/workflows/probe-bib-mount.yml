@@ -2,75 +2,28 @@ name: probe-mount
 on:
   workflow_dispatch:
 
-# Probe 3 for the amd64-only osbuild mount EPERM (P-757). Run 1: plain
-# rbind RW and unshare -Urm rbind both OK -> not an AppArmor userns issue.
-# Run 2 (41559933932): WITHOUT userns the remount RW of a read-only bind is
-# OK; FROM a user namespace it is denied by kernel 7.0-azure. osbuild 193
-# bwrap does NOT unshare-user, so reproduce the exact buildroot sandbox
-# (ipc+pid+net only, caps retained) and the shipped sequence rbind-RW +
-# remount-RW inside it, on the read-only bound store.
+# Probe for the amd64-only osbuild mount EPERM (P-757). The scenario matrix
+# lives in .ci-tooling/scripts/probe_bib_mount.sh (avoids shell quoting in
+# the workflow itself).
 permissions:
   contents: read
 
 jobs:
   probe:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.arch == 'arm64' && 'ubuntu-24.04-arm' || 'ubuntu-latest' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [amd64, arm64]
     steps:
+      - uses: actions/checkout@v7
+
       - name: Install podman
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends podman
 
-      - name: Probe the exact bwrap sandbox mount sequence
+      - name: Run the mount probes
         run: |
-          set -uo pipefail
-          echo "== kernel =="
-          uname -r
-          mkdir -p run-store/overlay
-          sudo podman pull ghcr.io/daemoncores/debian-bootc:bib_amd64 >/dev/null 2>&1 || true
-          BIB=ghcr.io/daemoncores/debian-bootc:bib_amd64
-
-          echo "== PROBE F: osbuild-193 bwrap sandbox, store bound RO, shipped mount sequence =="
-          sudo podman run --rm --privileged --security-opt apparmor=unconfined \
-            --entrypoint /bin/sh \
-            -v "$(pwd)/run-store:/var/lib/containers/storage:rshared" \
-            "${BIB}" -c '
-            mkdir -p /tmp/orig /tmp/sb-in &&
-            mount --rbind -o ro,0755 --make-rprivate /var/lib/containers/storage /tmp/orig &&
-            mount --rbind -o ro /tmp/orig /tmp/sb-in &&
-            command -v bwrap &&
-            bwrap --chdir / --die-with-parent --new-session \
-                  --unshare-ipc --unshare-pid --unshare-net \
-                  --bind /tmp/orig /var/lib/containers/storage \
-                  --proc /proc --dev /dev \
-                  sh -c "
-                    mkdir -p /run/osbuild/containers/storage;
-                    mount --rbind -o rw,0755 --make-rprivate /var/lib/containers/storage /run/osbuild/containers/storage && echo F_RBIND_RW_OK || echo F_RBIND_RW_FAIL;
-                    mount -o remount,bind,rw /run/osbuild/containers/storage && echo F_REMOUNT_RW_OK || echo F_REMOUNT_RW_FAIL
-                  " || echo F_BWRAP_FAIL"
-
-          echo "== PROBE G: same but store bound RW in the sandbox (no ro input) =="
-          sudo podman run --rm --privileged --security-opt apparmor=unconfined \
-            --entrypoint /bin/sh \
-            -v "$(pwd)/run-store:/var/lib/containers/storage:rshared" \
-            "${BIB}" -c '
-            bwrap --chdir / --die-with-parent --new-session \
-                  --unshare-ipc --unshare-pid --unshare-net \
-                  --bind /var/lib/containers/storage /var/lib/containers/storage \
-                  --proc /proc --dev /dev \
-                  sh -c "
-                    mkdir -p /run/osbuild/containers/storage;
-                    mount --rbind -o rw,0755 --make-rprivate /var/lib/containers/storage /run/osbuild/containers/storage && echo G_RBIND_RW_OK || echo G_RBIND_RW_FAIL;
-                    mount -o remount,bind,rw /run/osbuild/containers/storage && echo G_REMOUNT_RW_OK || echo G_REMOUNT_RW_FAIL
-                  " || echo G_BWRAP_FAIL'
-
-          echo "== capabilities inside bwrap =="
-          sudo podman run --rm --privileged --security-opt apparmor=unconfined \
-            --entrypoint /bin/sh \
-            -v "$(pwd)/run-store:/var/lib/containers/storage:rshared" \
-            "${BIB}" -c '
-            bwrap --chdir / --new-session --unshare-ipc --unshare-pid --unshare-net \
-                  --proc /proc --dev /dev /bin/sh -c "grep -A1 Cap /proc/self/status | head -6; echo user-ns-limit=\$(cat /proc/sys/user/max_user_namespaces)"'
-
-          echo "== kernel ring buffer =="
-          sudo dmesg | tail -40 || true
+          sudo -n .ci-tooling/scripts/probe_bib_mount.sh "" "${{ matrix.arch }}" 2>/dev/null \
+            || .ci-tooling/scripts/probe_bib_mount.sh "" "${{ matrix.arch }}"
