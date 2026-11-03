@@ -98,11 +98,16 @@ def test_patch_list_from_native_patches_json():
         "kernel_patch_list - amd64 7.0.14 | wc -l", PATCHES_JSON=patches
     )
     assert r.returncode == 0, r.stderr
-    # One line per patch entry: the count belongs to the VE manifest (edited
-    # by its own lane), the test pins the helper's semantics, not VE history.
+    # One line per patch entry the series actually carries: an entry whose
+    # exclude-series lists the resolved series (7.0 here) is dropped by the
+    # helper (e.g. bore, which CachyOS does not publish for 7.0).
     import json as _json
 
-    assert int(r.stdout.strip()) == len(_json.loads(patches))
+    entries = _json.loads(patches)
+    expected = sum(
+        1 for p in entries if "7.0" not in (p.get("exclude-series") or [])
+    )
+    assert int(r.stdout.strip()) == expected
 
 
 def test_patch_list_json_matches_file():

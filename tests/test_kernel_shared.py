@@ -51,6 +51,10 @@ def test_shared_data_files_present() -> None:
         "x64v1.cfg",
         "x64v2.cfg",
         "x64v3.cfg",
+        "x64v4.cfg",
+        "armv8.0.cfg",
+        "armv8.2-lse.cfg",
+        "armv9-sve2.cfg",
     ):
         assert (SHARED_DATA / "kconfig-shared" / name).is_file()
     for name in ("amd.cfg", "intel.cfg", "nvidia.cfg"):
@@ -80,6 +84,19 @@ def test_engine_exports_ci_kernel_shared() -> None:
     text = BUILD_DEB_SH.read_text(encoding="utf-8")
     assert 'export CI_KERNEL_SHARED' in text
     assert "kernel-shared" in text
+
+
+def test_bore_excluded_on_series_7_0() -> None:
+    """The bore sibling is series-gated: CachyOS carries no 7.0 dir and the
+    patch did not apply to the PVE 7.0.x tree (run 41628726241), so the entry
+    carries exclude-series ["7.0"] and the helper filter honours it."""
+    import yaml  # noqa: PLC0415 — local import keeps the module import light
+
+    doc = yaml.safe_load((SHARED_DATA / "patches-shared.yml").read_text())
+    bore = next(p for p in doc["patches"] if p["name"] == "bore")
+    assert bore["exclude-series"] == ["7.0"]
+    helper = (REPO / "scripts" / "kernel_helpers.sh").read_text()
+    assert "exclude-series" in helper
 
 
 def test_engine_exports_resolve() -> None:
