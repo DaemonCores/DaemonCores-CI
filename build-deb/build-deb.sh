@@ -81,6 +81,15 @@ run_build() {
   # Shared check scripts of DaemonCores-CI, for the build scripts to call.
   CI_SCRIPTS="$(cd "$(dirname "${BASH_SOURCE[0]}")/../scripts" && pwd)"
   export CI_SCRIPTS
+  # Shared kernel build data (the canonical patches manifest + kconfig
+  # fragments of both kernel lanes, owner arbitration 2026-11-03): exported
+  # to EVERY build like the helpers, so both consumers reference
+  # "${CI_KERNEL_SHARED}/patches-shared.yml" and
+  # "${CI_KERNEL_SHARED}/kconfig-shared/" without any cross-repository
+  # fetch. Its content feeds the hash under it (shared_hash in
+  # content-hash.sh), so a data change rebuilds.
+  CI_KERNEL_SHARED="$(cd "$(dirname "${BASH_SOURCE[0]}")/kernel-shared" && pwd)"
+  export CI_KERNEL_SHARED
   # Explicit failure propagation: when this function is evaluated in a context
   # where errexit is suppressed (a command substitution in an `if`/`||`), a
   # failing build must still return non-zero rather than falling through to the

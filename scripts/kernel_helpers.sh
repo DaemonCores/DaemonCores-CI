@@ -10,9 +10,10 @@
 # class/topic) entries, fetched from their official upstream at build time
 # and applied in file order. The helpers accept the set from TWO shapes,
 # same data:
-#   - a patches.yml FILE (reference mode: e.g. the canonical
-#     debian-bootc kernel/patches-shared.yml, consumed by the VE build by
-#     pinned commit + sha256): passed as the manifest path argument;
+#   - a patches.yml FILE (reference mode: e.g. the canonical shared
+#     build-deb/kernel-shared/patches-shared.yml of the build engine,
+#     exported as CI_KERNEL_SHARED and consumed by both lanes in file
+#     mode): passed as the manifest path argument;
 #   - a NATIVE entry key: packages.yml may carry `patches:` (identical
 #     structure, copy-pasted verbatim); build-deb exports it as compact
 #     JSON in PATCHES_JSON and a "-" manifest argument selects it.

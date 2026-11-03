@@ -13,15 +13,14 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
 HELPER = REPO / "scripts" / "kernel_helpers.sh"
-# Reference mode (patch parity, owner 2026-11-03): the canonical shared
-# manifest lives in debian-bootc; the VE build consumes it by pinned
-# commit + sha256 and defines no local patch data.
-VE_MANIFEST = Path(__file__).resolve().parents[
-    2
-] / "debian-bootc" / "workflows" / "bootc-debs-builder" / "kernel" / "patches-shared.yml"
-BOOTC_MANIFEST = Path(__file__).resolve().parents[
-    2
-] / "debian-bootc" / "workflows" / "bootc-debs-builder" / "kernel" / "patches.yml"
+# Reference mode (patch parity, owner arbitration 2026-11-03 12:30): the
+# canonical shared manifest lives in THIS repository, inside the build-deb
+# action; the engine exports it as CI_KERNEL_SHARED and both lanes consume
+# it from that checkout (no copy in any consumer repo).
+SHARED_DATA = Path(__file__).resolve().parents[
+    1
+] / "build-deb" / "kernel-shared"
+VE_MANIFEST = SHARED_DATA / "patches-shared.yml"
 
 ENV = {"KERNEL_CDN": "", "PATH": os.environ["PATH"], "HOME": os.environ["HOME"]}
 
@@ -42,9 +41,11 @@ def test_helper_shell_syntax():
 
 def test_patch_list_from_native_manifest():
     """The debian-bootc native `patches:` entries (packages.yml): class
-    filtering works; since the patch-parity change the kernel-class anchor
-    holds ONLY the debian-lane module entries (the shared XanMod set lives
-    at kernel/patches-shared.yml — reference mode, owner 2026-11-03)."""
+    filtering works; since the patch-parity arbitration (owner
+    2026-11-03 12:30) the kernel-class anchor holds ONLY the debian-lane
+    module entries (the shared XanMod set lives in
+    build-deb/kernel-shared/patches-shared.yml — the engine checkout,
+    exported as CI_KERNEL_SHARED)."""
     import json
 
     import yaml
