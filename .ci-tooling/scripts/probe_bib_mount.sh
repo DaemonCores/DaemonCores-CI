@@ -11,7 +11,7 @@ sudo podman pull "$BIB" >/dev/null 2>&1 || true
 mkdir -p run-store/overlay
 
 echo "== PROBE F: bwrap sandbox, store bound RO, shipped sequence =="
-sudo podman run --rm --privileged --security-opt apparmor=unconfined \
+sudo podman run -i --rm --privileged --security-opt apparmor=unconfined \
     -v "$(pwd)/run-store:/var/lib/containers/storage:rshared" \
     --entrypoint /bin/sh "$BIB" -s <<'EOF_BIB'
 mkdir -p /tmp/orig /tmp/sb-in &&
@@ -28,7 +28,7 @@ bwrap --chdir / --die-with-parent --new-session \
 EOF_BIB
 
 echo "== PROBE G: bwrap sandbox, store bound RW =="
-sudo podman run --rm --privileged --security-opt apparmor=unconfined \
+sudo podman run -i --rm --privileged --security-opt apparmor=unconfined \
     -v "$(pwd)/run-store:/var/lib/containers/storage:rshared" \
     --entrypoint /bin/sh "$BIB" -s <<'EOF_BIB'
 bwrap --chdir / --die-with-parent --new-session \
@@ -43,7 +43,7 @@ bwrap --chdir / --die-with-parent --new-session \
 EOF_BIB
 
 echo "== caps inside bwrap =="
-sudo podman run --rm --privileged --security-opt apparmor=unconfined \
+sudo podman run -i --rm --privileged --security-opt apparmor=unconfined \
     -v "$(pwd)/run-store:/var/lib/containers/storage:rshared" \
     --entrypoint /bin/sh "$BIB" -s <<'EOF_BIB'
 bwrap --chdir / --new-session --unshare-ipc --unshare-pid --unshare-net \
