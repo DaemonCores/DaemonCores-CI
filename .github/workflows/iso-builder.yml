@@ -128,13 +128,13 @@ jobs:
           # lists: on a single-image tag it prints `manifests: null`).
           PAYLOAD_SIZE=$(sudo skopeo inspect --raw "docker://${PAYLOAD}" \
             | jq '[.layers[].size] | add // 0')
-          THRESHOLD=$((1073741824))  # 1.0 GiB
-          # Budget: GitHub release assets cap at 2 GiB (422 already_exists is
-          # its failure mode; the amd64 offline ISO hit it at 2.2G, run
-          # 41567748715). The ISO ≈ compressed payload + the uncompressed
-          # installer live env + squashfs/xorriso overhead (~2x the payload),
-          # so the payload must stay well under 2 GiB: 1.0 GiB leaves the
-          # margin.
+          THRESHOLD=$((1800 * 1024 * 1024))  # 1.8 GiB
+          # Net-install exists only in the legacy rpm path: the container
+          # based bootc-installer REQUIRES --installer-payload-ref ("no
+          # installer payload bootc ref set", run 41569629969) so with the
+          # Debian/bib path the ISO is always offline. Oversized ISOs (> the
+          # 2 GiB GitHub release asset cap: 422, amd64 2.2G, run
+          # 41567748715) are handled by the upload step as split parts.
 
           if [ "${PAYLOAD_SIZE}" -lt "${THRESHOLD}" ]; then
             echo "Payload ${PAYLOAD_SIZE} bytes < ${THRESHOLD} — offline ISO mode"
@@ -346,8 +346,23 @@ jobs:
               gh api -X DELETE "repos/${{ github.repository }}/releases/assets/${ASSET_ID}" >/dev/null
             fi
           done
+          # GitHub release assets cap at 2 GiB (HTTP 422 above it: runs
+          # 41565502790, 41567748715 on the 2.2G amd64 offline ISO).
+          # Oversized ISOs are uploaded as split parts (ISO_PARTS, cat to
+          # rejoin); the sha256 always names the FULL iso.
+          SIZE=$(stat -c %s "${ISO_FINAL}")
+          CAP=2147483648
+          if [ "${SIZE}" -gt "${CAP}" ]; then
+            echo "ISO ${SIZE} bytes > ${CAP}: split upload"
+            rm -rf parts && mkdir parts
+            split --numeric-suffixes=0 --suffix-length=2 --bytes=1900MiB \
+              "${ISO_FINAL}" "parts/${ASSET_NAME}.part-"
+            ISO_ASSETS=$(echo "parts/${ASSET_NAME}.part-*" "${ISO_FINAL}.sha256")
+          else
+            rm -rf parts && mkdir parts
+            ISO_ASSETS=$(ls "${ISO_FINAL}" "${ISO_FINAL}.sha256")
+          fi
           gh release upload install-iso \
             --repo "${{ github.repository }}" \
-            "${ISO_FINAL}" \
-            "${ISO_FINAL}.sha256" \
+            ${ISO_ASSETS} \
             --clobber
