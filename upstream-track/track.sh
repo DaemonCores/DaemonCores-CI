@@ -27,13 +27,14 @@
 #       digests:                # env variable -> tarball name; the SHA-256
 #         KERNEL_SHA256: "linux-{version}.tar.xz"   # is read from sha256sums.asc
 #
-# `require-patches: kernel/patches.yml` on the entry (path relative to the
-# package manifest) restricts the choice to the newest stable or longterm
-# release whose series has every patch URL of that manifest upstream, so a
+# `require-patches` on the entry restricts the choice to the newest stable or
+# longterm release whose series has every patch URL of that entry upstream, so a
 # kernel that a patch source (CachyOS, ROCKNIX) has not caught up with is
-# skipped instead of built and failed. It never resolves a kernel older than the
-# highest one already published (debs-cache/hashes.json): the build then fails
-# and the last-good deb is kept, instead of a downgrade.
+# skipped instead of built and failed. The value is `native` (the entry's
+# `patches:` data — the canonical form, no patches.yml file in any repository)
+# or a patches.yml path relative to the package manifest. It never resolves a
+# kernel older than the highest one already published (debs-cache/hashes.json):
+# the build then fails and the last-good deb is kept, instead of a downgrade.
 #
 # {version} is the tag without its leading "v", {tag} is the tag as published.
 # The SHA-256 of each asset comes from the GitHub release API (`digest`), so the
@@ -86,12 +87,12 @@ fetch_kernel_release() {
 }
 
 #######################################
-# Succeed when every patch URL of a manifest exists for one kernel series.
+# Succeed when every patch URL (one per line) exists for one kernel series.
 # Arguments:
-#   $1 - patch manifest path
+#   $1 - url lines (one patch URL per line)
 #   $2 - kernel version, e.g. 7.2.11
 #######################################
-patches_available() {
+patch_urls_available() {
   local url series="${2%.*}"
   [[ "$2" == *.*.* ]] || series="$2"
   while IFS= read -r url; do
@@ -102,7 +103,30 @@ patches_available() {
       echo "patch not available for ${2}: ${url}" >&2
       return 1
     }
-  done < <(yq '.patches[].url' "$1")
+  done <<<"$1"
+}
+
+#######################################
+# URL lines of one entry's patch set (owner decision 2026-11-03): either the
+# native `patches:` entries of the manifest (require-patches: native) or the
+# URLs of a patches.yml manifest path relative to the package manifest (the
+# VE kernel-pve lane). Printed one per line.
+# Arguments:
+#   $1 - require-patches value
+#   $2 - package name
+#######################################
+patch_urls() {
+  if [[ "$1" == "native" ]]; then
+    yq ".packages[] | select(.name == \"$2\") | (.patches // [])[].url" "${MAN}"
+  else
+    local manifest
+    manifest="$(dirname "${SOURCE_MAN:-${MAN}}")/$1"
+    [[ -r "${manifest}" ]] || {
+      echo "patch manifest ${manifest} not found" >&2
+      return 1
+    }
+    yq '.patches[].url' "${manifest}"
+  fi
 }
 
 #######################################
@@ -164,9 +188,10 @@ kernel_digests() {
 
 #######################################
 # Print the releases.json entry to build, as JSON.  Without `require-patches`
-# on the entry it is the first release of the moniker.  With it (a patch
-# manifest path relative to the package manifest), it is the newest stable or
-# longterm release whose series has every patch of the manifest upstream, so a
+# on the entry it is the first release of the moniker.  With it (`native`, the
+# entry's `patches:` data, or a patches.yml path relative to the package
+# manifest), it is the newest stable or
+# longterm release whose series has every patch of the entry upstream, so a
 # mainline release that CachyOS or another patch source has not caught up with
 # yet is skipped instead of failing the build.
 # Arguments:
@@ -179,18 +204,19 @@ kernel_digests() {
 #   published), which is a legitimate "nothing to build"; 1 on any other error.
 #######################################
 select_kernel_release() {
-  local req manifest version floor entry
+  local req urls version floor entry
   req=$(yq ".packages[] | select(.name == \"$1\") | .track.\"$2\".\"require-patches\" // \"\"" \
     "${MAN}")
   if [[ -z "${req}" ]]; then
     fetch_kernel_release "$3"
     return
   fi
-  manifest="$(dirname "${SOURCE_MAN:-${MAN}}")/${req}"
-  [[ -r "${manifest}" ]] || {
-    echo "patch manifest ${manifest} not found" >&2
-    return 1
-  }
+  # {seriesdir}/{topic} placeholders of the manifest URLs resolve inside the
+  # builder (kernel_patch_list); the availability probe only needs {series}
+  # and {version}, so the raw URL list is what patch_urls prints either way
+  # (native `patches:` data or a patches.yml path).
+  local urls
+  urls=$(patch_urls "${req}" "$1") || return 1
   floor=$(published_kernel_floor "$1")
   while IFS= read -r version; do
     [[ -n "${version}" ]] || continue
@@ -201,7 +227,7 @@ select_kernel_release() {
       echo "kernel ${version} is older than the published ${floor}" >&2
       return 2
     fi
-    if patches_available "${manifest}" "${version}"; then
+    if patch_urls_available "${urls}" "${version}"; then
       entry=$(curl --retry 3 -fsSL "${KERNEL_ORG_URL:-https://www.kernel.org}/releases.json" \
         | V="${version}" yq -p=json -o=json \
           '[.releases[] | select(.version == strenv(V))] | .[0]')
@@ -215,7 +241,7 @@ select_kernel_release() {
   done < <(curl --retry 3 -fsSL "${KERNEL_ORG_URL:-https://www.kernel.org}/releases.json" \
     | yq -p=json '.releases[] | select(.moniker == "stable" or .moniker == "longterm")
       | .version' | sort -rV)
-  echo "no kernel release has every patch of ${manifest}" >&2
+  echo "no kernel release has every patch of the entry '$1' (require-patches: ${req})" >&2
   return 2
 }
 

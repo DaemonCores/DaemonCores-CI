@@ -69,14 +69,21 @@ kernel_prepare() {
   # standard DaemonCores-CI scripts/kernel_helpers.sh primitives — sourced
   # implicitly by deb_helpers.sh in the same bash, no import here.
   kernel_fetch_source "${BUILT_VER%%-*}"
-  # The modules build against the same patched tree as the image.
-  # Kernel-class patches are already in the image; module-class patches only
-  # exist in the tree the modules are built from.
+  # The modules build against the same patched tree as the image. The patch
+  # set is the NATIVE `patches:` data of the package entry, exported as
+  # PATCHES_JSON by the builder (canonical patches schema, owner decision
+  # 2026-11-03: no patches.yml file in any repository). The image already
+  # applied the kernel-class patches; module-class patches only exist in the
+  # tree the modules are built from.
+  [[ -n "${PATCHES_JSON:-}" ]] \
+    || {
+      echo "ERROR: no patch data (PATCHES_JSON) exported by the builder for this entry" >&2
+      exit 1
+    }
   local class
   for class in kernel module; do
     kernel_apply_patches \
-      "${SAVE_PWD}/workflows/bootc-debs-builder/kernel/patches.yml" \
-      "${DEB_ARCH}" "${BUILT_VER%%-*}" "${SRCDIR}" "${class}"
+      - "${DEB_ARCH}" "${BUILT_VER%%-*}" "${SRCDIR}" "${class}"
   done
 
   apt-get install -y "${COMMON_DEB}"

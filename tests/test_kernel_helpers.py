@@ -13,12 +13,12 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
 HELPER = REPO / "scripts" / "kernel_helpers.sh"
-VE_MANIFEST = Path(
-    __file__
-).resolve().parents[2] / "DaemonCores-VE" / "workflows" / "bootc-debs-builder" / "kernel-pve" / "patches.yml"
-BOOTC_MANIFEST = Path(
-    __file__
-).resolve().parents[2] / "debian-bootc" / "workflows" / "bootc-debs-builder" / "kernel" / "patches.yml"
+VE_MANIFEST = Path(__file__).resolve().parents[
+    2
+] / "DaemonCores-VE" / "workflows" / "bootc-debs-builder" / "kernel-pve" / "patches.yml"
+BOOTC_MANIFEST = Path(__file__).resolve().parents[
+    2
+] / "debian-bootc" / "workflows" / "bootc-debs-builder" / "kernel" / "patches.yml"
 
 ENV = {"KERNEL_CDN": "", "PATH": os.environ["PATH"], "HOME": os.environ["HOME"]}
 
@@ -37,13 +37,29 @@ def test_helper_shell_syntax():
     assert subprocess.run(["bash", "-n", str(HELPER)]).returncode == 0
 
 
-def test_patch_list_from_file_bootc():
-    """The debian-bootc kernel/patches.yml file: class filtering works."""
+def test_patch_list_from_native_manifest():
+    """The debian-bootc native `patches:` entries (packages.yml): class
+    filtering works and no patches.yml file is needed anywhere (owner,
+    2026-11-03)."""
+    import json
+
+    import yaml
+
+    manifest = (
+        Path(__file__).resolve().parents[2] / "debian-bootc" / "workflows" /
+        "bootc-debs-builder" / "packages.yml"
+    )
+    if not manifest.is_file():
+        return
+    entry = yaml.safe_load(manifest.read_text())["packages"]
+    entry = [p for p in entry if p["name"] == "linux-image"][0]
+    patches = json.dumps(entry["patches"])
     r = run_helper(
-        f'kernel_patch_list "{BOOTC_MANIFEST}" amd64 6.12.107 kernel',
+        f'kernel_patch_list - amd64 6.12.107 kernel', PATCHES_JSON=patches
     )
     assert r.returncode == 0, r.stderr
-    assert r.stdout.strip(), "kernel-class patches expected in the common stage"
+    out = r.stdout.strip()
+    assert out and out.splitlines()[0].startswith("bore ")
 
 
 def test_patch_list_from_file_ve():
@@ -67,7 +83,9 @@ def test_patch_list_from_native_patches_json():
     if not VE_MANIFEST.exists():
         return
     patches = json.dumps(yaml.safe_load(VE_MANIFEST.read_text())["patches"])
-    r = run_helper("kernel_patch_list - amd64 7.0.14 | wc -l", PATCHES_JSON=patches)
+    r = run_helper(
+        "kernel_patch_list - amd64 7.0.14 | wc -l", PATCHES_JSON=patches
+    )
     assert r.returncode == 0, r.stderr
     # One line per patch entry: the count belongs to the VE manifest (edited
     # by its own lane), the test pins the helper's semantics, not VE history.
@@ -86,7 +104,9 @@ def test_patch_list_json_matches_file():
         return
     patches = json.dumps(yaml.safe_load(VE_MANIFEST.read_text())["patches"])
     from_file = run_helper(f'kernel_patch_list "{VE_MANIFEST}" amd64 7.0.14')
-    from_json = run_helper("kernel_patch_list - amd64 7.0.14", PATCHES_JSON=patches)
+    from_json = run_helper(
+        "kernel_patch_list - amd64 7.0.14", PATCHES_JSON=patches
+    )
     assert from_file.returncode == 0 and from_json.returncode == 0
     assert from_file.stdout == from_json.stdout
     assert from_json.stdout.strip()
@@ -97,6 +117,7 @@ def test_flavour_kcflags():
     assert r.stdout.strip() == "-march=x86-64-v3"
     r = run_helper('kernel_flavour_kcflags x64v1')
     assert r.stdout.strip() == ""
+
 
 def _make_cdn(tmp_path, version):
     """A file:// kernel.org mirror holding a tiny linux-<version> tarball."""
@@ -113,7 +134,8 @@ def _make_cdn(tmp_path, version):
     with tarfile.open(tarball, "w:xz") as t:
         t.add(src, arcname=f"linux-{version}")
     shutil.rmtree(src)
-    return tmp_path / "cdn", tarball, hashlib.sha256(tarball.read_bytes()).hexdigest()
+    return tmp_path / "cdn", tarball, hashlib.sha256(tarball.read_bytes()
+                                                     ).hexdigest()
 
 
 def _fetch(cdn, version, want, cache):

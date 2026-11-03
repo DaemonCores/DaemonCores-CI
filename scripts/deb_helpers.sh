@@ -93,16 +93,20 @@ deb_overlay_apply() {
 
 # Overlay on an upstream SOURCE tree (not an extracted deb): the overlay dir
 # mirrors the source tree, new files are real files, modified upstream files are
-# git .patch at the mirrored path. patches.lock.json holds the sha256 each
-# patched file had when the patch was written; the guard hashes the pristine
-# tree first (drift = exit 3), then the all-or-nothing overlay applies.
+# git .patch at the mirrored path. The sha256 reference of each patched file is
+# a BUILD-LOCAL lock (patch_guard --update, retained under
+# ${PATCH_GUARD_LOCK_DIR:-/tmp/patch-guard}, never in git — owner decision
+# 2026-11-03); the drift guard is the all-or-nothing dry-run below: the overlay
+# applies only when every .patch passes --fuzz=0 first. Drift = exit 3, the
+# last-good deb retained by the caller.
 deb_src_overlay() {
   local ovl="${1:?}" tree="${2:?}"
   local -a patches
   mapfile -t patches < <(cd "${ovl}" && find . -name '*.patch' -type f | sort | sed "s|^\./|${ovl}/|")
   if [ "${#patches[@]}" -gt 0 ]; then
     python3 "${CI_SCRIPTS}/patch_guard.py" --tree "${tree}" \
-      --lock "${ovl}/patches.lock.json" "${patches[@]}" || return 3
+      --lock "${PATCH_GUARD_LOCK_DIR:-/tmp/patch-guard}/$(basename "${ovl}").json" \
+      --update "${patches[@]}" || return 3
   fi
   deb_overlay_apply "${ovl}" "${tree}"
 }
@@ -219,12 +223,14 @@ deb_source_build() {
     || return 1
   git -C "$O/src" checkout --quiet "${commit:?}"
 
-  # Lock guard on the pristine tree (pre-patch sha256), then all-or-nothing
-  # dry run before the real application. Drift (exit 3) = skip the build:
-  # last-good deb retained by the caller. C-lane patches mirror paths of the
-  # source tree root (src/pmxcfs/...).
+  # Build-local lock guard on the pristine tree (patch_guard --update,
+  # hashes computed and retained AT BUILD under
+  # ${PATCH_GUARD_LOCK_DIR:-/tmp/patch-guard}, never in git), then the
+  # all-or-nothing dry run before the real application. Drift (exit 3) =
+  # skip the build: last-good deb retained by the caller. C-lane patches
+  # mirror paths of the source tree root (src/pmxcfs/...).
   python3 "${CI_SCRIPTS}/patch_guard.py" --tree "$O/src" \
-    --lock "${SAVE_PWD}/workflows/bootc-debs-builder/${lane}/patches.lock.json" \
+    --lock "${PATCH_GUARD_LOCK_DIR:-/tmp/patch-guard}/${pkg}-src.lock.json" --update \
     "${SAVE_PWD}/workflows/bootc-debs-builder/${lane}"/src/pmxcfs/*.patch \
     || exit 3
   for p in "${SAVE_PWD}/workflows/bootc-debs-builder/${lane}"/src/pmxcfs/*.patch; do
