@@ -1197,3 +1197,10 @@ DEBUG: tick 2026-11-03 07:2x - vague-2 L14 FERME: re-run inchangee 41585866312 S
 - VE 41628726241 = FAILURE: x3 kernel-pve-x64v1/2/3 FAIL cause lue --log-failed = "ERROR: patch bore does not apply to 7.0.14-26" (bore téléchargé, dry-run strict KO sur l'arbre PVE 7.0 — même famille que 0003-sms retiré par sonde R-801; exclusion par serie ou retrait avec sonde = SUJET lane kernel-PVE/pattern bef03ff). Build images amd64+arm64 FAIL = "THP state matches the image profile (default never / twin always)" = l'arbitrage THP twin (R-803/R-804), sujet de sa lane.
 - Conversions ce tick: R-805 DONE-PROVEN (verdicts + causes des 2 runs), P-5 DONE-PROVEN (lecture live des logs d'erreur).
 - Compte P-610: OPEN 32, IN-PROGRESS 66, DEFORMED 21, DONE-UNVERIFIED 54 (843 rows, lecture fichier).
+
+
+## Tick 2026-11-03T12:38Z (cron H-VE)
+- Lint debian-bootc rouge x3 (41633837607, 41634249740, 41635338591): cause docs-check. `master` du wiki restait sur e5fda09 (citations rottees `workflows/bootc-debs-builder/kernel/...` apres migration engine 778d4ca) -> push main:master f2a2c6e; reste `.ci/build-deb/build-deb.sh:323` depassant la fin (220 lignes) -> re-ancre :184 ("flag build_failed for the issue step"); repro exact local (clone frais repo fe46b53 + wiki frais + CI frais): docs-check rc=0, 0 citation.
+- Preuve live: Lint run 41636661575 -R DaemonCores/debian-bootc = SUCCESS (verdict relu json). Wiki 092e0a8... pushed main+master.
+- debian-bootc Full Pipeline 41633838211 (8c6f3b8) SUCCESS = fix bore 404 prouve en run. Nouveau head fe46b53: pipeline 41635339424 queued (lane kernel), verdict au prochain tick.
+- VE Full Pipeline 41633558071 = CANCELLED: kernel-pve-x64v1/v2/v3 build failed (amd64) -> Build images (amd64) failure; sujet lane kernel-PVE en vol, non double. arm64: 14 wave0 success avant cancel.
