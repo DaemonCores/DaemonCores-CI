@@ -1088,3 +1088,24 @@ Gap: RSS cannot attribute the ~100 MiB of kernel-side memory. Harness now also d
   vert avec le même code. La preuve locale rootful passait pour la même raison.
 - Fix posé: iso-builder.yml, `sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0`
   posé après le proof env, avant les runs podman du builder.
+
+## Tick 2026-11-03T02:45+01:00 — P-757 amd64 ISO: cause racine AppArmor "unpriv_bwrap" PROUVEE, fixes posés
+- Démarche probes (workflow probe-mount + scripts/probe_bib_mount.sh, runs 41559582446,
+  41559933932, 41560416114..41565044610, 2 min par run, matrix amd64+arm64):
+  1. rbind RW + unshare -Urm = OK sur les DEUX runneurs -> le knob userns
+     n'est PAS la cause (sysctl du tick précédent réfuté, retiré).
+  2. Dans bwrap (osbuild buildroot, ipc/pid/net, caps complètes, même kernel
+     7.0.0-1017-azure des deux côtés): TOUT mount = EPERM sur amd64, OK sur arm64.
+  3. dmesg: apparmor="DENIED" profile="unpriv_bwrap" comm="mount" capname="sys_admin"
+     -> l'image runner amd64 24.04 charge un profile AppArmor bwrap qui refuse
+     CAP_SYS_ADMIN aux enfants de bwrap.
+  4. 41565044610: `apparmor_parser -R` du profile -> BEFORE_FAIL -> AFTER_OK sur
+     amd64, même kernel. CAUSE PROUVEE.
+- Fix: iso-builder.yml déscharge /etc/apparmor.d/*bwrap* + unpriv_bwrap avant les
+  runs podman (aucune chaîne DNS touchée, grep réseau n/a).
+- Run 41565502790: monté PAST le mount (osbuild squashfs/grub2/xorriso/implantisomd5
+  completes, install.iso amd64 écrite) -> mount FIXED. Nouvelle cause = upload
+  release: HTTP 422 already_exists sur un asset orphelin d'un upload interrompu
+  que --clobber ne remplace pas; fix e6f899c (delete de l'asset par nom avant upload).
+- Run 41567748715 dispatched (run_iso=true): verdict au prochain tick.
+- Arches: arm64 Build ISO SUCCESS x5 consécutifs (chemin bib complet).
