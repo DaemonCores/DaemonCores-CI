@@ -4,7 +4,7 @@
 # shipped mount sequence from osbuild/util/containers.py:
 #   rbind RW of the store, then remount RW ("dirty fix").
 set -u
-BIB=ghcr.io/daemoncores/debian-bootc:$2
+BIB=ghcr.io/daemoncores/debian-bootc:bib_$2
 echo "== kernel =="
 uname -r
 sudo podman pull "$BIB" >/dev/null 2>&1 || true
