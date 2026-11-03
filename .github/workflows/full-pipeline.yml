@@ -193,6 +193,12 @@ jobs:
           if [ "$img_gallium" = "true" ] && [ "$image" != "true" ]; then
             img_gallium=false
           fi
+          # The ISO stage pulls the prebuilt iso_<arch> image, which only a
+          # Containerfile.iso produces. A repo that does not ship one can never
+          # get a green ISO job (manifest unknown), so drop the flag for it.
+          if [ "$iso" = "true" ] && ! git cat-file -e "$SHA:Containerfile.iso" 2>/dev/null; then
+            iso=false
+          fi
           printf 'env=%s\ndebs=%s\nimage=%s\niso=%s\nimg_rpi=%s\nimg_gallium=%s\n' \
             "$env" "$debs" "$image" "$iso" "$img_rpi" "$img_gallium" | tee -a "$GITHUB_OUTPUT"
 
