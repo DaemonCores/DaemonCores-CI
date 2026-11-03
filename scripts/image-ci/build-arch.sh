@@ -368,9 +368,14 @@ boot_stack() {
   # arm64 ships two kernels: the 16 KB one on the plain tag for recent
   # hardware, the 4 KB one (-4k image) for the older devices. ARM_DEVICES
   # lists the device module packages built against that kernel.
-  ARM_DEVICES="rpi3 rpi4"
+  # ARM_DEVICES lists the device module packages built against that kernel:
+  # the 4 KB one for the pre-RK3588 generations (Pi 3/4 — the rpi3 module
+  # package carries the Pi Zero 2 W/BCM2710A1 —, RK3399, the sun50i H616/
+  # H613/A64 family, the i.MX8M family, the MT8167-8183 family), the 16 KB
+  # one for the recent rockchip hardware (RK3588, RK356x).
+  ARM_DEVICES="rpi3 rpi4 rk3399 h616 imx8m mt8183"
   if [[ "${kernel_suffix}" == -16k* ]]; then
-    ARM_DEVICES="rpi5 rk3588"
+    ARM_DEVICES="rpi5 rk3588 rk3566"
   fi
 }
 
