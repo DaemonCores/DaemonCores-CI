@@ -16,7 +16,7 @@ sudo podman run -i --rm --privileged --security-opt apparmor=unconfined \
     --entrypoint /bin/sh "$BIB" -s <<'EOF_BIB'
 mkdir -p /tmp/orig /tmp/sb-in &&
 mount --rbind -o ro,0755 --make-rprivate /var/lib/containers/storage /tmp/orig &&
-bwrap --tmpfs /run --ro-bind / / --chdir / --die-with-parent --new-session \
+bwrap --ro-bind / / --tmpfs /run --chdir / --die-with-parent --new-session \
       --unshare-ipc --unshare-pid --unshare-net \
       --ro-bind /tmp/orig /var/lib/containers/storage \
       --proc /proc --dev /dev \
@@ -31,7 +31,7 @@ echo "== PROBE G: bwrap sandbox, store bound RW =="
 sudo podman run -i --rm --privileged --security-opt apparmor=unconfined \
     -v "$(pwd)/run-store:/var/lib/containers/storage:rshared" \
     --entrypoint /bin/sh "$BIB" -s <<'EOF_BIB'
-bwrap --tmpfs /run --ro-bind / / --chdir / --die-with-parent --new-session \
+bwrap --ro-bind / / --tmpfs /run --chdir / --die-with-parent --new-session \
       --unshare-ipc --unshare-pid --unshare-net \
       --bind /var/lib/containers/storage /var/lib/containers/storage \
       --proc /proc --dev /dev \
@@ -46,7 +46,7 @@ echo "== caps inside bwrap =="
 sudo podman run -i --rm --privileged --security-opt apparmor=unconfined \
     -v "$(pwd)/run-store:/var/lib/containers/storage:rshared" \
     --entrypoint /bin/sh "$BIB" -s <<'EOF_BIB'
-bwrap --tmpfs /run --ro-bind / / --chdir / --new-session --unshare-ipc --unshare-pid --unshare-net \
+bwrap --ro-bind / / --tmpfs /run --chdir / --new-session --unshare-ipc --unshare-pid --unshare-net \
       --proc /proc --dev /dev \
       /bin/sh -c 'grep -A1 Cap /proc/self/status | head -6; echo user-ns-limit=$(cat /proc/sys/user/max_user_namespaces)'
 EOF_BIB
