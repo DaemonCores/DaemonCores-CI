@@ -1109,3 +1109,24 @@ Gap: RSS cannot attribute the ~100 MiB of kernel-side memory. Harness now also d
   que --clobber ne remplace pas; fix e6f899c (delete de l'asset par nom avant upload).
 - Run 41567748715 dispatched (run_iso=true): verdict au prochain tick.
 - Arches: arm64 Build ISO SUCCESS x5 consécutifs (chemin bib complet).
+
+## Tick 2026-11-03T03:20+01:00 — P-757: mount FIXED, 2 causes d'upload successives
+- Run 41567748715: amd64 osbuild COMPLETE (implantisomd5 ok) -> la 422 d'upload
+  est REPRODUCIBLE: cause = limite GitHub 2 GiB par asset release (ISO amd64
+  offline 2.2G, payload 1.17G; arm64 1.75G passe). Le .sha256 orphelin de la
+  release (115B) supprimé par API (asset 704043712).
+- Erreur de l'angle 1.0G threshold (a6c99a8): run 41569629969 choisi net-install
+  -> 'no installer payload bootc ref set' = bootc-installer EXIGE
+  --installer-payload-ref, PAS de mode netinstall côté bib. Threshold revenu à
+  1.8G (commentaire corrigé).
+- Fix définitif 5df48c8: upload en parties split 1900MiB si ISO > 2 GiB
+  (parts .part-00 + .sha256 du fichier complet, clobber + delete stale).
+- Run 41571372707 en vol = verdict final (prochain cron).
+
+## Tick 2026-11-03T03:50+01:00 — P-757: les 2 Build ISO VERTS
+- Run 41571372707: Build ISO amd64 + arm64 SUCCESS; release install-iso =
+  amd64 en 2 parts (1992294400 + 362818856+2M = 2.2G, part-01 364281856)
+  + sha256, arm64 intégral. La chaîne bib iso (offline, les 2 arches) est
+  FERMEE. Reste du run: unique failure = Publish .deb (amd64),
+  download-artifact ECONNRESET infra transitoire (pas code) -> run clean
+  41573076156 dispatched (run_iso=true).
