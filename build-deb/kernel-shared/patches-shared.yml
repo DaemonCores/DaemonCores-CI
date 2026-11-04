@@ -138,7 +138,7 @@ patches:
         fuzz: 2
         license: GPL-2.0-only
       - name: bore
-        url: https://raw.githubusercontent.com/CachyOS/kernel-patches/master/{series}/sched/0001-bore.patch
+        url: https://raw.githubusercontent.com/CachyOS/kernel-patches/master/{series}/sched/0001-bore-cachy.patch
         stage: common
         exclude-series: ["7.0"]
         license: GPL-2.0-only
