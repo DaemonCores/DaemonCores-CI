@@ -377,9 +377,11 @@ CONFIG_SYN_COOKIES=y
 CONFIG_PREEMPT_LAZY=y
 
 # Transparent huge pages: fewer TLB misses when a runtime maps multi-GB weights.
-# madvise only, so no process pays the memory cost unless it asks for it.
+# ALWAYS — owner arbitration 2026-11-03 (THP v2): the embedded AI profile primes;
+# no lane may boot [madvise]. The host-side never-forcing rule concerns PVE HOST
+# settings (sysfs, never baked here); the guests decide their own hugepages.
 CONFIG_TRANSPARENT_HUGEPAGE=y
-CONFIG_TRANSPARENT_HUGEPAGE_MADVISE=y
+CONFIG_TRANSPARENT_HUGEPAGE_ALWAYS=y
 
 # Multi-gen LRU: better reclaim when the weights and the page cache compete for
 # RAM on small boards.
