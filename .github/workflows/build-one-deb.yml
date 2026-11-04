@@ -312,3 +312,15 @@ jobs:
         run: |
           echo "::error::${PKG} build failed; the last valid .deb was reused, see the build step log"
           exit 1
+
+      # P-44/P-45 drain: this job carried SB_SIGNING_KEY/CERT and
+      # MODULE_SIGNING_KEY/CERT (and APT_GPG_KEY for repacks). The build-deb
+      # step shredded its trees' private artifacts (signing_key.pem, sb.key…)
+      # even when it failed; this final step closes the last env copy.
+      - name: Purge the signing material
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          unset SB_SIGNING_KEY SB_SIGNING_CERT MODULE_SIGNING_KEY \
+            MODULE_SIGNING_CERT COSIGN_PRIVATE_KEY COSIGN_PASSWORD APT_GPG_KEY

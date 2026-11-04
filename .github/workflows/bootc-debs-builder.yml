@@ -215,3 +215,12 @@ jobs:
           apt_gpg_key: ${{ secrets.APT_GPG_KEY }}
           skip_pages: ${{ !inputs.deploy_pages }}
           carry_over: ${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}
+
+      # P-44/P-45 drain: the APT repository GPG secret was passed to the
+      # publish action above; the final step unsets the env copy of the job.
+      - name: Purge the signing material
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          unset APT_GPG_KEY

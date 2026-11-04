@@ -287,6 +287,18 @@ jobs:
           COSIGN_PASSWORD: ${{ secrets.COSIGN_PASSWORD }}
         run: bash .ci-tooling/scripts/image-ci/build-arch.sh
 
+      # P-44/P-45: the build step carried COSIGN_PRIVATE_KEY/COSIGN_PASSWORD.
+      # Nothing may survive on the runner once the job is over — success or
+      # failure: the private key artifacts the run wrote to disk (cosign.key,
+      # signing_key.pem, *.key) are shredded and the only shell still observing
+      # the material at this point (this step's env copy) is unset. GitHub
+      # re-injects job variables into every new step, so earlier steps could
+      # not be drained post hoc; the final step closes the last one.
+      - name: Purge the signing material
+        if: always()
+        shell: bash
+        run: bash .ci-tooling/scripts/purge-signing-secrets.sh
+
       - name: Upload the logs of the failed images
         if: always()
         uses: actions/upload-artifact@v4
@@ -397,3 +409,14 @@ jobs:
           refs: ${{ steps.lists.outputs.refs }}
           private-key: ${{ secrets.COSIGN_PRIVATE_KEY }}
           password: ${{ secrets.COSIGN_PASSWORD }}
+
+      # P-44/P-45 drain: the signing step above held COSIGN_PRIVATE_KEY and 
+      # COSIGN_PASSWORD as job variables (cosign reads them from its env, no
+      # artifact is written to disk). The final step unsets the only env copy
+      # still observable at job end.
+      - name: Purge the signing material
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          unset COSIGN_PRIVATE_KEY COSIGN_PASSWORD COSIGN_PUBLIC_KEY

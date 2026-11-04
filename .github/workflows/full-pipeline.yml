@@ -442,6 +442,16 @@ jobs:
           echo "sha256=${sha}" >>"$GITHUB_OUTPUT"
           echo "Pinned APT key checksum: ${sha}"
 
+      # P-44/P-45 drain: close the env copy of the APT secret; the script
+      # already shredded the armored key it wrote to its GNUPGHOME temp dir.
+      - name: Purge the signing material
+        if: ${{ always() && env.HAS_APT == 'true' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          unset APT_GPG_KEY
+          bash .ci-tooling/scripts/purge-signing-secrets.sh
+
   build_env:
     name: Rebuild the deb-builder env image
     needs: [prepare]

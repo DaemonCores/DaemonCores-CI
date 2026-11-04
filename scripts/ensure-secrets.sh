@@ -16,7 +16,10 @@
 #
 # An existing secret is never touched: regenerating a key invalidates what was
 # signed with it.  Private keys only travel through pipes and a private
-# temporary directory into `gh secret set`; nothing secret is printed.
+# temporary directory into `gh secret set`; nothing secret is printed. A
+# generated key NEVER lingers on the runner disk: the scratch directory
+# contents are shredded (disk blocks overwritten) before the directory is
+# removed, by `discard_dir`.
 #
 # A secret created during a run is only visible to the NEXT run, so the caller
 # must start a new run when `created` is not empty.
@@ -63,6 +66,19 @@ has() {
 }
 
 #######################################
+# Shred the contents of a scratch directory, then remove it.  Every function
+# that writes key material to its scratch directory traps this on RETURN, so
+# a generated key never lingers on the runner disk (P-44/P-45).
+# Arguments:
+#   $1: the scratch directory path
+#######################################
+discard_dir() {
+  local dir=$1
+  find "${dir}" -type f -exec shred -uz {} + 2>/dev/null || true
+  rm -rf "${dir}"
+}
+
+#######################################
 # Create a private scratch directory removed when the caller returns.
 # Outputs:
 #   The directory path on stdout.
@@ -81,7 +97,7 @@ gen_cosign() {
   local dir password
   dir=$(scratch)
   # shellcheck disable=SC2064  # expand $dir now, it is fixed for this call
-  trap "rm -rf '${dir}'" RETURN
+  trap "discard_dir '${dir}'" RETURN
   password=$(openssl rand -hex 24)
   (cd "${dir}" && COSIGN_PASSWORD="${password}" cosign generate-key-pair >/dev/null)
   store COSIGN_PRIVATE_KEY <"${dir}/cosign.key"
@@ -118,6 +134,7 @@ gen_sb() {
     -addext "extendedKeyUsage=codeSigning" 2>/dev/null
   base64 -w0 <"${dir}/sb.key" | store SB_SIGNING_KEY
   base64 -w0 <"${dir}/sb.crt" | store SB_SIGNING_CERT
+  discard_dir "${dir}"
 }
 
 #######################################
@@ -135,6 +152,7 @@ gen_modules() {
     -subj "/CN=Module Signing Key/O=${GITHUB_REPOSITORY}/OU=CI" 2>/dev/null
   store MODULE_SIGNING_KEY <"${dir}/mod.pem"
   store MODULE_SIGNING_CERT <"${dir}/mod.x509"
+  discard_dir "${dir}"
 }
 
 #######################################

@@ -34,3 +34,12 @@ runs:
         COSIGN_PRIVATE_KEY: ${{ inputs.private-key }}
         COSIGN_PASSWORD: ${{ inputs.password }}
       run: ${{ github.action_path }}/sign.sh
+
+    # P-44/P-45 drain: the key material was visible only in this action's step
+    # env (cosign reads it from its env, nothing is written to disk). Unset it
+    # in the last shell that can still observe it.
+    - shell: bash
+      if: always()
+      run: |
+        set -euo pipefail
+        unset COSIGN_PRIVATE_KEY COSIGN_PASSWORD

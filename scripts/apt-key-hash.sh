@@ -41,6 +41,18 @@ fingerprint_of() {
 }
 
 #######################################
+# Shred the key-bearing files of the GNUPGHOME, then remove it. The armored
+# APT_GPG_KEY secret was written to secret.asc inside: overwritten before
+# deletion so no secret copy lingers on the runner disk (P-44/P-45).
+# Arguments:
+#   $1: the GNUPGHOME directory
+#######################################
+shred_gnupghome() {
+  find "${1}" -type f -exec shred -uz {} + 2>/dev/null || true
+  rm -rf "${1}"
+}
+
+#######################################
 # Main.
 #######################################
 main() {
@@ -54,7 +66,7 @@ main() {
   chmod 700 "${home}"
   tmp=$(mktemp)
   # shellcheck disable=SC2064  # expand now, both paths are fixed
-  trap "rm -rf '${home}' '${tmp}'" EXIT
+  trap "shred_gnupghome '${home}'; rm -f '${tmp}'" EXIT
   export GNUPGHOME="${home}"
   printf '%s\n' "${APT_GPG_KEY}" >"${home}/secret.asc"
   want=$(fingerprint_of "${home}/secret.asc")

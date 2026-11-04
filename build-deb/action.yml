@@ -85,3 +85,20 @@ runs:
         ARCH: ${{ inputs.arch }}
         SKIP_BUILD: ${{ inputs.skip }}
       run: bash "${GITHUB_ACTION_PATH}/build-deb.sh"
+
+    # P-44/P-45 drain: the build may have signed kernel modules with the
+    # MODULE_SIGNING_KEY secret (kernel_signing_setup writes the tree's
+    # certs/signing_key.pem) or signed an image with SB_SIGNING_KEY. Every
+    # private artifact of the sweep roots is shredded before deletion, and the
+    # env copy of the secrets dies with this step — no key outlives the job.
+    - id: purge
+      if: always()
+      shell: bash
+      env:
+        KEY_DIR: ${{ github.workspace }}
+      run: |
+        set -euo pipefail
+        unset MODULE_SIGNING_KEY MODULE_SIGNING_CERT SB_SIGNING_KEY \
+          SB_SIGNING_CERT COSIGN_PRIVATE_KEY COSIGN_PASSWORD APT_GPG_KEY
+        bash "${GITHUB_ACTION_PATH}/../scripts/purge-signing-secrets.sh" \
+          "${KEY_DIR}" /tmp "${RUNNER_TEMP:-/tmp}"

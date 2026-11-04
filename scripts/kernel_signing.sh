@@ -72,6 +72,19 @@ kernel_signing_setup() {
   fi
 }
 
+#######################################
+# Shred a signing scratch directory, then remove it. The Secure Boot key
+# (sb.key) is the only private content: overwritten before deletion, nothing
+# secret is left on the runner disk, even when the subshell dies mid-signing
+# (P-44/P-45).
+# Arguments:
+#   $1: the scratch directory path
+#######################################
+kernel_signing_purge() {
+  find "${1}" -type f -exec shred -uz {} + 2>/dev/null || true
+  rm -rf "${1}"
+}
+
 # Options forced when signing is active, checked after `make olddefconfig`.
 # MODULE_SIG_FORCE is handled apart: it follows KERNEL_SIGNING_ENFORCE.
 KERNEL_SIGNING_FORCED=(
@@ -160,7 +173,7 @@ kernel_sign_efi() {
   # An && chain: errexit is off inside a `||` list, and the image is only
   # overwritten once the signed copy exists and verifies.
   (
-    trap 'rm -rf "${dir}"' EXIT
+    trap 'purge_signing_dir "${dir}"' EXIT
     if [ "$(head -c2 "${image}" | od -An -tx1 | tr -d ' ')" = "1f8b" ]; then
       gzip -dc "${image}" >"${dir}/plain" || exit 1
     else
