@@ -173,7 +173,7 @@ kernel_sign_efi() {
   # An && chain: errexit is off inside a `||` list, and the image is only
   # overwritten once the signed copy exists and verifies.
   (
-    trap 'purge_signing_dir "${dir}"' EXIT
+    trap 'kernel_signing_purge "${dir}"' EXIT
     if [ "$(head -c2 "${image}" | od -An -tx1 | tr -d ' ')" = "1f8b" ]; then
       gzip -dc "${image}" >"${dir}/plain" || exit 1
     else
