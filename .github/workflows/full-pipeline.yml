@@ -534,6 +534,11 @@ jobs:
       (needs.debs_arm64.result == 'success' || needs.debs_arm64.result == 'failure')
     runs-on: ubuntu-latest
     permissions:
+      # actions: write: the bootc-debs-end composite drops the stale
+      # github-pages artifact of the run before its upload (a re-run of the
+      # failed debs_publish job would otherwise leave two github-pages
+      # artifacts and deploy-pages refuses the deployment — run 41757412975).
+      actions: write
       pages: write
       id-token: write
     outputs:

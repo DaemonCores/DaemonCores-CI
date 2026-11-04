@@ -135,6 +135,34 @@ runs:
           fi
         done
 
+    - name: Drop the stale github-pages artifact of this run
+      # deploy-pages refuses when the run carries MORE THAN ONE github-pages
+      # artifact. A re-run of the failed jobs (--failed) keeps the artifact
+      # the first attempt uploaded, so the second attempt's upload makes
+      # count 2 and deploy-pages dies ("Artifact count is 2"). upload-pages-
+      # artifact only replaces an artifact it created in the same job
+      # attempt — a previous attempt's one survives. Deleting every
+      # existing github-pages artifact of the run here makes the deploy
+      # idempotent across attempts. Requires actions: write on the job.
+      if: ${{ inputs.skip_pages != 'true' }}
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        set -euo pipefail
+        api="repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/artifacts"
+        for id in $(curl -fsSL \
+          -H "Authorization: Bearer ${GH_TOKEN}" \
+          -H "Accept: application/vnd.github+json" \
+          "${api}" | jq -r '.artifacts[]? | select(.name == "github-pages") | .id'); do
+          echo "deleting stale github-pages artifact ${id}"
+          curl -fsSL -X DELETE \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            "${api}/${id}"
+        done || {
+          echo "::warning::stale github-pages artifact cleanup failed (missing actions:write?)"
+        }
+
     - name: Upload Pages artifact
       if: ${{ inputs.skip_pages != 'true' }}
       uses: actions/upload-pages-artifact@v5
