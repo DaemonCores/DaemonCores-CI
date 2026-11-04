@@ -171,15 +171,18 @@ def test_engine_exports_ci_kernel_shared() -> None:
     assert "kernel-shared" in text
 
 
-def test_bore_excluded_on_series_7_0() -> None:
-    """The bore sibling is series-gated: CachyOS carries no 7.0 dir and the
-    patch did not apply to the PVE 7.0.x tree (run 41628726241), so the entry
-    carries exclude-series ["7.0"] and the helper filter honours it."""
+def test_bore_excluded_on_all_current_series() -> None:
+    """The bore sibling is series-gated: CachyOS carries no 7.0 dir, and the
+    2026-11-04 upstream bore (renamed 0001-bore-cachy.patch) no longer applies
+    to any vanilla tree (fair.c LOG->NONE drift; dry-run FAIL on 7.2.15 and
+    7.3) — the entry is DORMANT, excluded on every active series; the helper
+    filter honours it. Re-arm by removing the excludes when upstream matches
+    vanilla again."""
     import yaml  # noqa: PLC0415 — local import keeps the module import light
 
     doc = yaml.safe_load((SHARED_DATA / "patches-shared.yml").read_text())
     bore = next(p for p in doc["patches"] if p["name"] == "bore")
-    assert bore["exclude-series"] == ["7.0"]
+    assert bore["exclude-series"] == ["7.0", "7.1", "7.2", "7.3"]
     helper = (REPO / "scripts" / "kernel_helpers.sh").read_text()
     assert "exclude-series" in helper
 

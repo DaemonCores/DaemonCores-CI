@@ -138,7 +138,14 @@ patches:
         fuzz: 2
         license: GPL-2.0-only
       - name: bore
+        # DORMANT (2026-11-04, proven): the CachyOS 7.2/7.3 bore hunks no longer
+        # apply to any vanilla tree (fair.c LOG->NONE upstream drift; dry-run
+        # FAIL on vanilla 7.2.15 AND 7.3). Series-gated OFF until upstream
+        # ships a bore patch matching the vanilla tree again — REMOVE the
+        # excludes of the new series (and the consumer-side filter that
+        # debian-bootc c726774 added while the engine still exported bore)
+        # when re-arming. The URL stays the renamed 0001-bore-cachy.patch.
         url: https://raw.githubusercontent.com/CachyOS/kernel-patches/master/{series}/sched/0001-bore-cachy.patch
         stage: common
-        exclude-series: ["7.0"]
+        exclude-series: ["7.0", "7.1", "7.2", "7.3"]
         license: GPL-2.0-only
