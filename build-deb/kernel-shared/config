@@ -350,7 +350,9 @@ CONFIG_SYN_COOKIES=y
 # Scheduler statistics and latency accounting: per-task bookkeeping that only
 # debugging tools read.
 # CONFIG_SCHEDSTATS is not set
-CONFIG_SCHED_BORE=y
+# CONFIG_SCHED_BORE: REMOVED 2026-11-04 (proven) — bore DORMANT (see
+# kconfig-shared/x86-common.cfg and patches-shared.yml); the symbol is not
+# declared by a vanilla kernel until the patch re-arms.
 # CONFIG_LATENCYTOP is not set
 
 # Crash capture and kexec: reserve memory for a second kernel. bootc updates
