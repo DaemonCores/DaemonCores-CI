@@ -1,0 +1,24 @@
+# Intel (i915/xe) kernel-tree patch set — DRM-tree patches applied to the
+# kernel source NEXT TO patches-shared.yml (same run, same schema, same
+# all-or-nothing dry-run; the VE lane resolves the same manifest). {series}
+# resolves to the kernel series of the packaging tree.
+#
+# DEFAULT BUILD STATE: the set below is EMPTY — waiting for the owner's
+# choice. demandes.jsonl names NO precise i915/xe patchset.
+#
+# CANDIDATES (proof = fetched file + sha256, 2026-11-04):
+# 1. CachyOS/kernel-patches {series}/misc/0001-rt-i915.patch — EXISTS for the
+#    current series (7.2 AND 7.3 today), series-sibling pattern identical to
+#    the bore entry of the shared set; content is the RT-i915 compat rework,
+#    NOT a perf patch (proof of what actually applies to 7.x, though):
+#    https://github.com/CachyOS/kernel-patches/tree/master/{series}/misc
+#    proof sha256 7.2 (7.3 byte-identical, same digest):
+#      cfc0f69ca9bdf97cd269c5abebed5ff97c8b5f88402c3fd5d0b77ea5a647000b
+# 2. Upstream intel-next / drm-intel-next (gitlab.freedesktop.org/drm/i915)
+#    — genuine i915/xe perf work (SR-IOV, display bandwidth scheduling, xe
+#    GuC) as a TREE: riding it needs cherry-picks onto the 7.x base, owner
+#    arbitration.
+# 3. freedesktop patchwork (patchwork.freedesktop.org, projects
+#    drm-intel / xe) — patches exist individually but there is NO published
+#    curated per-series patchlist repo; assembling one is the unchosen work.
+patches: []

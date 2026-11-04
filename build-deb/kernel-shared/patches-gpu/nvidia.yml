@@ -1,0 +1,52 @@
+# NVIDIA open-gpu-kernel-modules patch set — the module-tree patches applied
+# to /build/nvidia-open BEFORE make modules (debian-bootc lane
+# linux-modules-nvidia; the PVE pair lane consumes the same manifest). Same
+# canonical schema as patches-shared.yml (name/url/topic/stage, optional
+# class/fuzz/exclude-series/sha256); {series} resolves to the KERNEL series
+# (7.2, 7.3...), the series the module tree is built against.
+#
+# IA vs GAMING (owner demand 10/31-11/02: the two variants may differ by
+# build CONFIGURATION only, never the vendor list): CachyOS publishes ONE
+# nvidia patch set per kernel series (misc/nvidia/{series}/), NO per-profile
+# divergence exists upstream — the two variants share this manifest verbatim
+# ("même set"). A per-profile set would need explicit owner arbitration.
+#
+# DEFAULT BUILD STATE: the set below is EMPTY — every candidate documented
+# here waits for the owner's choice before any patch enters the build
+# (owner never named a precise patchset in demandes.jsonl: "les rebuild
+# optimiser des driveer c'est fait ?" 10/31, GPU lanes validated "nikel"
+# 11/02 without patch data). The wiring is live: entries added to the list
+# are downloaded, sha-pinned when pinned, dry-run ALL (fuzz 0, all-or-
+# nothing) then applied BY THE REAL BUILD before compile.
+#
+# CANDIDATES (proof = fetched file + sha256, 2026-11-04):
+# 1. CachyOS/kernel-patches {series}/misc/nvidia/ — the maintained set
+#    CachyOS ships on its own nvidia-open dkms, per kernel series (7.2 and
+#    7.3 siblings exist TODAY; 6.x series carry the same shape). Compat +
+#    display fixes, no perf claim:
+#    https://github.com/CachyOS/kernel-patches/tree/master/{series}/misc/nvidia
+#    proof sha256 7.3/0003-Pass-dmem_cgroup_init-...:
+#      97d226aaddd54bdd2d4e3ae8e28f8eb23d053c48845cf8d051d2342e97546d9c
+#    proof sha256 7.3/0004-Open-sysfs-config-...:
+#      a6bbae1da91bead7030ed78a161dedd2dc8d38d495ef87af24673642ef1d7ca9
+#    proof sha256 7.2/0001-make-Add-support-for-7.2-Kernel:
+#      85d925cde698d2cff444c13e0ad42875dc0eb9391287efe335d0c3eadedc0b8f
+#    REAL-TREE PROBE (2026-11-04, dry-run --fuzz=0 on the REAL pinned
+#    clone open-gpu-kernel-modules tag 595.104.02, HEAD
+#    ac24e02fc090c3e05c1fc03384b317ac2cc301b5): the Linux-side compat
+#    patches (7.3 0003/0004, 7.2 0001) DO NOT apply to 595.104.02 (the
+#    CachyOS sets pair a DIFFERENT nvidia release to a kernel series); the
+#    two src/common display patches 7.2 0002 (dsc, sha 71008a4f65...) and
+#    7.2 0003 (dp war db, sha bb652257e5...) dry-run CLEAN on that tree.
+#    Consequence for a future choice: entries must be selected per BOTH
+#    the kernel series AND the paired NVIDIA release, and re-probed on
+#    every release bump (the dry-run gate does exactly this at build time).
+# 2. aikitoria/open-gpu-kernel-modules (tinygrad lineage P2P/ReBAR
+#    force-enable, REAL perf for IA multi-GPU) — ships as version branches
+#    (e.g. 610.43.03-p2p), NOT as .patch files; it cannot ride this manifest
+#    without either a .patch export or a tree-swap decision (owner).
+#    https://github.com/aikitoria/open-gpu-kernel-modules
+# 3. A1RM4X/CachyOS-P2P-Nvidia — DKMS installer of the aikitoria patches,
+#    carries only compat .patch files (patches/*.compat.patch), not the
+#    perf patch itself. https://github.com/A1RM4X/CachyOS-P2P-Nvidia
+patches: []

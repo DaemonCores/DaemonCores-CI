@@ -1,0 +1,34 @@
+# AMD (amdgpu) kernel-tree patch set — DRM-tree patches applied to the
+# kernel source NEXT TO patches-shared.yml, inside the SAME patch run of the
+# kernel build (debian-bootc linux-image; the PVE lane resolves the same
+# manifest). Canonical schema as patches-shared.yml: {series} resolves to
+# the kernel series the packaging tree carries, stage/class/exclude-series
+# filter exactly like the shared set; a patch that does not dry-run clean
+# fails the build (all-or-nothing).
+#
+# DEFAULT BUILD STATE: the set below is EMPTY — waiting for the owner's
+# choice. demandes.jsonl ("les rebuild optimiser des driveer c'est fait ?")
+# NEVER names a precise amdgpu patchset; the honest status is:
+#   NO maintained GitHub patchset repo carries current (7.x-series) amdgpu
+#   perf patches as patch files. Everything found is either legacy series,
+#   a CPU patch misleadingly named, or a source tree rather than a patch set.
+#
+# CANDIDATES (proof = fetched file + sha256, 2026-11-04):
+# 1. CachyOS/kernel-patches AMD dir — maintained repo, but the amdgpu-file
+#    content is old (5.15) and the newer amd-* patches are CPU-side
+#    (pstate/cache), NOT amdgpu:
+#    https://github.com/CachyOS/kernel-patches/tree/master/5.15/AMD
+#    proof sha256 5.15/AMD/0001-amd-gpu.patch:
+#      b2550e2b5827c8a3c66d3b371d5ee7abe8f362427b2412cb567b3bb1b4523037
+# 2. amd-cache-optimizer (CachyOS 6.12): named amd but CPU-cache side,
+#    listed only so the owner sees the file was checked, not confused:
+#    https://github.com/CachyOS/kernel-patches/blob/master/6.12/0001-amd-cache-optimizer.patch
+#    proof sha256:
+#      3a8e756865e88ff5dff486e15e6f888d17714d3b555c9a87f918e70b8b454fc1
+# 3. Upstream amd-staging-drm-next (gitlab.freedesktop.org/drm/misc/kernel
+#    / drm-next) — the REAL source of amdgpu perf work (DCN, scheduler,
+#    backlight, per-crtc changes) but a TREE, not a patch list: adopting it
+#    means cherry-picking onto the 7.x base, an owner arbitration.
+# 4. Frogging-Family/community-patches (linux*-tkg) — legacy series only
+#    (5.x amdgpu-si-cik-default). https://github.com/Frogging-Family/community-patches
+patches: []

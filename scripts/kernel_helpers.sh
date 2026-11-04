@@ -17,6 +17,10 @@
 #   - a NATIVE entry key: packages.yml may carry `patches:` (identical
 #     structure, copy-pasted verbatim); build-deb exports it as compact
 #     JSON in PATCHES_JSON and a "-" manifest argument selects it.
+#   manifest argument. An entry MAY also carry `sha256:` (hex): the file is
+#   downloaded, checksummed against it and the build fails on mismatch — for
+#   a set whose upstream does not guarantee immutable URLs. Entries without
+#   sha256 keep the dry-run as their only drift guard (existing schema).
 # The manifests stay DATA — consumed through yq/python3 (both present in
 # the build env), never a bashified patch list.
 #
@@ -139,8 +143,15 @@ kernel_fetch_source() {
 #######################################
 kernel_patch_list() {
   local manifest="$1" arch="$2" version="$3" class="${4:-}"
+  # {series}: the kernel series this build patches, e.g. 7.0 or 6.12. The
+  # GPU driver manifests (patches-gpu/) patch a DIFFERENT tree: the nvidia
+  # entry applies its manifest to the NVIDIA open-module tree but resolves
+  # {series} as the KERNEL series (CachyOS publishes its nvidia set per
+  # kernel series) — it overrides via PATCHES_SERIES.
   local series="${version%.*}"
   [[ "${version}" == *.*.* ]] || series="${version}"
+  # PATCHES_SERIES overrides (see kernel_apply_patches); else the computed one.
+  series="${PATCHES_SERIES:-$series}"
   # {seriesdir}: the xanmod upstream series directory. Archived series
   # (e.g. the 7.0.x the PVE packaging tracks) live under eol/.
   local sdir="linux-${series}.y-xanmod"
@@ -199,6 +210,29 @@ kernel_patch_fuzz() {
 }
 
 #######################################
+# sha256 pin of one manifest patch: its optional `sha256:` field. Empty when
+# the entry carries no pin (then only the dry-run guards upstream drift).
+# Arguments:
+#   $1 - manifest path (patches.yml) or - for the native PATCHES_JSON set
+#   $2 - patch name
+# Outputs:
+#   The 64-hex sha256 on stdout, empty when unpinned.
+#######################################
+kernel_patch_sha() {
+  local manifest="$1" name="$2" doc filter value
+  if [[ "${manifest}" == "-" ]]; then
+    doc="${PATCHES_JSON:-[]}"
+    filter='.[]'
+  else
+    doc=$(cat "${manifest}")
+    filter='.patches[]'
+  fi
+  value=$(printf '%s\n' "${doc}" | NAME="${name}" yq -r \
+    "${filter}"' | select(.name == strenv(NAME)) | .sha256 // ""' | head -n1)
+  echo "${value}"
+}
+
+#######################################
 # Download the patches of one manifest, dry-run the WHOLE set
 # (all-or-nothing), then apply them in manifest order.
 # Nothing is tolerated: a patch that cannot be downloaded or does not apply
@@ -218,6 +252,13 @@ kernel_patch_fuzz() {
 kernel_apply_patches() {
   local manifest="$1" arch="$2" version="$3" tree="$4" class="${5:-}"
   local series="${version%.*}" name url dir file
+  # The GPU driver manifests patch a DIFFERENT tree (patches-gpu/nvidia.yml
+  # applies to the NVIDIA open-module tree) but resolve {series} as the
+  # KERNEL series — the caller exports PATCHES_SERIES. The export is kept
+  # scoped to this call ONLY: the process substitution feeding the fetch
+  # loop below needs the environment, anything set before restores after.
+  local saved_series="${PATCHES_SERIES:-}"
+  export PATCHES_SERIES="${PATCHES_SERIES:-$series}"
   local -a names=() files=() fuzzes=()
   [[ "${version}" == *.*.* ]] || series="${version}"
   dir=$(mktemp -d)
@@ -229,6 +270,17 @@ kernel_apply_patches() {
         echo "ERROR: cannot download patch ${name}: ${url}" >&2
         exit 1
       }
+    # Optional immutability pin: a manifest entry may pin the exact bytes;
+    # failure fails the build BEFORE any touch of the tree (all-or-nothing).
+    local want sha
+    want=$(kernel_patch_sha "${manifest}" "${name}")
+    if [[ -n "${want}" ]]; then
+      [[ "${want}" =~ ^[0-9a-f]{64}$ ]] \
+        || { echo "ERROR: ${name}: sha256 pin '${want}' is not a 64-hex digest" >&2; exit 1; }
+      sha=$(sha256sum "${file}" | cut -d' ' -f1)
+      [[ "${sha}" == "${want}" ]] \
+        || { echo "ERROR: patch ${name} sha256 ${sha} != pinned ${want}" >&2; exit 1; }
+    fi
     names+=("${name}")
     files+=("${file}")
     fuzzes+=("$(kernel_patch_fuzz "${manifest}" "${name}")")
@@ -260,6 +312,11 @@ kernel_apply_patches() {
     echo "applied patch ${names[i]}"
   done
   rm -rf "${dir}"
+  if [[ -n "${saved_series}" ]]; then
+    export PATCHES_SERIES="${saved_series}"
+  else
+    unset PATCHES_SERIES
+  fi
 }
 
 #######################################
