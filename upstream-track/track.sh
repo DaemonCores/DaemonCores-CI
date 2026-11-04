@@ -134,7 +134,7 @@ patch_urls() {
       echo "engine patch manifest not found: ${engine}/build-deb/kernel-shared" >&2
       return 1
     }
-    yq '.patches[] | .url | sub("{topic}"; (.topic // ""))' \
+    yq '.patches[] | . as $p | $p.url | sub("{topic}"; ($p.topic // ""))' \
       "${engine}/build-deb/kernel-shared/patches-shared.yml"
   else
     local manifest
