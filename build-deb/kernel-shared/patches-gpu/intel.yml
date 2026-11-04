@@ -7,7 +7,16 @@
 # choice. demandes.jsonl names NO precise i915/xe patchset.
 #
 # CANDIDATES (proof = fetched file + sha256, 2026-11-04):
-# 1. CachyOS/kernel-patches {series}/misc/0001-rt-i915.patch — EXISTS for the
+# OWNER LEADS (04/11 20:3x) — anchors verified live on lore (gnuweeb mirror),
+# exact mbox per patch to be pinned when the owner picks the entry:
+# 1. DRM batch oct 2026 (kernel dispatch): the xe_mmio_wait32 rework rides
+#    the GuC failure report series:
+#    https://lore-kernel.gnuweeb.org/intel-xe/20261016204354.364846-15-umesh.nerlige.ramappa@intel.com/
+#    the pinned_link work rides the NUMA placement RFC series:
+#    https://lore-kernel.gnuweeb.org/intel-xe/20261102101803.455921-16-himal.prasad.ghimiray@intel.com/
+# 2. AuxCCS — rides [git pull] drm for 7.1 (Airlie):
+#    https://lore-kernel.gnuweeb.org/dri-devel/CAPM=9tyvKEU6-6O=Le9wVjTJqd3NdrUr-pA_eHxt3Bj-Cv7zMw@mail.gmail.com/
+# 3. CachyOS/kernel-patches {series}/misc/0001-rt-i915.patch — EXISTS for the
 #    current series (7.2 AND 7.3 today), series-sibling pattern identical to
 #    the bore entry of the shared set; content is the RT-i915 compat rework,
 #    NOT a perf patch (proof of what actually applies to 7.x, though):

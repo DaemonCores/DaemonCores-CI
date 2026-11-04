@@ -41,6 +41,10 @@
 #    Consequence for a future choice: entries must be selected per BOTH
 #    the kernel series AND the paired NVIDIA release, and re-probed on
 #    every release bump (the dry-run gate does exactly this at build time).
+# OWNER LEAD (04/11 20:3x): NO third-party nvidia patchset exists — the only
+# recognised lever is the GSP-off knob ALREADY set in the dc-gpu kconfig GPU
+# sets (kernel-shared/kconfig-shared/gpu/nvidia.cfg); document, nothing to
+# add to this manifest until the owner names one.
 # 2. aikitoria/open-gpu-kernel-modules (tinygrad lineage P2P/ReBAR
 #    force-enable, REAL perf for IA multi-GPU) — ships as version branches
 #    (e.g. 610.43.03-p2p), NOT as .patch files; it cannot ride this manifest

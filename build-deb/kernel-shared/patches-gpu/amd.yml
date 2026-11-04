@@ -14,7 +14,19 @@
 #   a CPU patch misleadingly named, or a source tree rather than a patch set.
 #
 # CANDIDATES (proof = fetched file + sha256, 2026-11-04):
-# 1. CachyOS/kernel-patches AMD dir — maintained repo, but the amdgpu-file
+# OWNER LEADS (04/11 20:3x, verified live) — lore.kernel.org mboxes, pinned
+# sha256; the owner picks the entries, nothing is applied until them:
+# 1. IOMMU PerfOpt v2 — Mario Limonciello, 2 patches (iommu/amd + amdgpu),
+#    rebased 7.3-rc2; ~20%% LLM-task gain measured (Phoronix amd-perfopt).
+#    Mbox: https://lore.kernel.org/linux-iommu/20260908041207.38113-1-mario.limonciello@amd.com/t.mbox.gz
+#      proof sha256: c23da0c9c7232f9beb6a112519cc84f4403d4fc0d35fcecc8d3224fff436bbf0
+#    (newer v4 exists: 20260930162401.273907-1-superm1@kernel.org,
+#    t.mbox.gz sha256 c27410e24871c6c9... — owner arbitrates the version).
+# 2. userq/hung-queue — Jesse Zhang, 21 patches (20260921075326.2409021-1,
+#    lore archive rows 153406/153407 2026-September are its patches 09/10).
+#    Mbox: https://lore.kernel.org/amd-gfx/20260921075326.2409021-1-Jesse.Zhang@amd.com/t.mbox.gz
+#      proof sha256: ac74122280c077224d8bb479ad0f07dc9058698fe7b2921d6caf5641dee8d76f
+# 3. CachyOS/kernel-patches AMD dir — maintained repo, but the amdgpu-file
 #    content is old (5.15) and the newer amd-* patches are CPU-side
 #    (pstate/cache), NOT amdgpu:
 #    https://github.com/CachyOS/kernel-patches/tree/master/5.15/AMD
