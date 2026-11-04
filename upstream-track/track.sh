@@ -93,10 +93,15 @@ fetch_kernel_release() {
 #   $2 - kernel version, e.g. 7.2.11
 #######################################
 patch_urls_available() {
-  local url series="${2%.*}"
+  local url series="${2%.*}" sdir
   [[ "$2" == *.*.* ]] || series="$2"
+  # {seriesdir}: the xanmod upstream series directory; archived series
+  # (7.0.x) live under eol/ — same rule as kernel_patch_list.
+  sdir="linux-${series}.y-xanmod"
+  [[ "${series}" == "7.0" ]] && sdir="eol/linux-7.0.y-xanmod"
   while IFS= read -r url; do
     [[ -n "${url}" ]] || continue
+    url="${url//\{seriesdir\}/${sdir}}"
     url="${url//\{series\}/${series}}"
     url="${url//\{version\}/$2}"
     curl --retry 3 -fsSL -o /dev/null "${url}" || {
@@ -107,10 +112,14 @@ patch_urls_available() {
 }
 
 #######################################
-# URL lines of one entry's patch set (owner decision 2026-11-03): either the
-# native `patches:` entries of the manifest (require-patches: native) or the
-# URLs of a patches.yml manifest path relative to the package manifest (the
-# VE kernel-pve lane). Printed one per line.
+# URL lines of one entry's patch set: the native `patches:` entries of the
+# manifest (require-patches: native), a patches.yml path relative to the
+# package manifest (the VE kernel-pve lane), or `engine` (require-patches:
+# engine): the canonical shared set of the BUILD ENGINE
+# (build-deb/kernel-shared/patches-shared.yml, resolved next to this
+# script's own repository root — the debs builder runs the track step from
+# the engine checkout, so the path is local, never a dist fetch between
+# production repositories). Printed one per line.
 # Arguments:
 #   $1 - require-patches value
 #   $2 - package name
@@ -118,6 +127,15 @@ patch_urls_available() {
 patch_urls() {
   if [[ "$1" == "native" ]]; then
     yq ".packages[] | select(.name == \"$2\") | (.patches // [])[].url" "${MAN}"
+  elif [[ "$1" == "engine" ]]; then
+    local engine
+    engine="${CI_ENGINE_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
+    [[ -r "${engine}/build-deb/kernel-shared/patches-shared.yml" ]] || {
+      echo "engine patch manifest not found: ${engine}/build-deb/kernel-shared" >&2
+      return 1
+    }
+    yq '.patches[] | .url | sub("{topic}"; (.topic // ""))' \
+      "${engine}/build-deb/kernel-shared/patches-shared.yml"
   else
     local manifest
     manifest="$(dirname "${SOURCE_MAN:-${MAN}}")/$1"

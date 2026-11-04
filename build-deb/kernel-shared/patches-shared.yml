@@ -122,6 +122,21 @@ patches:
       # entry is excluded on that series only (helper filter exclude-series);
       # the SCHED_BORE pin simply resolves as absent there. A series bump
       # re-arms it automatically.
+      - name: rocknix-btrtl-rtl8733bu
+        # DEBIAN-LANE MODULE CARRIER (owner arbitration 2026-11-03 13:05:
+        # production packages.yaml carry NO native patch data — this entry
+        # moved out of debian-bootc packages.yml). Debian-lane, arm64 tree:
+        # the RTL8733BU device support rides on the arm64 kernel builds.
+        # 171 chars: the upstream file name cannot be split (YAML folds a
+        # line break to a space, which would corrupt the URL).
+        url: https://github.com/ROCKNIX/distribution/raw/next/projects/ROCKNIX/packages/linux/patches/mainline/0005-Bluetooth-btrtl-Add-the-support-for-RTL8733BU.patch
+        stage: arm64
+        class: module
+        # The upstream context of btusb.c moved (186 lines, two context lines
+        # differ); the hunk only inserts one device-ID entry. Placement verified on
+        # 7.2.14: it lands between 0xb011 and the 8761BUV block.
+        fuzz: 2
+        license: GPL-2.0-only
       - name: bore
         url: https://raw.githubusercontent.com/CachyOS/kernel-patches/master/{series}/sched/0001-bore.patch
         stage: common

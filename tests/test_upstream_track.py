@@ -406,6 +406,72 @@ def test_resolve_skips_a_kernel_the_patches_do_not_cover(api: Path) -> None:
     ]
 
 
+def _kernel_with_engine(api: Path, engine: Path, available: set[str]) -> None:
+    """Point ``require-patches: engine`` at a fake engine and serve the
+    series dirs as the xanmod layout ({seriesdir}/{topic}); some series are
+    unavailable (e.g. 7.3 without a bore sibling)."""
+    (api / 'packages.yml').write_text(
+        KERNEL_MANIFEST.replace(
+            'kernel-org: stable',
+            'kernel-org: stable\n        require-patches: engine'
+        )
+    )
+    cdn = api / 'cdn'
+    cdn.mkdir(exist_ok=True)
+    (cdn / 'sha256sums.asc').write_text(
+        f'{DIGEST}  linux-7.3.1.tar.xz\n{DIGEST}  linux-7.2.11.tar.xz\n'
+    )
+    shared = engine / 'build-deb' / 'kernel-shared'
+    shared.mkdir(parents=True)
+    for series in ('7.3', '7.2'):
+        sdir = api / f'linux-{series}.y-xanmod'
+        sdir.mkdir(exist_ok=True)
+        (sdir / 'topic').mkdir(exist_ok=True)
+        if series in available:
+            (sdir / 'topic' / '0001-xanmod-bore.patch').write_text('x')
+    manifest = (
+        'patches:\n'
+        f'  - url: file://{api}/{{seriesdir}}/topic/0001-xanmod-bore.patch\n'
+        '    topic: topic\n'
+    )
+    (shared / 'patches-shared.yml').write_text(manifest)
+    releases = [{
+        'moniker': 'stable',
+        'version': '7.3.1',
+        'source': f'file://{cdn}/linux-7.3.1.tar.xz'
+    }, {
+        'moniker': 'stable',
+        'version': '7.2.11',
+        'source': f'file://{cdn}/linux-7.2.11.tar.xz'
+    }]
+    (api / 'releases.json').write_text(json.dumps({'releases': releases}))
+
+
+def test_resolve_engine_mode_falls_back_to_the_covered_series(
+    api: Path, tmp_path: Path
+) -> None:
+    """``require-patches: engine`` probes the engine's shared set: the
+    newest series whose every patch upstream wins (7.3 without bore → 7.2).
+
+    Args:
+        api: API tree fixture.
+        tmp_path: Scratch directory holding the fake engine root.
+    """
+    _kernel_with_engine(api, tmp_path / 'engine', {'7.2'})
+    result = _run(
+        api,
+        'resolve',
+        PKG='kernel',
+        BASE_ENV='A=1',
+        KERNEL_ORG_URL=f'file://{api}',
+        CI_ENGINE_ROOT=str(tmp_path / 'engine')
+    )
+    assert result.returncode == 0, result.stderr
+    assert _env_output(api) == [
+        'A=1', 'KERNEL_VER=7.2.11', f'KERNEL_SHA256={DIGEST}'
+    ]
+
+
 def test_resolve_skips_a_kernel_whose_digest_is_not_published(
     api: Path
 ) -> None:
