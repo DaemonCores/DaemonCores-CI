@@ -14,9 +14,18 @@ on:
   workflow_call:
     inputs:
       enable_base:
-        description: 'Product builds on debian-bootc and may rebuild it (DaemonCores-VE: true).'
+        description: 'Product builds on the base_repo upstream and may rebuild it (proxmox-ve-bootc: DaemonCores/debian-bootc; DaemonCores-VE: DaemonCores/proxmox-ve-bootc).'
         type: boolean
         default: false
+      # The upstream repository the product derives FROM (the base rebuild
+      # trigger targets it). Default: the debian-bootc base (debian-bootc and
+      # proxmox-ve-bootc sit on it). The DaemonCores-VE fork sits on the
+      # PUBLISHED proxmox-ve-bootc image and passes that repository here, so
+      # the chain runs debian-bootc -> proxmox-ve-bootc -> DaemonCores-VE.
+      base_repo:
+        description: 'Upstream repository to rebuild when update_base is asked.'
+        type: string
+        default: 'DaemonCores/debian-bootc'
       # Dispatch checkboxes, forwarded from the caller. Passed as strings so an
       # empty value on push/schedule (no inputs) is tolerated; the `changes` job
       # only reads them on workflow_dispatch.
@@ -203,8 +212,8 @@ jobs:
             "$env" "$debs" "$image" "$iso" "$img_rpi" "$img_gallium" | tee -a "$GITHUB_OUTPUT"
 
   base:
-    name: Rebuild debian-bootc base first
-    # Manual-dispatch only, and only for products that sit on the base
+    name: Rebuild the upstream base first
+    # Manual-dispatch only, and only for products that sit on an upstream
     # (enable_base). A push/schedule never rebuilds the base (nothing in the
     # product repo changes it). If it fails, the downstream jobs gate on base
     # success/skipped, so the run goes red instead of shipping on a stale base.
@@ -212,10 +221,10 @@ jobs:
     if: ${{ !cancelled() && needs.prepare.outputs.restart != 'yes' && inputs.enable_base && inputs.update_base == 'true' }}
     runs-on: ubuntu-latest
     steps:
-      - name: Trigger debian-bootc pipeline and wait
+      - name: Trigger the upstream base pipeline and wait
         uses: DaemonCores/DaemonCores-CI/trigger-pipeline@main
         with:
-          repo: DaemonCores/debian-bootc
+          repo: ${{ inputs.base_repo }}
           workflow: pipeline.yml
           ref: main
           # PAT with Actions read+write on debian-bootc (GITHUB_TOKEN cannot
