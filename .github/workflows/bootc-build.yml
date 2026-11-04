@@ -375,9 +375,12 @@ jobs:
             fi
           done
           docker manifest create "${list}" "${refs[@]}"
-          for arch in "${arches[@]}"; do
-            if [ "${arch}" = "arm64" ]; then
-              docker manifest annotate --arch arm64 "${list}" "${refs[1]}"
+          for i in "${!refs[@]}"; do
+            # refs[i] parallels arches[i]; a `-4k` tag (arm64 only) has no
+            # index 1 — indexing by arm64's actual position keeps the
+            # annotation unbound-variable-safe under set -u.
+            if [ "${arches[$i]}" = "arm64" ]; then
+              docker manifest annotate --arch arm64 "${list}" "${refs[$i]}"
             fi
           done
           docker manifest push "${list}"
