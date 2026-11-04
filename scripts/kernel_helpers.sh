@@ -410,6 +410,16 @@ kernel_pve_clone_packaging() {
   git clone --quiet --no-checkout "${url}" "${dest}" \
     || return 1
   while read -r commit; do
+    # 2026-11-04: master carries the objtool klp-checksum tool whose C does
+    # not compile against ANY of the packaged kernel trees (insn_reloc et al.
+    # are missing there) — proven on 41925723483 / 41930175340 / 41936105671.
+    # Walk back past every commit that introduces it; those commits are
+    # unbuildable upstream, with ANY kernel.
+    if git -C "${dest}" cat-file -e "${commit}:pkg-src/kernel/tools/objtool/klp-checksum.c" 2>/dev/null; then
+      echo "WARN: packaging ${commit} carries the uncompilable klp-checksum tool; walking back past it"
+      tried=$((tried + 1))
+      continue
+    fi
     tried=$((tried + 1))
     git -C "${dest}" checkout --quiet --force "${commit}" || return 1
     if git -C "${dest}" submodule update --init --depth 1 --recommend-shallow; then
