@@ -116,10 +116,12 @@ kernel_prepare() {
   SEED_DIR=/tmp/linux-kernel-build-seed
   rm -rf "${SEED_DIR}"
   dpkg-deb -x "${COMMON_DEB}" "${SEED_DIR}"
-  test -f "${SEED_DIR}/usr/lib/linux-kernel-build/config" \
+  # The build tree is PER-FLAVOUR (owner 04/11, unpack collision): the deb
+  # name and the tree path share the KERNEL_SUFFIX ("", -x64vN, -16k).
+  test -f "${SEED_DIR}/usr/lib/linux-kernel-build${KERNEL_SUFFIX:-}/config" \
     || {
       echo "ERROR: ${COMMON_DEB} carries no kernel config" >&2
       exit 1
     }
-  cp "${SEED_DIR}/usr/lib/linux-kernel-build/config" .config
+  cp "${SEED_DIR}/usr/lib/linux-kernel-build${KERNEL_SUFFIX:-}/config" .config
 }
