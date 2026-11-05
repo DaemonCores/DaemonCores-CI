@@ -214,10 +214,12 @@ PART
   # kernel_2712.img (Pi 5 firmware loads it directly — Pi 5 dropped the
   # start*.elf/fixup*.dat stage and boots a raw kernel image named
   # kernel_2712.img).
-  KERNEL=$(find /target/usr/lib/modules -maxdepth 2 -name vmlinuz \
-    2>/dev/null | sort -V | tail -1)
+  KERNEL=$( (find /target/usr/lib/modules /target/ostree/deploy -name vmlinuz \
+        2>/dev/null || true) \
+      | sort -V | tail -1)
   if [ -z "$KERNEL" ]; then
-    echo "::error::No kernel (vmlinuz) found in the bootc image" >&2
+    echo "::error::No kernel (vmlinuz) found in the bootc image (searching the tree:)" >&2
+    find /target -maxdepth 7 \( -name vmlinuz -o -name "lib/modules" \) 2>/dev/null | head -20 >&2 || true
     exit 1
   fi
   cp "$KERNEL" /mnt-boot/kernel8.img
@@ -226,8 +228,9 @@ PART
   # DTBs: copy the broadcom bcm2711 (Pi 4), bcm2712 (Pi 5) and bcm2837 (Pi 3)
   # blobs if present. The Debian arm64 kernel package lays them at
   # /usr/lib/linux-image-<ver>/broadcom/bcm*.dtb.
-  DTB_DIR=$(find /target/usr/lib -maxdepth 3 -type d -name broadcom \
-    2>/dev/null | sort -V | tail -1)
+  DTB_DIR=$( (find /target/usr/lib /target/ostree/deploy -type d -name broadcom \
+      2>/dev/null || true) \
+    | sort -V | tail -1)
   if [ -n "$DTB_DIR" ]; then
     mkdir -p /mnt-boot/overlays
     cp "${DTB_DIR}"/bcm*.dtb /mnt-boot/ 2>/dev/null || true
@@ -353,15 +356,18 @@ PART
     # is at /usr/lib/linux-image-<ver>/<vendor>/<board>.dtb — the phone
     # board DTB is selected by the device tree name baked into the kernel
     # cmdline; here we pass the first DTB found (single-board phone).
-    KERNEL=$(find /target/usr/lib/modules -maxdepth 2 -name vmlinuz \
-      2>/dev/null | sort -V | tail -1)
+    KERNEL=$( (find /target/usr/lib/modules /target/ostree/deploy -name vmlinuz \
+          2>/dev/null || true) \
+        | sort -V | tail -1)
     if [ -z "$KERNEL" ]; then
-      echo "::error::No kernel (vmlinuz) found in the bootc image" >&2
+      echo "::error::No kernel (vmlinuz) found in the bootc image (searching the tree:)" >&2
+    find /target -maxdepth 7 \( -name vmlinuz -o -name "lib/modules" \) 2>/dev/null | head -20 >&2 || true
       exit 1
     fi
 
-    INITRAMFS=$(find /target/boot -maxdepth 1 -name 'initramfs-*.img' \
-      2>/dev/null | sort -V | tail -1)
+    INITRAMFS=$( (find /target/boot /target/ostree/deploy -name 'initramfs-*.img' \
+        2>/dev/null || true) \
+      | sort -V | tail -1)
     if [ -z "$INITRAMFS" ]; then
       echo "::error::No initramfs found in /target/boot (bootc install did not lay one)" >&2
       exit 1
@@ -370,8 +376,9 @@ PART
     # DTB: the phone board DTB. Use the first .dtb under the linux-image
     # tree that is NOT a broadcom one (broadcom = RPi). On a phone target the
     # relevant vendor is qcom/sdm845 or similar.
-    DTB=$(find /target/usr/lib/linux-image-* -type f -name '*.dtb' \
-      2>/dev/null | grep -v '/broadcom/' | sort -V | head -1)
+    DTB=$( (find /target/usr/lib /target/ostree/deploy -type f -name '*.dtb' \
+        2>/dev/null || true) \
+      | grep -v '/broadcom/' | sort -V | head -1)
     if [ -z "$DTB" ]; then
       echo "::warning::No phone DTB found; packing boot.img without a DTB." >&2
     fi
