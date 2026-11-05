@@ -115,6 +115,13 @@ jobs:
           yq -P '.' "$man.tmp" > "$man" && rm -f "$man.tmp"
           echo "only=${ONLY}: kept ${kept} package(s):" \
             "$(yq '.packages[].name' "$man" | tr '\n' ' ')"
+          # Deps dropped by this filter cannot be satisfied intra-run (no
+          # wave, no /tmp/prior deb): strip them so the package builds with
+          # its OWN fallback source (zfs-module-pve: the published APT
+          # index of a previous green run). Unfiltered path untouched.
+          yq -o=json '.' "$man" > "$man.json"
+          python3 .ci-tooling/scripts/prune_unsatisfiable_deps.py "$man.json"
+          yq -P '.' "$man.json" > "$man" && rm -f "$man.json"
 
       - name: Compute dependency waves
         id: waves
