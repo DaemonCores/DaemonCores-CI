@@ -159,6 +159,13 @@ cleanup() {
 }
 trap cleanup EXIT
 
+# podman's --cgroups=disabled requires crun (the runners run crun); on an
+# runc host, leave cgroup creation as-is instead of dying on NoCgroups.
+CG_FLAG=""
+if [ "$(podman info --format '{{.Host.Runtime}}' 2>/dev/null || echo runc)" = "crun" ]; then
+  CG_FLAG="--cgroups=disabled"
+fi
+
 if [ "$TARGET" = "rpi" ]; then
   # ── Raspberry Pi: FAT32 /boot + ext4 / ───────────────────────────────────
   # GPT: p1 = FAT32 /boot (512M, Linux filesystem type GUID), p2 = ext4 /
@@ -185,7 +192,7 @@ PART
   echo ">>> Laying root filesystem via bootc install to-filesystem..."
   mkdir -p /target
   mount "${DEV}p2" /target
-  podman run --rm --privileged --pid=host \
+  podman run --rm --privileged --pid=host ${CG_FLAG}\
     --security-opt label=disable \
     -v /dev:/dev \
     -v /var/lib/containers:/var/lib/containers \
@@ -294,7 +301,7 @@ PART
     echo ">>> Laying root filesystem via bootc install to-filesystem..."
     mkdir -p /target
     mount "${DEV}p1" /target
-    podman run --rm --privileged --pid=host \
+    podman run --rm --privileged --pid=host ${CG_FLAG}\
       --security-opt label=disable \
       -v /dev:/dev \
       -v /var/lib/containers:/var/lib/containers \
@@ -324,7 +331,7 @@ PART
     echo ">>> Laying root filesystem via bootc install to-filesystem..."
     mkdir -p /target
     mount "${DEV}p2" /target
-    podman run --rm --privileged --pid=host \
+    podman run --rm --privileged --pid=host ${CG_FLAG}\
       --security-opt label=disable \
       -v /dev:/dev \
       -v /var/lib/containers:/var/lib/containers \
