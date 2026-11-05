@@ -62,6 +62,8 @@ mkdir -p "${OUT_DIR}"
 IMG_PATH="${OUT_DIR}/${IMG_FILE}"
 
 # Image size: rpi 4G (small OS + FAT32 boot), gallium 8G.
+echo ">>> podman diagnostics: runtime=$(podman info --format '{{.Host.Runtime}}' 2>/dev/null || echo info-failed), CG_FLAG=${CG_FLAG}"
+
 if [ "$TARGET" = "rpi" ]; then
   SIZE_MB=4096
 else
