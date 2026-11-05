@@ -52,13 +52,16 @@ def test_gpu_manifests_present_and_schema() -> None:
             assert entry.get("stage", "common") in ("common", "amd64", "arm64")
             sha = entry.get("sha256")
             if sha is not None:
-                assert len(sha) == 64 and all(c in "0123456789abcdef" for c in sha)
+                assert len(sha) == 64 and all(
+                    c in "0123456789abcdef" for c in sha
+                )
 
     # The shared-data hash term rides the WHOLE directory (content-hash.sh
     # uses find kernel-shared -type f): adding a driver set changes every
     # consuming package's cache key. Prove the dir listing sees the files.
-    assert {p.name for p in GPU_DATA.iterdir()} == {
-        "nvidia.yml", "amd.yml", "intel.yml"}
+    assert {p.name
+            for p in GPU_DATA.iterdir()
+            } == {"nvidia.yml", "amd.yml", "intel.yml"}
 
 
 def test_gpu_nvidia_candidates_documented_not_chosen() -> None:
@@ -68,18 +71,20 @@ def test_gpu_nvidia_candidates_documented_not_chosen() -> None:
     for name in ("nvidia.yml", "amd.yml", "intel.yml"):
         text = (GPU_DATA / name).read_text()
         assert "patches: []" in text, name
-        assert "proof sha256" in text.lower(), (
-            f"{name}: candidates need URL+sha256 proof documentation")
+        assert "proof sha256" in text.lower(
+        ), (f"{name}: candidates need URL+sha256 proof documentation")
 
 
 def run_helper(script: str, **env_over) -> subprocess.CompletedProcess:
     import os
 
-    env = {"PATH": os.environ["PATH"], "HOME": os.environ["HOME"],
-           **env_over}
-    return subprocess.run(
-        ["bash", "-c", f'source "{HELPER}"\nset -euo pipefail\n{script}'],
-        capture_output=True, text=True, env=env)
+    env = {"PATH": os.environ["PATH"], "HOME": os.environ["HOME"], **env_over}
+    return subprocess.run([
+        "bash", "-c", f'source "{HELPER}"\nset -euo pipefail\n{script}'
+    ],
+                          capture_output=True,
+                          text=True,
+                          env=env)
 
 
 def test_empty_gpu_set_is_a_noop() -> None:
@@ -97,14 +102,16 @@ def _series_probe_patch(tmp: Path) -> Path:
     prefix), not as a series derived from the NVIDIA release number."""
     patch = tmp / "probe.patch"
     patch.write_text(
-        "--- a/README\n+++ b/README\n@@ -1 +1 @@\n-gpu probe\n+gpu probe patched\n")
+        "--- a/README\n+++ b/README\n@@ -1 +1 @@\n-gpu probe\n+gpu probe patched\n"
+    )
     (patch.parent / "README").write_text("gpu probe\n")
     manifest = tmp / "probe.yml"
     manifest.write_text(
         "patches:\n"
         "  - name: probe\n"
         f"    url: file://{tmp}/series-{{series}}/probe.patch\n"
-        "    stage: common\n")
+        "    stage: common\n"
+    )
     (tmp / "series-7.2").mkdir()
     patch.rename(tmp / "series-7.2" / "probe.patch")
     return manifest
@@ -120,10 +127,11 @@ def test_patches_series_override_resolves_kernel_series() -> None:
         manifest = _series_probe_patch(tmp)
         # The NVIDIA release 595.104.02 would compute series '595.104' —
         # the override must resolve 7.2 instead, then dry-run + apply.
-        r = run_helper(
-            (f'PATCHES_SERIES=7.2 '
-             f'kernel_apply_patches "{manifest}" amd64 595.104.02 "{tmp}" && '
-             f'grep -q patched {tmp}/README && echo APPLIED'))
+        r = run_helper((
+            f'PATCHES_SERIES=7.2 '
+            f'kernel_apply_patches "{manifest}" amd64 595.104.02 "{tmp}" && '
+            f'grep -q patched {tmp}/README && echo APPLIED'
+        ))
         assert r.returncode == 0, r.stderr
         assert "APPLIED" in r.stdout
 
@@ -134,10 +142,11 @@ def test_gpu_env_var_does_not_leak_between_driver_manifests() -> None:
     with tempfile.TemporaryDirectory() as td:
         tmp = Path(td)
         manifest = _series_probe_patch(tmp)
-        r = run_helper(
-            (f'PATCHES_SERIES=7.2 kernel_apply_patches "{manifest}" amd64 '
-             f'595.104.02 "{tmp}" >/dev/null; '
-             f'[[ -z "${{PATCHES_SERIES:-}}" ]] && echo RESTORED'))
+        r = run_helper((
+            f'PATCHES_SERIES=7.2 kernel_apply_patches "{manifest}" amd64 '
+            f'595.104.02 "{tmp}" >/dev/null; '
+            f'[[ -z "${{PATCHES_SERIES:-}}" ]] && echo RESTORED'
+        ))
         assert r.returncode == 0, r.stderr + r.stdout
         assert r.stdout.strip() == "RESTORED"
 
@@ -150,8 +159,7 @@ def test_sha256_pin_enforced_all_or_nothing(tmp_path=None) -> None:
 
     tmp = Path(tempfile.mkdtemp())
     patch = tmp / "p.patch"
-    patch.write_text(
-        "--- a/READ\n+++ b/READ\n@@ -1 +1 @@\n-one\n+two\n")
+    patch.write_text("--- a/READ\n+++ b/READ\n@@ -1 +1 @@\n-one\n+two\n")
     (tmp / "READ").write_text("one\n")
     good = hashlib.sha256(patch.read_bytes()).hexdigest()
     manifest = tmp / "m.yml"
@@ -160,9 +168,11 @@ def test_sha256_pin_enforced_all_or_nothing(tmp_path=None) -> None:
         "  - name: pinned\n"
         f"    url: file://{tmp}/p.patch\n"
         "    stage: common\n"
-        f"    sha256: {good}\n")
+        f"    sha256: {good}\n"
+    )
     r = run_helper(
-        f'kernel_apply_patches "{manifest}" amd64 7.2.15 "{tmp}" && grep -q two {tmp}/READ')
+        f'kernel_apply_patches "{manifest}" amd64 7.2.15 "{tmp}" && grep -q two {tmp}/READ'
+    )
     assert r.returncode == 0, r.stderr
     manifest.write_text(manifest.read_text().replace(good, "0" * 64))
     (tmp / "READ").write_text("one\n")
@@ -176,27 +186,62 @@ def test_sha256_pin_enforced_all_or_nothing(tmp_path=None) -> None:
     assert r.stdout.strip() == "GUARDED"
 
 
+def patches_gpu_nvidia_count(text: str) -> int:
+    """Count the kernel_apply_patches invocations on the nvidia.yml in one
+    packages.yml — one entry per repo that ships a kernel-module pair."""
+    import re
+    return len(re.findall(r'kernel_apply_patches "\$\{GPU_NVIDIA_YML\}"', text))
+
+
 def test_bootc_builds_apply_the_gpu_manifests() -> None:
     """The real builds apply the sets (all-or-nothing, empty = no-op):
-    linux-image loops amd+intel over the kernel tree; BOTH nvidia module
-    entries apply nvidia.yml to the open-gpu-kernel-modules tree before
-    `make modules`."""
+    the debian linux-image loops amd+intel over the kernel tree; the
+    debian linux-modules-nvidia AND the pve-lane pair apply nvidia.yml to
+    the open-gpu-kernel-modules tree before `make modules` (the pve pair
+    MOVED to the vanilla lane, one build per kernel repo — owner 04/11)."""
     text = BOOTC_PACKAGES.read_text()
     assert 'patches-gpu/${GPU_DRIVER}.yml' in text
-    for _ in range(2):
-        assert 'kernel_apply_patches "${GPU_NVIDIA_YML}"' in text
-    assert 'patches-gpu/nvidia.yml missing' in text  # both guarded
-    # Both nvidia entries patch the NVIDIA tree BEFORE its compile:
+    assert patches_gpu_nvidia_count(text) == 1
+    assert 'patches-gpu/nvidia.yml missing' in text  # guarded
+    # The debian nvidia entry patches the NVIDIA tree BEFORE its compile:
     import re
 
-    makes = [m.start() for m in re.finditer(r'make -C /build/nvidia-open', text)]
-    applies = [m.start() for m in re.finditer(
-        r'kernel_apply_patches "\$\{GPU_NVIDIA_YML\}"', text)]
-    # Each entry runs two make calls (modules, then the signed pair install):
-    # the entry's FIRST make must come after its own manifest application.
-    assert len(makes) >= 4 and len(applies) == 2
-    assert applies[0] < makes[0] and applies[1] < makes[2]
+    makes = [
+        m.start() for m in re.finditer(r'make -C /build/nvidia-open', text)
+    ]
+    applies = [
+        m.start() for m in
+        re.finditer(r'kernel_apply_patches "\$\{GPU_NVIDIA_YML\}"', text)
+    ]
+    # The entry runs two make calls (modules, then the signed pair install):
+    # its FIRST make must come after its own manifest application.
+    assert len(makes) >= 2
+    assert applies[0] < makes[0]
     # The variants share ONE manifest ("même set" ia/gaming, owner 10/31:
     # config differs, never the vendor list) — no nvidia-ia/gaming split.
     assert 'patches-gpu/nvidia-ia' not in text \
         and 'patches-gpu/nvidia-gaming' not in text
+
+
+def test_pve_lane_applies_the_gpu_manifest_against_its_tree() -> None:
+    """The vanilla-lane nvidia pair applies nvidia.yml to the NVIDIA
+    open tree compiled against the LIVE pve SRCDIR (kernel-pve entry,
+    pivot 7.2: the pair = the SAME lane tree, local SRCDIR)."""
+    pve = (
+        Path(__file__).resolve().parents[2] / "proxmox-ve-bootc" / "workflows" /
+        "bootc-debs-builder" / "packages.yml"
+    )
+    text = pve.read_text()
+    assert patches_gpu_nvidia_count(text) == 1
+    assert 'patches-gpu/nvidia.yml missing' in text  # guarded
+    import re
+
+    makes = [
+        m.start() for m in re.finditer(r'make .*-C /build/nvidia-open', text)
+    ]
+    applies = [
+        m.start() for m in
+        re.finditer(r'kernel_apply_patches "\$\{GPU_NVIDIA_YML\}"', text)
+    ]
+    assert len(applies) == 1
+    assert applies[0] < makes[0]
