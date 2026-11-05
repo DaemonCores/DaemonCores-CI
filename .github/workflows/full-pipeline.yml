@@ -50,6 +50,16 @@ on:
       gpu_driver:
         type: string
         default: 'false'
+      # Single-entry dispatch filter (owner 05/11 08:57: build ONE module
+      # without moving the rest of the lane): forwarded to the deb builder's
+      # `only` input — the expanded manifest is filtered to the packages
+      # whose name is <only_deb> or starts with <only_deb>- BEFORE the wave
+      # plan. An image/iso run on a filtered debs stage keeps the published
+      # deb for every other package (the APT repo carries them). Empty on a
+      # push/schedule = unfiltered.
+      only_deb:
+        type: string
+        default: ''
       # Opt-in disk-image (.img) build, split per format. NEVER activated by
       # default — only via the workflow_dispatch checkboxes. The img job runs
       # after the container image build and produces flashable .img files.
@@ -491,6 +501,7 @@ jobs:
       arch: amd64
       signing_active: ${{ needs.prepare.outputs.signing_active }}
       gpu_driver: ${{ inputs.gpu_driver == 'true' && 'yes' || 'no' }}
+      only: ${{ inputs.only_deb }}
       deploy_pages: false
     secrets: inherit
 
@@ -516,6 +527,7 @@ jobs:
       arch: arm64
       signing_active: ${{ needs.prepare.outputs.signing_active }}
       gpu_driver: ${{ inputs.gpu_driver == 'true' && 'yes' || 'no' }}
+      only: ${{ inputs.only_deb }}
       deploy_pages: false
     secrets: inherit
 

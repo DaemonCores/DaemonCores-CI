@@ -30,6 +30,11 @@ on:
         required: false
         type: boolean
         default: true
+      only:
+        description: 'Dispatch filter: keep only the packages whose expanded name is <only> or starts with <only>- (e.g. only=zfs-module-pve builds every zfs-module-pve-* variant; only=zfs-module-pve-x64v3 builds one). Empty = keep everything.'
+        required: false
+        type: string
+        default: ''
     outputs:
       any_rebuilt:
         description: 'true if at least one package was rebuilt (not cache-reused).'
@@ -86,6 +91,30 @@ jobs:
           # `when: {unsigned-kernel: true}` anymore (L1), the filter drops none.
           unsigned-kernel: 'no'
           gpu-driver: ${{ inputs.gpu_driver == 'yes' && 'yes' || 'no' }}
+
+      # Dispatch filter (owner 05/11 08:57: build a SINGLE entry without
+      # disturbing the rest of the lane): keep only the packages whose
+      # expanded name is ONLY or starts with ONLY- (variant expansion:
+      # zfs-module-pve -> zfs-module-pve-x64v3, ...). Applied AFTER expand
+      # so the wave planner, the matrix and every build job see exactly the
+      # filtered set. Empty ONLY = unfiltered (the normal push path).
+      - name: Dispatch-only filter
+        if: ${{ inputs.only != '' }}
+        shell: bash
+        env:
+          ONLY: ${{ inputs.only }}
+        run: |
+          set -euo pipefail
+          man="${{ steps.expand.outputs.manifest }}"
+          yq -o=json '.packages = [.packages[]
+            | select(.name == env(ONLY) or (.name | test("^" + env(ONLY) + "-")))]' \
+            "$man" > "$man.tmp"
+          kept=$(yq '.packages | length' "$man.tmp")
+          test "${kept:-0}" -gt 0 \
+            || { echo "ERROR: only=${ONLY} matched 0 packages in the expanded manifest" >&2; exit 1; }
+          yq -P '.' "$man.tmp" > "$man" && rm -f "$man.tmp"
+          echo "only=${ONLY}: kept ${kept} package(s):" \
+            "$(yq '.packages[].name' "$man" | tr '\n' ' ')"
 
       - name: Compute dependency waves
         id: waves
