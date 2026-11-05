@@ -85,23 +85,60 @@ echo ">>> Loop device: ${DEV}"
 
 # Container /dev does not propagate nodes created by the kernel AFTER the
 # mount (sfdisk's own re-read confirmed it: "/dev/loop0p2 does not exist").
-# The /sys partition entries are always visible, so recreate the /dev nodes
-# from sysfs major:minor before any ${DEV}pN use.
-ensure_part_nodes() {
-  base="$(basename "$1")"
+# The /sys partition entries are normally visible, so recreate the /dev
+# nodes from sysfs major:minor before any ${DEV}pN use. They can lag, so
+# wait for them (bounded); if the kernel never scanned the table at all
+# (partscan withheld: no loopNpN under /sys/class/block after the wait),
+# fall back to attaching one sub-loop per partition at the start/size read
+# from `sfdisk -d` — a sub-loop is a plain block device that needs no
+# partition node, so mkfs/mount/dd against the mknod'd ${DEV}pN alias keep
+# working without touching the callers below.
+SUB_DEVS=""
+ensure_part_subloops() {
+  # Args: <part-number>...   Globals: DEV, IMG_PATH, SUB_DEVS
   for part in "$@"; do
-    node="$1p${part}"
-    sysdev="/sys/class/block/$(basename "$1")p${part}/dev"
-    if [ ! -e "${sysdev}" ]; then
-      echo "::error::partition ${part} of ${base} not present in /sys (partscan failed)" >&2
+    start="$(sfdisk -d "${DEV}" | sed -n "${part}s/.*start= *\([0-9]*\).*/\1/p")"
+    size="$(sfdisk -d "${DEV}" | sed -n "${part}s/.*size= *\([0-9]*\).*/\1/p")"
+    if [ -z "${start}" ] || [ -z "${size}" ]; then
+      echo "::error::cannot read partition ${part} start/size from sfdisk -d ${DEV} (sub-loop fallback aborted)" >&2
       return 1
     fi
-    if [ ! -e "${node}" ]; then
-      mm="$(cat "${sysdev}")"
-      mknod "${node}" b "${mm% *}" "${mm#* }"
-      echo ">>> (re)created device node ${node} (${mm})"
-    fi
+    sub="$(losetup -f --show --offset $((start * 512)) --sizelimit $((size * 512)) "${IMG_PATH}")"
+    SUB_DEVS="${SUB_DEVS} ${sub}"
+    node="${DEV}p${part}"
+    mm="$(cat "/sys/class/block/$(basename "${sub}")/dev")"
+    rm -f "${node}"
+    mknod "${node}" b "${mm%%:*}" "${mm##*:}"
+    echo ">>> sub-loop ${sub} (start=${start}, size=${size}) mknod'd as ${node} (${mm})"
   done
+}
+
+ensure_part_nodes() {
+  # Args: <dev> <part-number>...   Globals: SUB_DEVS
+  base="$(basename "$1")"
+  nodes_present() {
+    for part in "$@"; do
+      [ -e "/sys/class/block/${base}p${part}/dev" ] || return 1
+    done
+  }
+  # Poll: the partscan entries can take a few seconds to show up.
+  for _ in $(seq 1 30); do
+    nodes_present "$@" && break
+    sleep 1
+  done
+  if nodes_present "$@"; then
+    for part in "$@"; do
+      node="$1p${part}"
+      sysdev="/sys/class/block/${base}p${part}/dev"
+      mm="$(cat "${sysdev}")"
+      rm -f "${node}"
+      mknod "${node}" b "${mm%%:*}" "${mm##*:}"
+      echo ">>> (re)created device node ${node} (${mm})"
+    done
+    return 0
+  fi
+  echo "::warning::partition scan of ${base} absent from /sys after 30s (kernel partscan did not run) — per-partition sub-loop fallback" >&2
+  ensure_part_subloops "${@:2}"
 }
 
 #######################################
@@ -112,6 +149,9 @@ ensure_part_nodes() {
 cleanup() {
   umount -R /target 2>/dev/null || true
   umount /mnt-boot 2>/dev/null || true
+  for sub in ${SUB_DEVS}; do
+    losetup -d "${sub}" 2>/dev/null || true
+  done
   losetup -d "${DEV}" 2>/dev/null || true
 }
 trap cleanup EXIT
@@ -362,6 +402,9 @@ sync
 # Detach the loop device (the trap also does this, but we want a clean state
 # before the release upload).
 umount -R /target 2>/dev/null || true
+for sub in ${SUB_DEVS}; do
+  losetup -d "${sub}" 2>/dev/null || true
+done
 losetup -d "${DEV}" 2>/dev/null || true
 trap - EXIT
 
