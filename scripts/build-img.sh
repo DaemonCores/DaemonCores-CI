@@ -160,13 +160,13 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# podman's --cgroups=disabled requires crun (the runners run crun); on an
-# runc host, leave cgroup creation as-is instead of dying on NoCgroups.
-CG_FLAG=""
-if [ "$(podman info --format '{{.Host.Runtime}}' 2>/dev/null || echo runc)" = "crun" ]; then
-  CG_FLAG="--cgroups=disabled"
-fi
-echo ">>> podman diagnostics: runtime=$(podman info --format '{{.Host.Runtime}}' 2>/dev/null || echo info-failed), CG_FLAG=${CG_FLAG}"
+# The job container cannot delegate the pids cgroup controller, so crun dies
+# at container create; --cgroups=disabled (crun-only feature — this step's
+# Install step pins crun) skips cgroup creation for the ephemeral build
+# container. podman info is NOT a usable probe here: it fails on the job
+# container's store, so the flag is set unconditionally.
+CG_FLAG="--cgroups=disabled"
+echo ">>> podman cgroups flag: ${CG_FLAG}"
 
 if [ "$TARGET" = "rpi" ]; then
   # ── Raspberry Pi: FAT32 /boot + ext4 / ───────────────────────────────────
