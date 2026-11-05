@@ -390,6 +390,72 @@ kernel_build_debs() {
 }
 
 #######################################
+# BUILD a kernel module against a prepared kernel tree (shared by every
+# module pair: the nvidia pair and the zfs pair build ONCE, the deb is
+# consumed by both lanes of the same release — owner 05/11 midi point c).
+# The command string may reference $SYSSRC/$SYSOUT (absolute, resolved).
+# Globals:
+#   (none)
+# Arguments:
+#   $1 - the prepared kernel tree (SYSSRC: kbuild, .config, symvers)
+#   $2 - the module workdir (already cloned/configured)
+#   $3 - the build command, run with set -e from the workdir
+# Returns:
+#   Non-zero on build failure.
+#######################################
+kernel_module_run_build() {
+  local syssrc="${1:?}" workdir="${2:?}" cmd="${3:?}"
+  test -s "${syssrc}/.config" \
+    || { echo "ERROR: kernel_module_run_build: ${syssrc} is not a kernel tree (.config missing)" >&2; return 1; }
+  SYSSRC="$(readlink -e "${syssrc}")" SYSOUT="$(readlink -e "${syssrc}")" \
+    bash --noprofile --norc -eo pipefail -c "${cmd}"
+}
+
+#######################################
+# ASSEMBLE a kernel-modules deb (shared layout: /lib/modules/<release>/kernel/
+# <layout>/, depmod postinst, md5sums, strip --strip-debug on every .ko) —
+# the deb is flavour-free beside its release string and consumed by every
+# lane publishing the same release (owner 05/11 midi points c/e).
+# Globals:
+#   (none)
+# Arguments:
+#   $1 - deb package name
+#   $2 - deb version
+#   $3 - kernel release string (the /lib/modules dir)
+#   $4 - in-tree layout of the .kos (e.g. zfs, drivers/video)
+#   $5 - the Depends line
+#   $6 - the description body (\n escapes allowed)
+#   $7,... - the absolute .ko file paths shipped, in order
+# Returns:
+#   Exits non-zero when a .ko is missing or dpkg-deb fails.
+#######################################
+kernel_modules_deb() {
+  local pkg="${1:?}" ver="${2:?}" release="${3:?}" layout="${4:?}"
+  local depends="${5:?}" desc="${6:?}"
+  shift 6
+  local out="/output/${pkg}" ko arch
+  arch="$(dpkg --print-architecture)"
+  rm -rf "${out}"
+  mkdir -p "${out}/DEBIAN" "${out}/lib/modules/${release}/kernel/${layout}"
+  for ko in "$@"; do
+    test -s "${ko}" \
+      || { echo "ERROR: kernel_modules_deb: ${ko} missing" >&2; exit 1; }
+    strip --strip-debug "${ko}"
+    cp "${ko}" "${out}/lib/modules/${release}/kernel/${layout}/"
+  done
+  printf 'Package: %s\nVersion: %s\nArchitecture: %s\nMaintainer: DaemonCores <packaging@daemoncores.org>\nDepends: %s\nDescription: %s\nSection: kernel\nPriority: optional\n' \
+    "${pkg}" "${ver}" "${arch}" "${depends}" "$(printf '%b' "${desc}")" \
+    > "${out}/DEBIAN/control"
+  printf '#!/bin/sh\nset -e\nif command -v depmod >/dev/null 2>&1; then\n  depmod -a %s\nfi\n' \
+    "${release}" > "${out}/DEBIAN/postinst"
+  chmod 755 "${out}/DEBIAN/postinst"
+  ( cd "${out}" \
+    && find . -type f ! -path './DEBIAN/*' | sed 's|^\./||' >> DEBIAN/md5sums )
+  dpkg-deb --build "${out}" "/debs/${pkg}_${ver}_${arch}.deb"
+  ls -la "/debs/${pkg}_${ver}_${arch}.deb"
+}
+
+#######################################
 # Clone the PVE kernel packaging with its submodules at the newest commit
 # whose submodule pins are all fetchable. Upstream occasionally pins a
 # submodule commit that is not (yet) on its mirror; a plain recursive clone
