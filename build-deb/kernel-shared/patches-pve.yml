@@ -1,18 +1,29 @@
 ---
 # PVE ADDITIVE PATCH SET — owner pivot 7.2 unifié (2026-11-05). The PVE lane
-# builds the upstream MAINLINE kernel.org tree (7.2.15 pinned in the lane,
-# same source/mechanics as the debian lane helpers); the Proxmox packaging
-# submodule mirror_ubuntu-kernels is OUT of the build path. The Proxmox
+# builds the upstream MAINLINE kernel.org tree, resolved DYNAMICALLY at
+# build time (track: kernel-org stable, series "7.2" — the patch-proven
+# stream anchored per the owner order 05/11 01:5x: NO fixed version, the
+# newest 7.2.x wins while it streams); the Proxmox packaging submodule
+# mirror_ubuntu-kernels is OUT of the build path. The Proxmox
 # patches re-enter as ADDITIVES applied AFTER the shared XanMod+clearlinux
 # set, sourced from the GitHub read-only mirror of git.proxmox.com/git/pve-kernel
 # (https://raw.githubusercontent.com/proxmox/pve-kernel/master/patches/kernel/):
 # the mirror serves git-format .patch files, byte-stable, downloadable with
-# no re-encoding. Entries carry a sha256 pin (the exact bytes are immutable).
-# Same canonical schema as patches-shared.yml, applied by the standard
-# kernel_apply_patches — dry-run ALL first, fuzz 0, any failure fails the
-# build all-or-nothing.
+# no re-encoding. Entries carry a sha256 pin (the exact bytes are immutable;
+# the doctrine stays — the TARBALL digest is NOT pinned, it is read from
+# sha256sums.asc every build). Same canonical schema as patches-shared.yml,
+# applied by the standard kernel_apply_patches — dry-run ALL first, fuzz 0,
+# any failure fails the build all-or-nothing: the gate re-validates the
+# RESOLVED tree on every build.
 #
-# PROOF (2026-11-05, dry-run fuzz 0 on the REAL pinned tree: vanilla
+# SERIES GATE (proven live, 2026-11-05): the newest STABLE at that moment,
+# 7.3.1, was dry-run with the FULL shared set + this set — the set's
+# 0055-KVM-Check-for-duplicate-vcpu_id fails there; the track resolution
+# anchors the stream, and the dry-run keeps re-judging the exact resolved
+# tree (a new 7.2.x that drifts a hunk fails the build and keeps the
+# last-good deb).
+#
+# PROOF (2026-11-05, dry-run fuzz 0 on the REAL tree: vanilla
 # linux-7.2.15, tarball sha256
 # d0f6b1d7324c937ccaeb5c4ca7084bfcf71db2edb3e2d3a31f0ad83a681809ab, with the
 # FULL patches-shared.yml set applied first): the 51 entries below apply

@@ -406,6 +406,69 @@ def test_resolve_skips_a_kernel_the_patches_do_not_cover(api: Path) -> None:
     ]
 
 
+def _kernel_with_series(
+    api: Path,
+    series: str,
+    versions: list[str]
+) -> None:
+    """Serve a kernel.org tree with several stable stream releases and a
+    ``series:`` anchor on the entry (the owner order 2026-11-05: the
+    version is dynamic, the stream is the patch-proven one)."""
+    (api / 'packages.yml').write_text(
+        KERNEL_MANIFEST.replace('kernel-org: stable',
+                                f'kernel-org: stable\n        series: {series}')
+    )
+    cdn = api / 'cdn'
+    cdn.mkdir(exist_ok=True)
+    (cdn / 'sha256sums.asc').write_text(
+        ''.join(f'{DIGEST}  linux-{v}.tar.xz\n' for v in versions))
+    releases = [{
+        'moniker': 'stable',
+        'version': v,
+        'source': f'file://{cdn}/linux-{v}.tar.xz'
+    } for v in versions]
+    (api / 'releases.json').write_text(json.dumps({'releases': releases}))
+
+
+def test_resolve_series_anchor_takes_the_newest_of_that_stream(
+    api: Path
+) -> None:
+    """A ``series:`` anchor keeps the newest release of that stable stream
+    (7.2.x), never the newer stream the patches do not cover, and never a
+    fixed version."""
+    _kernel_with_series(api, '7.2', ['7.3.1', '7.2.15', '7.2.11'])
+    result = _run(
+        api,
+        'resolve',
+        PKG='kernel',
+        BASE_ENV='A=1',
+        KERNEL_ORG_URL=f'file://{api}'
+    )
+    assert result.returncode == 0, result.stderr
+    assert _env_output(api) == [
+        'A=1', 'KERNEL_VER=7.2.15', f'KERNEL_SHA256={DIGEST}'
+    ]
+
+
+def test_resolve_series_anchor_skips_when_the_stream_has_no_digest(
+    api: Path
+) -> None:
+    """With no digest published inside the anchored stream the entry is a
+    skip (last-good deb), not a fallback onto another series."""
+    _kernel_with_series(api, '7.2', ['7.3.1', '7.2.15'])
+    (api / 'cdn' / 'sha256sums.asc').write_text(
+        f'{DIGEST}  linux-7.3.1.tar.xz\\n')
+    result = _run(
+        api,
+        'resolve',
+        PKG='kernel',
+        BASE_ENV='A=1',
+        KERNEL_ORG_URL=f'file://{api}'
+    )
+    assert result.returncode == 0, result.stderr
+    assert not any(line.startswith('KERNEL_VER') for line in _env_output(api))
+
+
 def _kernel_with_engine(api: Path, engine: Path, available: set[str]) -> None:
     """Point ``require-patches: engine`` at a fake engine and serve the
     series dirs as the xanmod layout ({seriesdir}/{topic}); some series are

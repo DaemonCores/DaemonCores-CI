@@ -27,6 +27,12 @@
 #       digests:                # env variable -> tarball name; the SHA-256
 #         KERNEL_SHA256: "linux-{version}.tar.xz"   # is read from sha256sums.asc
 #
+#     An optional `series:` value ("7.2") restricts the candidates to that
+#     STABLE STREAM (the patch-proven series, never a fixed version — the
+#     owner order 2026-11-05: the version is resolved dynamically at build
+#     time): the newest 7.2.x wins while it streams, and the entry
+#     auto-advances when the series moves.
+#
 # `require-patches` on the entry restricts the choice to the newest stable or
 # longterm release whose series has every patch URL of that entry upstream, so a
 # kernel that a patch source (CachyOS, ROCKNIX) has not caught up with is
@@ -222,10 +228,16 @@ kernel_digests() {
 #   published), which is a legitimate "nothing to build"; 1 on any other error.
 #######################################
 select_kernel_release() {
-  local req urls version floor entry
+  local req urls version floor entry series
   req=$(yq ".packages[] | select(.name == \"$1\") | .track.\"$2\".\"require-patches\" // \"\"" \
     "${MAN}")
-  if [[ -z "${req}" ]]; then
+  # SERIES anchor (owner 2026-11-05: the kernel version is NEVER a fixed
+  # env): restrict the candidates to the stable stream the patch set is
+  # proven for ("7.2" -> any 7.2.x, newest first). Data, not a version —
+  # the series itself rolls when the patch gate proves the next one.
+  series=$(yq ".packages[] | select(.name == \"$1\") | .track.\"$2\".series // \"\"" \
+    "${MAN}")
+  if [[ -z "${req}" && -z "${series}" ]]; then
     fetch_kernel_release "$3"
     return
   fi
@@ -233,11 +245,15 @@ select_kernel_release() {
   # builder (kernel_patch_list); the availability probe only needs {series}
   # and {version}, so the raw URL list is what patch_urls prints either way
   # (native `patches:` data or a patches.yml path).
-  local urls
-  urls=$(patch_urls "${req}" "$1") || return 1
+  local urls=""
+  if [[ -n "${req}" ]]; then
+    urls=$(patch_urls "${req}" "$1") || return 1
+  fi
   floor=$(published_kernel_floor "$1")
   while IFS= read -r version; do
     [[ -n "${version}" ]] || continue
+    # Series anchor: only the declared stable stream is eligible.
+    [[ -z "${series}" || "${version}" == "${series}".* ]] || continue
     # Never publish an older kernel than the one already out: when the newest
     # releases lack a patch, keep the published deb instead of downgrading.
     if [[ -n "${floor}" && "$(printf '%s\n%s\n' "${floor}" "${version}" \
@@ -245,17 +261,22 @@ select_kernel_release() {
       echo "kernel ${version} is older than the published ${floor}" >&2
       return 2
     fi
-    if patch_urls_available "${urls}" "${version}"; then
-      entry=$(curl --retry 3 -fsSL "${KERNEL_ORG_URL:-https://www.kernel.org}/releases.json" \
-        | V="${version}" yq -p=json -o=json \
-          '[.releases[] | select(.version == strenv(V))] | .[0]')
-      # A release listed in releases.json before its tarball digest is
-      # published cannot be built (nothing to pin): try the next one.
-      kernel_digests "$1" "$2" "${version}" "$(yq -p=json '.source // ""' <<<"${entry}")" \
-        >/dev/null || continue
-      printf '%s\n' "${entry}"
-      return
+    # No require-patches: the series anchor alone selects (availability is
+    # not probed — an empty URL list is trivially available anyway). With
+    # require-patches, the stream must carry every patch URL upstream, so
+    # a series a patch source has not caught up with is skipped.
+    if [[ -n "${req}" ]] && ! patch_urls_available "${urls}" "${version}"; then
+      continue
     fi
+    entry=$(curl --retry 3 -fsSL "${KERNEL_ORG_URL:-https://www.kernel.org}/releases.json" \
+      | V="${version}" yq -p=json -o=json \
+        '[.releases[] | select(.version == strenv(V))] | .[0]')
+    # A release listed in releases.json before its tarball digest is
+    # published cannot be built (nothing to pin): try the next one.
+    kernel_digests "$1" "$2" "${version}" "$(yq -p=json '.source // ""' <<<"${entry}")" \
+      >/dev/null || continue
+    printf '%s\n' "${entry}"
+    return
   done < <(curl --retry 3 -fsSL "${KERNEL_ORG_URL:-https://www.kernel.org}/releases.json" \
     | yq -p=json '.releases[] | select(.moniker == "stable" or .moniker == "longterm")
       | .version' | sort -rV)
