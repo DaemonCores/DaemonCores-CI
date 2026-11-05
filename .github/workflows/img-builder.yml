@@ -47,12 +47,12 @@ jobs:
   build-img:
     name: Build ${{ inputs.target }} .img (${{ inputs.arch }})
     runs-on: ${{ inputs.arch == 'arm64' && 'ubuntu-24.04-arm' || 'ubuntu-latest' }}
-    container:
-      image: almalinux:10
-      # --privileged is required for loop mount (mount -o loop) and partition
-      # tools (sfdisk, partprobe, mkfs.*) when building a disk image. Do not
-      # remove — same constraint as the ISO builder.
-      options: --privileged
+    # NO container: — the ISO builder (iso-builder.yml) runs bare on the
+    # runner host with sudo podman, and its runs prove that rootful podman
+    # creates its cgroups fine there. The AlmaLinux job container could not
+    # delegate the pids controller to podman (crun: "controller pids is not
+    # available"), which killed every bootc install to-filesystem. Do not
+    # re-add a container: here — loop mount keeps working bare thanks to sudo.
     permissions:
       contents: write
 
@@ -80,17 +80,12 @@ jobs:
       - name: Install dependencies
         run: |
           set -euo pipefail
-          dnf install -y epel-release
-          dnf install -y 'dnf-command(config-manager)'
-          dnf config-manager -y \
-            --add-repo https://cli.github.com/packages/rpm/gh-cli.repo
-          dnf makecache --refresh
-          dnf install -y \
-            git gh curl cpio gzip podman fuse-overlayfs \
+          sudo apt-get update
+          sudo apt-get install -y \
+            git gh curl cpio gzip podman \
             dosfstools mtools \
             parted e2fsprogs \
             util-linux
-          git config --system --add safe.directory '*'
 
       # AOSP mkbootimg (pure Python, needs its gki/ package next to it). The
       # tag is only a convenience: the commit it must resolve to is checked, so
@@ -104,13 +99,13 @@ jobs:
         run: |
           set -euo pipefail
           dir=/usr/local/lib/mkbootimg
-          git clone --quiet --depth 1 --branch "${MKBOOTIMG_TAG}" "${MKBOOTIMG_URL}" "${dir}"
+          sudo git clone --quiet --depth 1 --branch "${MKBOOTIMG_TAG}" "${MKBOOTIMG_URL}" "${dir}"
           got=$(git -C "${dir}" rev-parse HEAD)
           if [ "${got}" != "${MKBOOTIMG_COMMIT}" ]; then
             echo "::error::mkbootimg ${MKBOOTIMG_TAG} resolves to ${got}, expected ${MKBOOTIMG_COMMIT}"
             exit 1
           fi
-          ln -s "${dir}/mkbootimg.py" /usr/local/bin/mkbootimg
+          sudo ln -s "${dir}/mkbootimg.py" /usr/local/bin/mkbootimg
           mkbootimg --help >/dev/null
 
       # ─── VARIABLES ───────────────────────────────────────────────────────
@@ -158,7 +153,11 @@ jobs:
           IMG_REF: ${{ steps.names.outputs.img_ref }}
         run: |
           set -euo pipefail
-          bash .ci-tooling/scripts/build-img.sh "${TARGET}" "${ARCH}" "${IMG_FILE}" "${IMG_REF}"
+          # sudo: losetup/mount/mkfs and the rootful podman store. Rootful
+          # podman on the runner host creates its cgroups fine (same pattern as
+          # the ISO builder) — the AlmaLinux job container path died on pids.
+          sudo bash .ci-tooling/scripts/build-img.sh "${TARGET}" "${ARCH}" "${IMG_FILE}" "${IMG_REF}"
+          sudo chown -R "$(id -u):$(id -g)" out
 
       # ─── UPLOAD ────────────────────────────────────────────────────────────
       # Upload the .img to the same release the ISO builder uses (install-iso).

@@ -160,20 +160,9 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# The job container is privileged, so /sys/fs/cgroup is writable, but podman
-# does not mkdir its cgroupfs sandbox root (/libpod_parent) and fails to
-# enable the controllers on the root cgroup (conmon warning: "write .../cgroup
-# .subtree_control: no such file or directory"), which later kills crun with
-# "controller pids is not available". Prepare the cgroup tree for podman.
-CFG=/sys/fs/cgroup
-if [ -e "${CFG}/cgroup.controllers" ] && [ -w "${CFG}" ]; then
-  mkdir -p "${CFG}/libpod_parent"
-  for c in cpuset cpu io memory pids; do
-    grep -qw "${c}" "${CFG}/cgroup.controllers" 2>/dev/null || continue
-    grep -qw "${c}" "${CFG}/cgroup.subtree_control" 2>/dev/null       || echo "+${c}" > "${CFG}/cgroup.subtree_control" 2>/dev/null || true
-  done
-  echo ">>> cgroup preparation done: $(ls ${CFG}) controllers=$(cat ${CFG}/cgroup.subtree_control)"
-fi
+# The script runs under sudo (rootful podman) directly on the runner host —
+# the ISO builder proves rootful podman creates its cgroups there. No job
+# container cgroup constraints apply; do not add any cgroup surgery here.
 
 if [ "$TARGET" = "rpi" ]; then
   # ── Raspberry Pi: FAT32 /boot + ext4 / ───────────────────────────────────
