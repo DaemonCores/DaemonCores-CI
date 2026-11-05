@@ -97,8 +97,11 @@ SUB_DEVS=""
 ensure_part_subloops() {
   # Args: <part-number>...   Globals: DEV, IMG_PATH, SUB_DEVS
   for part in "$@"; do
-    start="$(sfdisk -d "${DEV}" | sed -n "${part}s/.*start= *\([0-9]*\).*/\1/p")"
-    size="$(sfdisk -d "${DEV}" | sed -n "${part}s/.*size= *\([0-9]*\).*/\1/p")"
+    # The dump line for partition N is "/dev/<loop>pN : start= ...": address the
+    # line by its device name (a bare line-number like ${part}s would hit the
+    # dump header "label:"/"" lines that never carry start/).
+    start="$(sfdisk -d "${DEV}" | sed -n "/p${part} :/s/.*start= *\([0-9]*\).*/\1/p")"
+    size="$(sfdisk -d "${DEV}" | sed -n "/p${part} :/s/.*size= *\([0-9]*\).*/\1/p")"
     if [ -z "${start}" ] || [ -z "${size}" ]; then
       echo "::error::cannot read partition ${part} start/size from sfdisk -d ${DEV} (sub-loop fallback aborted)" >&2
       return 1
