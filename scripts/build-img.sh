@@ -197,6 +197,7 @@ PART
     -v /target:/target \
     local-bootc:latest \
     bootc install to-filesystem --skip-fetch-check \
+      --bootloader none \
       --karg console=serial0,115200 \
       --karg root=LABEL=root \
       --karg rw \
@@ -276,7 +277,8 @@ else
   # ── gallium ────────────────────────────────────────────────────────────
   # amd64: single ext4 / (raw image). No ESP, no FAT32, no phone config —
   #   just the raw image laid from the container image, ready to flash or
-  #   convert. bootc install writes grub to the disk.
+  #   convert. The bootloader is packed separately (bootloader=none here: the
+  #   target has no ESP for bootupd to install into).
   # arm64: phone target — GPT with a raw boot partition (p1, 64M, holds an
   #   Android boot.img) + an ext4 root partition (p2, ostree deployment).
   #   The boot.img is packed with mkbootimg (kernel + DTB + initramfs) and
@@ -306,6 +308,7 @@ PART
       -v /target:/target \
       local-bootc:latest \
       bootc install to-filesystem --skip-fetch-check \
+        --bootloader none \
         --karg root=LABEL=root \
         --karg rw \
         /target
@@ -336,6 +339,7 @@ PART
       -v /target:/target \
       local-bootc:latest \
       bootc install to-filesystem --skip-fetch-check \
+        --bootloader none \
         --karg root=LABEL=root \
         --karg rw \
         --karg console=ttyMSM0,115200 \
