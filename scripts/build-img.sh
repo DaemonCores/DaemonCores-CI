@@ -194,7 +194,7 @@ PART
   echo ">>> Laying root filesystem via bootc install to-filesystem..."
   mkdir -p /target
   mount "${DEV}p2" /target
-  podman run --rm --privileged --pid=host ${CG_FLAG}\
+  podman run --rm --privileged ${CG_FLAG}\
     --security-opt label=disable \
     -v /dev:/dev \
     -v /var/lib/containers:/var/lib/containers \
@@ -303,7 +303,7 @@ PART
     echo ">>> Laying root filesystem via bootc install to-filesystem..."
     mkdir -p /target
     mount "${DEV}p1" /target
-    podman run --rm --privileged --pid=host ${CG_FLAG}\
+    podman run --rm --privileged ${CG_FLAG}\
       --security-opt label=disable \
       -v /dev:/dev \
       -v /var/lib/containers:/var/lib/containers \
@@ -333,7 +333,7 @@ PART
     echo ">>> Laying root filesystem via bootc install to-filesystem..."
     mkdir -p /target
     mount "${DEV}p2" /target
-    podman run --rm --privileged --pid=host ${CG_FLAG}\
+    podman run --rm --privileged ${CG_FLAG}\
       --security-opt label=disable \
       -v /dev:/dev \
       -v /var/lib/containers:/var/lib/containers \
