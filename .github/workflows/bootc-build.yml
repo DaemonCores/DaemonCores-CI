@@ -267,8 +267,22 @@ jobs:
           install-dir: /usr/local/bin
           use-sudo: true
 
+      # aquasecurity/setup-trivy flakes on the arm64 runner (in-action release
+      # download with no retry, silent exit 1 — it killed two image runs on the
+      # same step): install the pinned trivy release directly, with curl
+      # retries, and prepend its dir to PATH for the later build step.
       - name: Install trivy
-        uses: aquasecurity/setup-trivy@v0.2.6
+        run: |
+          case "$(uname -m)" in
+            x86_64) a=64bit ;;
+            aarch64) a=ARM64 ;;
+            *) echo "unsupported arch $(uname -m)" >&2; exit 1 ;;
+          esac
+          mkdir -p "$HOME/.local/bin"
+          curl -sSfL --retry 6 --retry-all-errors --retry-delay 5 \
+            "https://github.com/aquasecurity/trivy/releases/download/v0.76.1/trivy_0.76.1_Linux-$a.tar.gz" |
+            tar -xz -C "$HOME/.local/bin" trivy
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
       # Content hash, build, lint, boot test, scan, push and signature of every
       # image of the architecture. The results table goes to the job summary, the
