@@ -82,7 +82,7 @@ jobs:
           set -euo pipefail
           sudo apt-get update
           sudo apt-get install -y \
-            git gh curl cpio gzip podman \
+            git gh curl cpio gzip podman zstd \
             dosfstools mtools \
             parted e2fsprogs \
             util-linux
@@ -158,6 +158,10 @@ jobs:
           # the ISO builder) — the AlmaLinux job container path died on pids.
           sudo bash .ci-tooling/scripts/build-img.sh "${TARGET}" "${ARCH}" "${IMG_FILE}" "${IMG_REF}"
           sudo chown -R "$(id -u):$(id -g)" out
+          # GitHub release assets are capped at 2 GiB and the flashable image
+          # is 4/8 GiB (sparse): ship it zstd-compressed (the sparse raw image
+          # compresses to well under the cap).
+          zstd -T0 -19 -f "out/${IMG_FILE}" -o "out/${IMG_FILE}.zst"
 
       # ─── UPLOAD ────────────────────────────────────────────────────────────
       # Upload the .img to the same release the ISO builder uses (install-iso).
@@ -197,7 +201,7 @@ jobs:
           set -euo pipefail
           gh release upload install-iso \
             --repo "${GITHUB_REPOSITORY}" \
-            "out/${IMG_FILE}" --clobber
+            "out/${IMG_FILE}.zst" --clobber
 
       # ── Phone boot.img (gallium/arm64 only) ────────────────────────────────
       # The gallium arm64 (phone) target packs an Android boot.img separately
