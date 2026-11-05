@@ -160,13 +160,20 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# The job container cannot delegate the pids cgroup controller, so crun dies
-# at container create; --cgroups=disabled (crun-only feature — this step's
-# Install step pins crun) skips cgroup creation for the ephemeral build
-# container. podman info is NOT a usable probe here: it fails on the job
-# container's store, so the flag is set unconditionally.
-CG_FLAG="--cgroups=disabled"
-echo ">>> podman cgroups flag: ${CG_FLAG}"
+# The job container is privileged, so /sys/fs/cgroup is writable, but podman
+# does not mkdir its cgroupfs sandbox root (/libpod_parent) and fails to
+# enable the controllers on the root cgroup (conmon warning: "write .../cgroup
+# .subtree_control: no such file or directory"), which later kills crun with
+# "controller pids is not available". Prepare the cgroup tree for podman.
+CFG=/sys/fs/cgroup
+if [ -e "${CFG}/cgroup.controllers" ] && [ -w "${CFG}" ]; then
+  mkdir -p "${CFG}/libpod_parent"
+  for c in cpuset cpu io memory pids; do
+    grep -qw "${c}" "${CFG}/cgroup.controllers" 2>/dev/null || continue
+    grep -qw "${c}" "${CFG}/cgroup.subtree_control" 2>/dev/null       || echo "+${c}" > "${CFG}/cgroup.subtree_control" 2>/dev/null || true
+  done
+  echo ">>> cgroup preparation done: $(ls ${CFG}) controllers=$(cat ${CFG}/cgroup.subtree_control)"
+fi
 
 if [ "$TARGET" = "rpi" ]; then
   # ── Raspberry Pi: FAT32 /boot + ext4 / ───────────────────────────────────
@@ -194,7 +201,7 @@ PART
   echo ">>> Laying root filesystem via bootc install to-filesystem..."
   mkdir -p /target
   mount "${DEV}p2" /target
-  podman run --rm --privileged ${CG_FLAG}\
+  podman run --rm --privileged --pid=host \
     --security-opt label=disable \
     -v /dev:/dev \
     -v /var/lib/containers:/var/lib/containers \
@@ -303,7 +310,7 @@ PART
     echo ">>> Laying root filesystem via bootc install to-filesystem..."
     mkdir -p /target
     mount "${DEV}p1" /target
-    podman run --rm --privileged ${CG_FLAG}\
+    podman run --rm --privileged --pid=host \
       --security-opt label=disable \
       -v /dev:/dev \
       -v /var/lib/containers:/var/lib/containers \
@@ -333,7 +340,7 @@ PART
     echo ">>> Laying root filesystem via bootc install to-filesystem..."
     mkdir -p /target
     mount "${DEV}p2" /target
-    podman run --rm --privileged ${CG_FLAG}\
+    podman run --rm --privileged --pid=host \
       --security-opt label=disable \
       -v /dev:/dev \
       -v /var/lib/containers:/var/lib/containers \
