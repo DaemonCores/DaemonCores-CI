@@ -390,6 +390,27 @@ kernel_build_debs() {
 }
 
 #######################################
+# kernel_build_module — the ONE module pair gate (build + deb via the
+# composed helpers; kept as the canonical name, owner 05/11 midi).
+# Arguments (positional, see the two composable helpers below):
+#   $1  prepared kernel tree (SYSSRC)   $2  module workdir
+#   $3  build command string            $4  deb package name
+#   $5  deb version                     $6  kernel release
+#   $7  in-kernel layout                $8  Depends line
+#   $9  description (\n escapes)        $10.. .ko paths to ship
+#######################################
+kernel_build_module() {
+  local syssrc="${1:?}" workdir="${2:?}" cmd="${3:?}"
+  local pkg ver release layout depends desc
+  pkg="${4:?}" ver="${5:?}" release="${6:?}" layout="${7:?}"
+  depends="${8:?}" desc="${9:?}"
+  shift 9
+  kernel_module_run_build "${syssrc}" "${workdir}" "${cmd}"
+  kernel_modules_deb "${pkg}" "${ver}" "${release}" "${layout}" \
+    "${depends}" "${desc}" "$@"
+}
+
+#######################################
 # BUILD a kernel module against a prepared kernel tree (shared by every
 # module pair: the nvidia pair and the zfs pair build ONCE, the deb is
 # consumed by both lanes of the same release — owner 05/11 midi point c).
