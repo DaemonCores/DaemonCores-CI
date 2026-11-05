@@ -410,19 +410,29 @@ kernel_pve_clone_packaging() {
   git clone --quiet --no-checkout "${url}" "${dest}" \
     || return 1
   while read -r commit; do
-    # 2026-11-04: master carries the objtool klp-checksum tool whose C does
-    # not compile against ANY of the packaged kernel trees (insn_reloc et al.
-    # are missing there) — proven on 41925723483 / 41930175340 / 41936105671.
-    # Walk back past every commit that introduces it; those commits are
-    # unbuildable upstream, with ANY kernel.
-    if git -C "${dest}" cat-file -e "${commit}:pkg-src/kernel/tools/objtool/klp-checksum.c" 2>/dev/null; then
-      echo "WARN: packaging ${commit} carries the uncompilable klp-checksum tool; walking back past it"
-      tried=$((tried + 1))
-      continue
-    fi
+    # 2026-11-04: the packaged kernel carries the objtool klp-checksum tool
+    # whose C does not compile against ANY of the packaged kernel trees
+    # (insn_reloc et al. are missing there) — proven on 41925723483 /
+    # 41930175340 / 41936105671.
+    # 2026-11-05 walk-back path VERIFIED against the real repos: the tool is
+    # NOT an object of git.proxmox.com/pve-kernel.git itself (rev-list
+    # --all --objects: zero klp-checksum entries in the whole history) — the
+    # kernel tree arrives via the submodules/ubuntu-kernel GITLINK, so a
+    # cat-file of "${commit}:pkg-src/kernel/tools/objtool/klp-checksum.c"
+    # (the old path: dest-name-prefixed on top of it) could NEVER match and
+    # the walk-back never fired. The correct check is the on-disk file under
+    # the submodule, testable only AFTER submodule update checks it out.
+    # Walk back past every state that carries it: with the tool in the tree
+    # upstream is unbuildable, with ANY kernel.
     tried=$((tried + 1))
     git -C "${dest}" checkout --quiet --force "${commit}" || return 1
     if git -C "${dest}" submodule update --init --depth 1 --recommend-shallow; then
+      if [[ -f "${dest}/submodules/ubuntu-kernel/tools/objtool/klp-checksum.c" ]]; then
+        echo "WARN: packaging ${commit} pins a kernel tree carrying the uncompilable klp-checksum tool; walking back past it"
+        git -C "${dest}" submodule deinit --all --force >/dev/null 2>&1 || true
+        rm -rf "${dest}/.git/modules"
+        continue
+      fi
       [[ "${tried}" -eq 1 ]] \
         || echo "WARN: packaging master has unfetchable submodule pins; using ${commit} (${tried} submodule update(s) back)"
       return 0
