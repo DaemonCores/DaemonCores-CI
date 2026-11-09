@@ -170,7 +170,7 @@ jobs:
           (ls -1 /tmp/prior 2>/dev/null || true) | head -40
           echo "DEP WORDS:"
           for w in ${debs}; do
-            c=$(( (ls ${w} 2>/dev/null || true) | wc -l ))
+            c=$( (ls ${w} 2>/dev/null || true) | wc -l )
             echo "  word=${w} matches=${c}"
           done
           apt-get install -y ${debs}
