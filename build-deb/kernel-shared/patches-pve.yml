@@ -44,6 +44,18 @@
 #    OUR mainline pin re-runs the dry-run gate: an entry that stops applying
 #    FAILS the build and keeps the last-good deb (same contract as
 #    patches-shared.yml).
+#
+# ARCH-INDEPENDENCE ASSERT (re-checked 2026-11-09, owner mandate ARM OPTI):
+# the set needs NO arm64 fork and NO second dry-run per arch. Both kernel
+# profiles unpack the SAME mainline tarball (arch/x86 and arm64 sources
+# ship TOGETHER in one tree), and patch(1) matches file content only — it
+# never consults the target ARCH. The x86-only entries (0008 PKRU, 0056
+# KVM VMX...) re-touch files that exist in this single tree whatever the
+# build arch; their x86 code is simply inert on an arm64 boot. Proven:
+# the FULL sequence (patches-shared + patches-gpu/{amd,intel} + this set)
+# dry-runs CLEAN fuzz-0 on the very same 7.2.15 tree the debian lane
+# proofs ran on — one tree, one dry-run, both arches (logs: build-local
+# 2026-11-09).
 patches:
       - name: 0001-Make-mkcompile_h-accept-an-alternate-timestamp-strin.patch
         url: https://raw.githubusercontent.com/proxmox/pve-kernel/master/patches/kernel/0001-Make-mkcompile_h-accept-an-alternate-timestamp-strin.patch
