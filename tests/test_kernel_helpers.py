@@ -145,6 +145,15 @@ def test_flavour_kcflags():
     assert r.stdout.strip() == "-march=x86-64-v3"
     r = run_helper('kernel_flavour_kcflags x64v1')
     assert r.stdout.strip() == ""
+    # ARM OPTI (owner 2026-11-09): the arm flavours carry -mcpu=<core>,
+    # the level representative the matrix declares; armv8.0 stays bare
+    # (it spans Cortex-A53 AND A72 — pinning one CPU mis-tunes the other).
+    r = run_helper('kernel_flavour_kcflags armv8.0')
+    assert r.stdout.strip() == ""
+    r = run_helper('kernel_flavour_kcflags armv8.2-lse')
+    assert r.stdout.strip() == "-mcpu=cortex-a76"
+    r = run_helper('kernel_flavour_kcflags armv9-sve2')
+    assert r.stdout.strip() == "-mcpu=neoverse-v2"
 
 
 def _make_cdn(tmp_path, version):

@@ -30,7 +30,14 @@
 #   kernel_apply_patches <manifest> <arch> <ver> <tree> [class]
 #                                                     -> dry-run ALL, apply ALL
 #   kernel_merge_config <tree> <fragment>...          -> append + olddefconfig
-#   kernel_flavour_kcflags <flavour>                  -> -march=x86-64-vN
+#   kernel_flavour_kcflags <flavour>                  -> -march=x86-64-vN |
+#                                                        -mcpu=<arm core>
+#                                                        (owner ARM OPTI
+#                                                        2026-11-09: the
+#                                                        arm flavours carry
+#                                                        -mcpu, the arch
+#                                                        codegen analogue of
+#                                                        -march=x86-64-vN)
 #   kernel_build_debs <tree> <target> [KCFLAGS]       -> make -j <target>
 # Mode pve only (the PVE packaging is a git packaging, not a kernel.org
 # tarball):
@@ -347,9 +354,21 @@ kernel_flavour_kcflags() {
     x64v2) echo "-march=x86-64-v2" ;;
     x64v3) echo "-march=x86-64-v3" ;;
     x64v4) echo "-march=x86-64-v4" ;;
-    # arm64 flavours (coded, kernel-arm lane): baseline v8.0 = no flag.
-    armv8.2-lse) echo "-march=armv8.2-a+lse" ;;
-    armv9-sve2)  echo "-march=armv9-a+sve2" ;;
+    # arm64 flavours (owner mandate ARM OPTI 2026-11-09: -mcpu, not
+    # -march — the kernel arm64 Makefile never passes a C -march (only
+    # -Wa,-march for asm), KCFLAGS lands LAST in the top Makefile
+    # (KBUILD_CFLAGS += $(KCFLAGS)), so the flavour flag is the single
+    # C codegen lever. -mcpu=<core> pins the SAME ISA floor the old
+    # -march=armv8.2-a+lse / armv9-a+sve2 carried (gcc 13 aarch64 -Q:
+    # cortex-a76 => .arch armv8.2-a, neoverse-v2 => .arch armv9-a+sve2)
+    # PLUS the microarch scheduler tuning the report names as the
+    # principal arm64 codegen gain — the flavours are LEVELS, the two
+    # cores below are the level representatives the matrix declares
+    # (Cortex-A76 class, Neoverse V2 class). armv8.0 stays the bare
+    # baseline: the flavour spans Cortex-A53 AND A72, pinning one CPU
+    # would mis-tune the other.
+    armv8.2-lse) echo "-mcpu=cortex-a76" ;;
+    armv9-sve2)  echo "-mcpu=neoverse-v2" ;;
     *)     echo "" ;;
   esac
 }
