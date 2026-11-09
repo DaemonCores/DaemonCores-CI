@@ -196,11 +196,12 @@ def test_bore_excluded_on_all_current_series() -> None:
 
 def test_arm_opti_entries_pinned_and_staged() -> None:
     """ARM OPTI (owner mandate 2026-11-09): the two clearlinux generic
-    completions enter as stage-common entries with sha256 pins; the msm
-    adreno devfreq IFPC relax enters as an arm64-stage additive (the gpu
-    manifests stay the amd64 gpu-DEB lane — arm64 carries no gpu deb and
-    msm is an arm64 SoC driver), lore-URL + sha256 pinned. The bore entry
-    stays dormant and carries no pin while excluded."""
+    completions enter as stage-common entries with sha256 pins. The msm
+    adreno devfreq IFPC siblings are BOTH K-PORT (run 42715501467,
+    linux-image-ia-armv8.0): [17/17] uses ADRENO_QUIRK_IFPC which only its
+    dropped [16/17] sibling introduces, so the arm64 kernel build dies at
+    msm_gpu_devfreq.c:162. The bore entry stays dormant and carries no pin
+    while excluded."""
     import yaml  # noqa: PLC0415 — local import keeps the module import light
 
     doc = yaml.safe_load((SHARED_DATA / "patches-shared.yml").read_text())
@@ -209,20 +210,15 @@ def test_arm_opti_entries_pinned_and_staged() -> None:
     # 0174-memcg-charge-batch-128 K-PORTED (run 42713342754): applies fuzz-0
     # but mainline BUILD_BUG_ON(MEMCG_CHARGE_BATCH > S8_MAX) kills the build.
     assert "0174-memcg-charge-batch-128" not in entries
-    for name in ("0166-sched-fair-remove-upper-limit",
-                 "msm-adreno-devfreq-ifpc-relax"):
-        assert len(entries[name]["sha256"]) == 64, name
-        assert entries[name]["license"] == "GPL-2.0-only"
-    assert entries["msm-adreno-devfreq-ifpc-relax"]["stage"] == "arm64"
-    assert "lore-kernel.gnuweeb.org" in \
-        entries["msm-adreno-devfreq-ifpc-relax"]["url"]
+    assert "0166-sched-fair-remove-upper-limit" in entries
+    assert entries["0166-sched-fair-remove-upper-limit"]["license"] == \
+        "GPL-2.0-only"
+    assert "msm-adreno-devfreq-ifpc-relax" not in entries
     pins = {p["name"]: p["sha256"] for p in doc["patches"]
             if p.get("sha256")}
-    # the pins recorded by the 2026-11-09 dry-run proofs
+    # the pin recorded by the 2026-11-09 dry-run proof
     assert pins["0166-sched-fair-remove-upper-limit"] == \
         "e6a7bfa9844f5f6bde6ef0a149dd58a7ad7dcfceae45cb08a9a4fd638d6ff0e9"
-    assert pins["msm-adreno-devfreq-ifpc-relax"] == \
-        "77fdb7a9afd9460c0c8fdee77ec2483078b781c1bd716719cf9441ae7edfe88d"
 
 
 def test_engine_exports_resolve() -> None:

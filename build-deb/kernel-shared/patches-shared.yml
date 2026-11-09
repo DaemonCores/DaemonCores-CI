@@ -188,14 +188,11 @@ patches:
       # driver that only arm64 KERNEL builds need. lore:
       # https://lore.kernel.org/dri-devel/20250720-ifpc-support-v1-17-9347aa5bcbd6@oss.qualcomm.com
       # (the mbox serves headers before the diff; patch(1) skips them —
-      # same convention as the patches-gpu lore entries). The /raw URL below
-      # is served by the gnuweeb mirror bare-curl (lore 403s a bare agent,
-      # the mirror bytes verified IDENTICAL, the sha256 below = the lore
-      # /raw digest). Dry-run fuzz 0 PASS on pristine 7.2.15 (2026-11-09);
-      # the sibling [16/17] a6xx X1-85 IFPC enablement FAILS raw
-      # (a6xx_catalog.c table drifted) = K-PORT, documented, not hand-forced.
-      - name: msm-adreno-devfreq-ifpc-relax
-        url: https://lore-kernel.gnuweeb.org/dri-devel/20250720-ifpc-support-v1-17-9347aa5bcbd6@oss.qualcomm.com/raw
-        stage: arm64
-        sha256: 77fdb7a9afd9460c0c8fdee77ec2483078b781c1bd716719cf9441ae7edfe88d
-        license: GPL-2.0-only
+      # same convention as the patches-gpu lore entries). K-PORT BOTH
+      # siblings of the series: the [16/17] a6xx X1-85 enablement FAILS raw
+      # (a6xx_catalog.c table drifted), and the [17/17] devfreq relax itself
+      # does NOT COMPILE without it — run 42715501467 job linux-image-ia-
+      # armv8.0: msm_gpu_devfreq.c:162 'ADRENO_QUIRK_IFPC undeclared', the
+      # quirk is introduced only by [16/17]. Dry-run fuzz 0 proved the
+      # application, never the compilation (same lesson as 0174 memcg).
+      # Re-arm = re-probe both when the a6xx catalog matches again.
