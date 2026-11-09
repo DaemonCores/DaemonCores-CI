@@ -352,7 +352,10 @@ CONFIG_SYN_COOKIES=y
 # CONFIG_SCHEDSTATS is not set
 # CONFIG_SCHED_BORE: REMOVED 2026-11-04 (proven) — bore DORMANT (see
 # kconfig-shared/x86-common.cfg and patches-shared.yml); the symbol is not
-# declared by a vanilla kernel until the patch re-arms.
+# declared by a vanilla kernel until the patch re-arms. RE-PROBED
+# 2026-11-09 (ARM OPTI mandate): all CachyOS siblings {6.12,7.2,7.3} still
+# FAIL the fuzz-0 dry-run on vanilla 7.2.15 (fair.c drift) — stays dormant,
+# a pin here would kill the gate; re-pin on re-arm.
 # CONFIG_LATENCYTOP is not set
 
 # Crash capture and kexec: reserve memory for a second kernel. bootc updates

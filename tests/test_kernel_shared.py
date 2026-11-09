@@ -177,7 +177,14 @@ def test_bore_excluded_on_all_current_series() -> None:
     to any vanilla tree (fair.c LOG->NONE drift; dry-run FAIL on 7.2.15 and
     7.3) — the entry is DORMANT, excluded on every active series; the helper
     filter honours it. Re-arm by removing the excludes when upstream matches
-    vanilla again."""
+    vanilla again.
+
+    Re-probed 2026-11-09 (ARM OPTI mandate): the CachyOS siblings
+    {6.12, 7.2, 7.3} STILL fail the fuzz-0 dry-run on vanilla 7.2.15
+    (7.2: 9/22 hunks failed, the same fair.c drift; the 6.12 sibling fails
+    outright) — the exclusion stays, no pin, K-PORT documented in the
+    entry comment.
+    """
     import yaml  # noqa: PLC0415 — local import keeps the module import light
 
     doc = yaml.safe_load((SHARED_DATA / "patches-shared.yml").read_text())

@@ -138,7 +138,14 @@ patches:
         fuzz: 2
         license: GPL-2.0-only
       - name: bore
-        # DORMANT (2026-11-04, proven): the CachyOS 7.2/7.3 bore hunks no longer
+        # DORMANT — RE-PROBED 2026-11-09 (owner mandate ARM OPTI): still KO.
+        # The CachyOS series siblings {7.2,7.3} both FAIL the fuzz-0 dry-run
+        # against vanilla 7.2.15 (fair.c: hunks #2,#10-#12,#15-#19 of 22, the
+        # LOG->NONE drift; 6.12 sibling fails even harder). Verdict per
+        # series: K-PORT everywhere, series-gating unchanged. The byte
+        # identity of the upstream siblings (2026-11-09):
+        # 7.2 1809a4d4d6508a2a..., 7.3 d2eaa8e8dbf1f56b..., 6.12 b6174446ed6d...
+        # (full digests in the dry-run report). DORMANT (2026-11-04, proven): the CachyOS 7.2/7.3 bore hunks no longer
         # apply to any vanilla tree (fair.c LOG->NONE upstream drift; dry-run
         # FAIL on vanilla 7.2.15 AND 7.3). Series-gated OFF until upstream
         # ships a bore patch matching the vanilla tree again — REMOVE the
