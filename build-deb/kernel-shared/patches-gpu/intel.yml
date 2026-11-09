@@ -22,19 +22,27 @@
 #   serves the identical bytes — verified for the entered patches — so the
 #   pins hold for either; mbox headers precede the diff, patch(1) skips
 #   them).
-#   APPLIED (3 of the 7 patches pass fuzz-0 standalone on 7.2.15):
+#   APPLIED (2 of the 7 pass fuzz-0 AND compile standalone on 7.2.15):
 #     [v8 1/7] guc: Use different error codes for GuC load errors
 #     [v8 2/7] guc: Handle CRASH and EXCEPTION G2H with separate helpers
-#     [v8 5/7] xe/uc: Report DMA failure using SIGID
-#   K-PORT (4 of 7): [v8 3/7] ct_dead_capture non-debug, [v8 4/7] CT error
+#   K-PORT (5 of 7): [v8 3/7] ct_dead_capture non-debug, [v8 4/7] CT error
 #   cleanup, [v8 6/7] major GuC failures SIGID (the owner-named anchor
 #   20261016204354.364846-15 — series-order dependent: applies only after
 #   [5/7] is in, and the engine dry-runs the whole manifest on the pristine
 #   tree first; standalone = conflict, 05/11 probe), [v8 7/7] CT shutdown
 #   SIGID (same dependency, entered [5/7] then conflicts on the GuC file
-#   context). PORTING TASK: after [1/7]/[2/7]/[5/7] enter, re-probe [3/7],
-#   [4/7], [7/7] against the PATCHED tree (the dependency class), then the
-#   owner GOs; add in series order, entries only on clean fuzz-0.
+#   context), [v8 5/7] xe/uc: Report DMA failure using SIGID (REMOVED from
+#   the entered set on 09/11, run 42622490165 proof: it applies fuzz-0 but
+#   adds `#include "xe_log.h"` in xe_uc_fw.c and NO patch of this series
+#   creates xe_log.h — the header only exists on the drm-intel-next base the
+#   series was written against, and xe_log.h is absent from 7.2.15:
+#   'fatal error: xe_log.h: No such file or directory'). The fuzz-0
+#   standalone gate PROVES APPLICATION, not COMPILABILITY: an entry that
+#   references a symbol/header a non-entered sibling or a foreign base
+#   provides must stay in K-PORT — [1/7] (xe_guc.c) and [2/7]
+#   (xe_guc_ct.c) compiled clean in the same run. PORTING TASK: port
+#   xe_log.h to 7.2.15 (upstream the logging helper) or wait for the
+#   mainline merge; owner GO per entry batch.
 #
 # SOURCE SERIES 2 — Per-BO host NUMA node placement (Himal Prasad Ghimiray,
 # Intel, nov 2026), RFC 0/7..7/7 "drm/ttm, drm/xe: Per-BO host NUMA node
@@ -85,11 +93,6 @@ patches:
         url: https://lore-kernel.gnuweeb.org/intel-xe/20261016204354.364846-11-umesh.nerlige.ramappa@intel.com/raw
         stage: amd64
         sha256: 0bfcbfe8437ddce07dc95bb85c0d797f0690be3449501babb0353627f9e2ba7c
-        license: GPL-2.0-only
-      - name: guc-failreport-5of7-dma-sigid
-        url: https://lore-kernel.gnuweeb.org/intel-xe/20261016204354.364846-14-umesh.nerlige.ramappa@intel.com/raw
-        stage: amd64
-        sha256: 2d5e1201337ca24ff38b52ae804170c52a1d29605fbb55fcdab6b8e32bba4d3f
         license: GPL-2.0-only
       - name: numa-rfc-3of7-ttm-pool-per-node-limits
         url: https://lore-kernel.gnuweeb.org/intel-xe/20261102101803.455921-12-himal.prasad.ghimiray@intel.com/raw
