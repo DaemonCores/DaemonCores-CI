@@ -192,14 +192,14 @@ jobs:
                 # A format is auto-rebuilt when its dependencies change.
                 #   Containerfile  -> base of every img format (both rebuilt)
                 #   packages.yml   -> debs feed every img format (both rebuilt)
-                #   kernel/modules/rpi*   -> rpi boot layout (rpi only)
-                #   kernel/modules/rk3588 -> rpi-adjacent SBC (rpi only)
-                #   kernel/modules/x86_64 -> ISO, NOT any img format (no img)
+                #   kernel-src/modules/embeded/rpi*   -> rpi boot layout (rpi only)
+                #   kernel-src/modules/embeded/rk3588 -> rpi-adjacent SBC (rpi only)
+                #   kernel-src/kconfig/{cpus,pages}   -> flavour fragments (both rebuilt)
                 # Only trigger a format whose deps actually changed; never
                 # cascade between img formats.
                 match '^Containerfile$' && { img_rpi=true; img_gallium=true; } || true
                 match '^workflows/bootc-debs-builder/packages\.yml$' && { img_rpi=true; img_gallium=true; } || true
-                match '^workflows/bootc-debs-builder/kernel/modules/(rpi|rk3588)' && img_rpi=true || true
+                match '^workflows/bootc-debs-builder/kernel-src/modules/embeded/(rpi|rk3588)' && img_rpi=true || true
               fi ;;
           esac
           # img cascade (manual dispatch + push): when a format was opted in OR
