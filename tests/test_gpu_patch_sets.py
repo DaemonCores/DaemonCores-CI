@@ -11,10 +11,14 @@ the patches really applied by the driver builds:
   - amd/intel: the manifests apply to the KERNEL source tree next to the
     shared set, inside the linux-image build (and the VE lane the same way).
 
-demandes.jsonl NEVER names a precise patchset (the owner says "les rebuild
-optimiser des driveer c'est fait ?"): every manifest starts with an EMPTY
-`patches` list and documents PROVEN candidates (URL + sha256 fetched) in
-comments — nothing enters the default build until the owner picks.
+demandes.jsonl never named a patchset until the owner DID (05/11 17:0x:
+"les patchs nvidia, je les veux dans les yaml de la CI" — the sweep pool
+landed): nvidia.js carries the applying subset as sha-pinned entries and
+documents the rest as K-PORT blocks. The 05/11 16:5x GPU-completions
+mandate then entered the PROVEN applying subsets of amd/intel too
+(fuzz-0 dry-run on pristine 7.2.15, sha-pinned, K-PORT documented) — no
+set stays empty, every entry is pinned and every non-entering remainder
+is a documented K-PORT porting lane, never hand-forced.
 
 IA vs GAMING nvidia variants: CachyOS publishes ONE nvidia set per kernel
 series, no per-profile divergent patchset exists upstream — the two
@@ -65,14 +69,24 @@ def test_gpu_manifests_present_and_schema() -> None:
 
 
 def test_gpu_nvidia_candidates_documented_not_chosen() -> None:
-    """The owner did not pick a patchset: defaults stay EMPTY sets with the
-    candidates (real repo, proof sha256) documented IN the manifest, never
-    in the applied list."""
+    """Every set carries its applying subset as sha-pinned entries and
+    documents the non-applying remainder as K-PORT (the 05/11 17:0x nvidia
+    order landed the nvidia pool; the 05/11 16:5x GPU-completions mandate
+    then entered the fuzz-0-proven amd/intel subsets too — entries only on
+    a clean dry-run, the rest a porting lane, never hand-forced)."""
     for name in ("nvidia.yml", "amd.yml", "intel.yml"):
         text = (GPU_DATA / name).read_text()
-        assert "patches: []" in text, name
-        assert "proof sha256" in text.lower(
-        ), (f"{name}: candidates need URL+sha256 proof documentation")
+        doc = yaml.safe_load(text)
+        assert doc["patches"], name  # the applying subset is ENTERED
+        for entry in doc["patches"]:
+            sha = entry.get("sha256")
+            assert sha and len(sha) == 64 and all(
+                c in "0123456789abcdef" for c in sha
+            ), entry.get("name")
+            assert entry.get("url"), entry.get("name")
+            assert entry.get("stage") in ("common", "amd64"), entry.get("name")
+        assert "K-PORT" in text, name  # the non-applying remainder documented
+        assert "sha256" in text.lower()  # proof documentation in the manifest
 
 
 def run_helper(script: str, **env_over) -> subprocess.CompletedProcess:
@@ -89,11 +103,21 @@ def run_helper(script: str, **env_over) -> subprocess.CompletedProcess:
 
 def test_empty_gpu_set_is_a_noop() -> None:
     """kernel_apply_patches over an EMPTY gpu manifest exits 0 without
-    touching the tree (the default build state of all three sets)."""
-    r = run_helper(
-        f'kernel_apply_patches "{GPU_DATA / "nvidia.yml"}" amd64 7.2.15 /tmp/does-not-exist-gpu-test'
-    )
-    assert r.returncode == 0, r.stderr
+    touching the tree (no set ships a `patches: []` any more since the
+    05/11 GPU completions, but the no-op contract of an empty manifest
+    stays a helper behaviour the builds rely on)."""
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        manifest = tmp / "empty.yml"
+        (tmp / "tree").mkdir()
+        (tmp / "tree" / "README").write_text("unpatched\n")
+        manifest.write_text("patches: []\n")
+        r = run_helper(
+            f'kernel_apply_patches "{manifest}" amd64 7.2.15 "{tmp}/tree" && '
+            f'grep -q unpatched "{tmp}/tree/README" && echo NOOP'
+        )
+        assert r.returncode == 0, r.stderr
+        assert r.stdout.strip() == "NOOP"
 
 
 def _series_probe_patch(tmp: Path) -> Path:
@@ -224,24 +248,25 @@ def test_bootc_builds_apply_the_gpu_manifests() -> None:
 
 
 def test_pve_lane_applies_the_gpu_manifest_against_its_tree() -> None:
-    """The vanilla-lane nvidia pair applies nvidia.yml to the NVIDIA
-    open tree compiled against the LIVE pve SRCDIR (kernel-pve entry,
-    pivot 7.2: the pair = the SAME lane tree, local SRCDIR)."""
+    """FINAL architecture (owner 05/11 13:0x): the vanilla lane builds NO
+    kernel and NO NVIDIA pair any more — the former kernel-pve entry is
+    REMOVED, the unified kernel and both module pairs (nvidia open on the
+    debian linux-modules-nvidia entry, OpenZFS via the SHARED gate) live on
+    the debian side / the shared engine helpers. The vanilla manifest stays
+    free of a lane-local GPU patch application: its module publisher rides
+    the SHARED kernel_build_module helper, never inline module logic."""
     pve = (
         Path(__file__).resolve().parents[2] / "proxmox-ve-bootc" / "workflows" /
         "bootc-debs-builder" / "packages.yml"
     )
     text = pve.read_text()
-    assert patches_gpu_nvidia_count(text) == 1
-    assert 'patches-gpu/nvidia.yml missing' in text  # guarded
-    import re
-
-    makes = [
-        m.start() for m in re.finditer(r'make .*-C /build/nvidia-open', text)
-    ]
-    applies = [
-        m.start() for m in
-        re.finditer(r'kernel_apply_patches "\$\{GPU_NVIDIA_YML\}"', text)
-    ]
-    assert len(applies) == 1
-    assert applies[0] < makes[0]
+    # NO lane-local GPU/nvidia patch application, NO open-gpu clone, NO
+    # kernel build entry left in the vanilla manifest.
+    assert patches_gpu_nvidia_count(text) == 0
+    assert "nvidia-open" not in text
+    assert "- name: kernel-pve" not in text
+    assert "kernel_fetch_source" not in text
+    # The module publisher goes through the SHARED gate (one signature, both
+    # module pair lanes).
+    assert "kernel_build_module" in text
+    assert "kernel_module_run_build" not in text
