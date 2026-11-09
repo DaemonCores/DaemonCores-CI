@@ -206,9 +206,10 @@ def test_arm_opti_entries_pinned_and_staged() -> None:
     doc = yaml.safe_load((SHARED_DATA / "patches-shared.yml").read_text())
     entries = {p["name"]: p for p in doc["patches"]}
     assert entries["0166-sched-fair-remove-upper-limit"]["stage"] == "common"
-    assert entries["0174-memcg-charge-batch-128"]["stage"] == "common"
+    # 0174-memcg-charge-batch-128 K-PORTED (run 42713342754): applies fuzz-0
+    # but mainline BUILD_BUG_ON(MEMCG_CHARGE_BATCH > S8_MAX) kills the build.
+    assert "0174-memcg-charge-batch-128" not in entries
     for name in ("0166-sched-fair-remove-upper-limit",
-                 "0174-memcg-charge-batch-128",
                  "msm-adreno-devfreq-ifpc-relax"):
         assert len(entries[name]["sha256"]) == 64, name
         assert entries[name]["license"] == "GPL-2.0-only"
@@ -217,11 +218,9 @@ def test_arm_opti_entries_pinned_and_staged() -> None:
         entries["msm-adreno-devfreq-ifpc-relax"]["url"]
     pins = {p["name"]: p["sha256"] for p in doc["patches"]
             if p.get("sha256")}
-    # the three pins recorded by the 2026-11-09 dry-run proofs
+    # the pins recorded by the 2026-11-09 dry-run proofs
     assert pins["0166-sched-fair-remove-upper-limit"] == \
         "e6a7bfa9844f5f6bde6ef0a149dd58a7ad7dcfceae45cb08a9a4fd638d6ff0e9"
-    assert pins["0174-memcg-charge-batch-128"] == \
-        "e202d61e89c2c64dce72c93d9a199fb001f7434957c9fddb83e34f75dfcd9ef2"
     assert pins["msm-adreno-devfreq-ifpc-relax"] == \
         "77fdb7a9afd9460c0c8fdee77ec2483078b781c1bd716719cf9441ae7edfe88d"
 

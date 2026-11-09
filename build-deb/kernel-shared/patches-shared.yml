@@ -126,11 +126,12 @@ patches:
         stage: common
         sha256: e6a7bfa9844f5f6bde6ef0a149dd58a7ad7dcfceae45cb08a9a4fd638d6ff0e9
         license: GPL-2.0-only
-      - name: 0174-memcg-charge-batch-128
-        url: https://raw.githubusercontent.com/clearlinux-pkgs/linux/main/0174-memcg-increase-MEMCG_CHARGE_BATCH-to-128.patch
-        stage: common
-        sha256: e202d61e89c2c64dce72c93d9a199fb001f7434957c9fddb83e34f75dfcd9ef2
-        license: GPL-2.0-only
+      # 0174-memcg-charge-batch-128 K-PORT (2026-11-09, run 42713342754): the
+      # patch applies fuzz-0 but does NOT build — mainline carries
+      # BUILD_BUG_ON(MEMCG_CHARGE_BATCH > S8_MAX) in memcontrol.h (s8 field,
+      # hard cap 127); bumping to 128 fails every kernel build at
+      # mm/memcontrol.o (21 wave0 reds amd64+arm64). Re-introduction requires
+      # a follow-up s8->s16 field change upstream, out of scope here.
       # 0004-ata-before-graphics REMOVED (series 7.0 review): downloads but no
       # longer applies to the 7.0.x tree — drivers initialize ata before
       # graphics upstream now.
