@@ -19,6 +19,7 @@
 #   deb_overlay_tree <pkg> <ver-suffix> <tree-dir> [exec...]  -> tree-copy repack
 #   deb_custom <pkg> <ver> <tree-dir>                         -> custom whole...
 #   deb_source_build <pkg> <commit> <src-ver> <src-lane> [overlay...]    -> upstream source build, patch lanes applied on the source treeee
+#   nvidia_driver_detect [repo-dir]                           -> NVIDIA_DRIVER_VERSION (rolling pin), exit 1 when no candidate pairs a module tag
 #
 # Kernel build primitives live in scripts/kernel_helpers.sh (both kernel
 # modes: VE kernel-pve and debian-bootc linux-image), sourced here so the
@@ -318,4 +319,85 @@ deb_custom() {
     > "$O/DEBIAN/md5sums"
   dpkg-deb --build "$O" \
     "/debs/${pkg}_${ver}_all.deb"
+}
+
+#######################################
+# NVIDIA driver version — the rolling pin of the kernel stream (owner order
+# 09/11 2026), resolved at build time from NVIDIA's own signed APT
+# repository (https://developer.download.nvidia.com/compute/cuda/repos).
+# The repo carries the whole driver meta stack as pinned releases (libcuda1
+# is versioned like the whole NVIDIA user-space there); the open kernel
+# modules build is the github tag of the SAME release. Candidates walk
+# newest-first and the FIRST one whose open-gpu-kernel-modules tag exists
+# wins — NVIDIA has shipped a user-space release without its module tag
+# (620.70.06 in the 09/11 probe was exactly that until NVIDIA pushed the
+# tag), and a clone that dies on a missing tag used to kill the lane (paid
+# 2026-11-04). Version and user-space must pair on BOTH sides; a
+# release without a tag is skipped, never forced.
+# Globals:
+#   NVIDIA_APT_REPO: read — the distro subdirectory of the CUDA repos
+#                    (debian10..13 share the index layout). Default debian13.
+#   NVIDIA_REPO_BASE: read — repo root override.
+#   NVIDIA_DRIVER_VERSION: read (honored verbatim when preset — the pin
+#                    wins over detection) AND export — the chosen release
+#                    with the Debian revision stripped (620.70.06-1 ->
+#                    620.70.06).
+# Arguments:
+#   $1 - optional repo directory (overrides NVIDIA_APT_REPO)
+# Exports:
+#   NVIDIA_DRIVER_VERSION (fails the build when nothing resolves)
+#######################################
+nvidia_driver_detect() {
+  local repo_dir="${1:-${NVIDIA_APT_REPO:-debian13}}"
+  local base="${NVIDIA_REPO_BASE:-https://developer.download.nvidia.com/compute/cuda/repos}"
+  local repo="${base}/${repo_dir}/x86_64"
+  if [[ -n "${NVIDIA_DRIVER_VERSION:-}" ]]; then
+    export NVIDIA_DRIVER_VERSION
+    echo "NVIDIA driver: pinned ${NVIDIA_DRIVER_VERSION}"
+    return 0
+  fi
+  local work
+  work=$(mktemp -d)
+  # The repo ships Packages.gz (xz absent on the current index); each index
+  # record is one package. libcuda1 is the user-space release marker the
+  # whole stack is versioned by.
+  if ! curl -fsSL --retry 3 "${repo}/Packages.gz" -o "${work}/Packages.gz" \
+    && ! curl -fsSL --retry 3 "${repo}/Packages.xz" -o "${work}/Packages.xz"; then
+    echo "ERROR: NVIDIA apt Packages index unreachable: ${repo}" >&2
+    exit 1
+  fi
+  if [ -s "${work}/Packages.gz" ]; then
+    gzip -dc "${work}/Packages.gz" > "${work}/Packages"
+  else
+    xz -dc "${work}/Packages.xz" > "${work}/Packages"
+  fi
+  local v nvidia_tags=""
+  local nvidia_repo="${NVIDIA_OPEN_REPO:-https://github.com/NVIDIA/open-gpu-kernel-modules.git}"
+  # Candidates newest-first (sort -rV), debian revision (-N) stripped —
+  # the tag names the bare release. A curl cache miss on the tag list
+  # fails every probe: fetch ONCE, grep it after.
+  if ! nvidia_tags=$(git ls-remote --tags "${nvidia_repo}" \
+      | sed 's|.*refs/tags/||' | grep -v '\^{}' || true); then
+    nvidia_tags=""
+  fi
+  test -n "${nvidia_tags}" \
+    || { echo "ERROR: open-gpu-kernel-modules tag list unreachable" >&2; exit 1; }
+  while IFS= read -r v; do
+    [ -n "${v}" ] || continue
+    v="${v%-*}"
+    if grep -qxF "${v}" <<<"${nvidia_tags}"; then
+      echo "NVIDIA driver: ${v} (rolling pin, repo ${repo_dir}, first candidate with an open-gpu-kernel-modules tag)"
+      export NVIDIA_DRIVER_VERSION="${v}"
+      rm -rf "${work}"
+      return 0
+    fi
+  done < <(
+    awk 'BEGIN{RS=""; FS="\n"}
+      /^Package: libcuda1(\n|$)/ {
+        for (i = 1; i <= NF; i++)
+          if ($i ~ /^Version: /) { sub(/^Version: /, "", $i); print $i; break }
+      }' "${work}/Packages" | sort -u -rV
+  )
+  echo "ERROR: no release in ${repo} pairs an open-gpu-kernel-modules tag" >&2
+  exit 1
 }
