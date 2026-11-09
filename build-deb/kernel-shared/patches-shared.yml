@@ -13,9 +13,14 @@
 # (DaemonCores-CI): each lane resolves its own kernel series (the PVE
 # packaging carries a Debian 6.12.x kernel tree — the series resolves by
 # that tree's Makefile, not by the 7.0.x packaging version). Source
-# reviewed 2026-10-29: 17 xanmod + 3 clearlinux entries + bore (which
+# Source reviewed 2026-10-29: 17 xanmod + 3 clearlinux entries + bore (which
 # travels with the shared set so the SCHED_BORE pin of
 # kconfig/x86-common.cfg resolves on both kernels);
+# ARM OPTI update 2026-11-09 (owner mandate): +2 clearlinux generic
+# completions (0166 sched-fair upper-limit, 0174 memcg CHARGE_BATCH) and
+# +1 arm64 additive (msm-adreno devfreq IFPC relax, lore-pinned) — counts
+# now 25 entries (23 common, 2 stage arm64) + the dormant bore + the
+# rocknix module carrier; bore re-probed and still K-PORT (see its entry).
 # 0004-ata-before-graphics removed (does not apply to the consumer trees);
 # 0003-kbuild-sms-pipelining retired (dry-run fails on both series
 # variants). A patch that cannot be downloaded or applied fails the
@@ -108,6 +113,24 @@ patches:
         url: https://gitlab.com/xanmod/linux-patches/-/raw/master/{seriesdir}/{topic}/0003-locking-rwsem-spin-faster.patch
         topic: clearlinux
         stage: common
+      # Clear-linux generic completions (owner mandate ARM OPTI 2026-11-09):
+      # the two generic Serie.clr entries the shared set was missing. Dry-run
+      # fuzz 0 PASS on pristine 7.2.15 (2026-11-09) and in manifest order on
+      # the FULL set (log: build-local, tarball sha256 d0f6b1d7...809ab).
+      # 0166 drops the fair.c upper limit on CPU numbers (big NR_CPUS sched
+      # domains); 0174 raises MEMCG_CHARGE_BATCH to 128 (fewer memcg charge
+      # round-trips, LLM-shaped allocations). Both touch generic files,
+      # stage common = arm64 AND amd64.
+      - name: 0166-sched-fair-remove-upper-limit
+        url: https://raw.githubusercontent.com/clearlinux-pkgs/linux/main/0166-sched-fair-remove-upper-limit-on-cpu-number.patch
+        stage: common
+        sha256: e6a7bfa9844f5f6bde6ef0a149dd58a7ad7dcfceae45cb08a9a4fd638d6ff0e9
+        license: GPL-2.0-only
+      - name: 0174-memcg-charge-batch-128
+        url: https://raw.githubusercontent.com/clearlinux-pkgs/linux/main/0174-memcg-increase-MEMCG_CHARGE_BATCH-to-128.patch
+        stage: common
+        sha256: e202d61e89c2c64dce72c93d9a199fb001f7434957c9fddb83e34f75dfcd9ef2
+        license: GPL-2.0-only
       # 0004-ata-before-graphics REMOVED (series 7.0 review): downloads but no
       # longer applies to the 7.0.x tree — drivers initialize ata before
       # graphics upstream now.
