@@ -140,6 +140,12 @@ jobs:
             >>"$GITHUB_OUTPUT"
           yq -o=json '.' "${MAN}" >/tmp/pkgs.json
           python3 .ci-tooling/scripts/dependency-waves.py /tmp/pkgs.json
+          # Loud diagnostics: the wave plan is the contract of every matrix
+          # below — an empty wave1 whose deps land downstream prints here
+          # instead of surfacing as literal-glob apt errors in the wave jobs.
+          grep '^wave' "$GITHUB_OUTPUT" | while IFS= read -r ln; do
+            echo "WAVES: ${ln}"
+          done
 
   wave0:
     needs: setup

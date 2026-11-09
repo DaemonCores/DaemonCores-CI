@@ -163,6 +163,16 @@ jobs:
           done
           # Intentional split + glob of the collected local deb paths.
           # shellcheck disable=SC2086
+          # Loud diagnostic before apt: an unmatched word prints the pool and
+          # the word itself instead of the bare apt 'Unable to locate
+          # package <literal glob>' that hides the artifact layout problem.
+          echo "PRIOR POOL ($(ls -1 /tmp/prior 2>/dev/null | wc -l) files):"
+          (ls -1 /tmp/prior 2>/dev/null || true) | head -40
+          echo "DEP WORDS:"
+          for w in ${debs}; do
+            c=$(( (ls ${w} 2>/dev/null || true) | wc -l ))
+            echo "  word=${w} matches=${c}"
+          done
           apt-get install -y ${debs}
           # Identity of the dependency debs this build really consumes. The
           # content hash only saw the tracked upstream version, so a package
