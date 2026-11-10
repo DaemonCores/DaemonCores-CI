@@ -376,4 +376,7 @@ for _origin in "${T}"/ostree/deploy/*/deploy/*.origin; do
   echo "===== ${_origin} ====="
   cat "${_origin}"
 done
+echo "--- ESP EFI binaries (${T}/boot/efi/EFI tree) ---"
+find "${T}"/boot/efi -type f -printf '%p (%s bytes)\n' 2>/dev/null | sort | head -40
+[ -d "${T}"/boot/efi/EFI ] || echo "(no EFI dir in ESP)"
 echo "=== end post-deploy boot config ==="
