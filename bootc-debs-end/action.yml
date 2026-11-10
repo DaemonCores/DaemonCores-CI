@@ -121,6 +121,18 @@ runs:
         done
         echo "debs-cache: $(jq 'keys | length' "${out}") package(s) recorded"
 
+    # The SBOM of the election (the selection.log records the track/sibling
+    # security gates wrote, merged into .meta) + the per-variant changelog:
+    # both files land at the Pages root next to the APT repo.
+    - name: Assemble the election SBOM + changelog
+      shell: bash
+      env:
+        REPO_DIR: ${{ steps.create-apt-repo.outputs.dir }}
+      run: |
+        set -euo pipefail
+        DEBS_DIR="debs" OUT_DIR="${REPO_DIR}" \
+          bash "${GITHUB_ACTION_PATH}/sbom.sh"
+
     - name: Clean stale deb cache
       shell: bash
       env:

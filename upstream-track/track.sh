@@ -87,6 +87,14 @@
 #   GITHUB_API_URL, PAGES_URL, GITHUB_REPOSITORY, GITHUB_OUTPUT as in Actions.
 set -euo pipefail
 
+# The auto security gates judge every adopted candidate before the
+# resolution feeds the build: CARE_DELAY (24 h default, 0 = hotfix) holds
+# a freshly elected candidate; the OSV.dev/GHSA advisories hold on an
+# open advisory on the source or the commit; a CISA KEV / linux-cve-
+# announce CRITICAL kernel CVE bypasses the delay. Every verdict is
+# logged to the election selection.log (ELECTION_DIR), which the publish
+# step materializes as the SBOM source. See upstream-track/security_gate.sh
+# for the consumed variables.
 MAN="${MAN:-workflows/bootc-debs-builder/packages.yml}"
 API="${GITHUB_API_URL:-https://api.github.com}"
 # Default when UNSET only; an explicitly empty value disables the walk
@@ -94,6 +102,10 @@ API="${GITHUB_API_URL:-https://api.github.com}"
 if [[ -z "${GIT_TAGS_URL+x}" ]]; then
   GIT_TAGS_URL="https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git"
 fi
+
+GATE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=upstream-track/security_gate.sh
+source "${GATE_DIR}/security_gate.sh"
 
 #######################################
 # Fetch the latest (non-prerelease) release of a repository as JSON.
@@ -350,6 +362,95 @@ election_dryrun() {
 election_require() {
   yq ".packages[] | select(.name == \"$1\") | .track.\"$2\".\"require-patches\" // \"\"" \
     "${MAN}"
+}
+
+#######################################
+# The security gates over one adopted resolution: the candidate age is
+# judged by CARE_DELAY (24 h default, 0 = hotfix; a CISA KEV / linux-cve-
+# announce CRITICAL kernel CVE bypasses the delay for a kernel candidate),
+# then the OSV.dev + GHSA advisories of the source (an open advisory on
+# the SOURCE or the COMMIT holds). The adopted candidate is appended to
+# the election selection.log and the package record file either way.
+# Globals:
+#   PKG
+#   GATE_JUDGE_REASON the hold reason, read by resolve()
+# Arguments:
+#   $1 - env variable key
+#   $2 - the resolved KEY=VALUE lines (first line KEY=<version|commit>)
+# Returns:
+#   0 = adopted (record updated); 3 = hold (nothing adopted)
+#######################################
+gate_judge() {
+  local key="$1" lines="$2" id sha moniker repo date url entry osv ghr
+  local care_verdict flux_verdict rc kind
+  id=$(printf '%s\n' "${lines}" | head -n1 | cut -d= -f2-)
+  [[ -n "${id}" ]] || return 0
+  sha=$(printf '%s\n' "${lines}" | grep -m1 'SHA256=' | cut -d= -f2- || true)
+  moniker=$(kernel_moniker "${PKG}" "${key}")
+  if [[ -n "${moniker}" ]]; then
+    # kernel: the release date + tarball source of the elected version
+    kind="kernel"
+    entry=$(releases_entry "${id}" 2>/dev/null || true)
+    date=$(yq -p=json -r '.date // ""' <<<"${entry}" 2>/dev/null) || date=""
+    url=$(yq -p=json -r '.source // ""' <<<"${entry}" 2>/dev/null) || url=""
+    osv=$(printf '{"package":{"name":"linux_kernel","ecosystem":"Linux"},"version":"%s"}' "${id}")
+    ghr="${GATE_KERNEL_GHSA_REPO:-torvalds/linux}"
+  elif is_head "${PKG}" "${key}"; then
+    kind="commit"
+    repo=$(PKG="${PKG}" TRACK_KEY="${key}" yq -r \
+      '.packages[] | select(.name == strenv(PKG)) | .track[strenv(TRACK_KEY)].repo // ""' "${MAN}")
+    url="${repo}/${id}"
+    date=$(fetch_api "repos/${repo}/commits/${id}" 2>/dev/null \
+      | yq -p=json -r '.commit.committer.date // ""') || date=""
+    osv=$(printf '{"commit":"%s"}' "${id}")
+    ghr="${repo}"
+  else
+    kind="release"
+    repo=$(PKG="${PKG}" TRACK_KEY="${key}" yq -r \
+      '.packages[] | select(.name == strenv(PKG)) | .track[strenv(TRACK_KEY)].repo // ""' "${MAN}")
+    date=$(fetch_release "${repo}" 2>/dev/null \
+      | yq -p=json -r '.published_at // ""') || date=""
+
+    url=""
+    # A release id has no OSV query shape and no commit: the source GHSA
+    # advisory stream carries the flux verdict alone.
+    osv=""
+    ghr="${repo}"
+  fi
+  GATE_JUDGE_REASON=""
+  care_verdict=""
+  flux_verdict=""
+  if [[ -n "${moniker}" ]] && gate_bypass; then
+    # The bypass log line cites the CVE ids and the feed that listed them.
+    care_verdict="bypass"
+  elif gate_care_delay "${date}" "${id} (key ${key})"; then
+    care_verdict="pass"
+  else
+    care_verdict="hold"
+    GATE_JUDGE_REASON="the candidate is younger than CARE_DELAY and the bypass judges found no cited active CVE"
+    gate_log hold kernel_election "${kind:-candidate} ${id}" \
+      "HOLD ${PKG} ${key}: ${GATE_JUDGE_REASON} (id ${id})"
+    return 3
+  fi
+  if gate_flux "${osv}" "${ghr}"; then
+    flux_verdict="pass"
+  else
+    rc=$?
+    if [[ "${rc}" -eq 3 ]]; then
+      flux_verdict="hold"
+      GATE_JUDGE_REASON="an open OSV/GHSA advisory on the source or the commit"
+      gate_log hold kernel_election "${kind:-candidate} ${id}" \
+        "HOLD ${PKG} ${key}: ${GATE_JUDGE_REASON} (id ${id})"
+      return 3
+    fi
+    # rc 1 = the advisory source itself is unreachable: loud pass, logged.
+    flux_verdict="unreachable"
+  fi
+  gate_record "${key}" "${kind}" "${id}" "${url}" "${sha}" "${date}" \
+    "${care_verdict}" "${flux_verdict}"
+  gate_log election "${kind}" "${id}" \
+    "ELECTED ${PKG} ${key}: ${id} (care=${care_verdict} flux=${flux_verdict})"
+  return 0
 }
 
 #######################################
@@ -696,12 +797,24 @@ resolve() {
     rc=0
     lines=$(resolve_entry "${PKG}" "${key}") || rc=$?
     if [[ "${rc}" -eq 0 ]]; then
+      gate_judge "${key}" "${lines}" || rc=$?
+      [[ "${rc}" -eq 3 ]] && rc=3
+    fi
+    if [[ "${rc}" -eq 0 ]]; then
       overrides+="${lines}"$'\n'
       echo "upstream ${PKG}: ${lines//$'\n'/ }" >&2
     elif [[ "${rc}" -eq 2 ]]; then
       skip=true
       echo "::notice::${PKG}: no upstream release is eligible for ${key} yet;" \
         "nothing to build, the last-good deb is kept" >&2
+    elif [[ "${rc}" -eq 3 ]]; then
+      # Security hold (care delay or open OSV/GHSA advisory): keep the
+      # last-good deb and surface the hold in a deduped issue.
+      skip=true
+      echo "::error::${PKG}: security HOLD on ${key} (${GATE_JUDGE_REASON:-gates});" \
+        "the last-good deb is kept, the election selection.log carries the reason" >&2
+      gate_hold_issue "Security hold: ${PKG} (${key})" \
+        "**${PKG}** ${key}: the security gates held the candidate. Reason: ${GATE_JUDGE_REASON:-unknown}. Run: ${GITHUB_SERVER_URL:-}/${GITHUB_REPOSITORY:-}/actions/runs/${GITHUB_RUN_ID:-}"
     else
       failed=1
       echo "::warning::${PKG}: cannot resolve the latest upstream for ${key};" \
@@ -714,6 +827,8 @@ resolve() {
     merge_env "${BASE_ENV:-}" "${overrides%$'\n'}"
     echo "TRACK_ENV_EOF"
     echo "skip=${skip}"
+    [[ ! -s "${ELECTION_DIR}/election-${PKG}.json" ]] \
+      || echo "election=${ELECTION_DIR}/election-${PKG}.json"
   } >>"${GITHUB_OUTPUT:-/dev/stdout}"
 }
 

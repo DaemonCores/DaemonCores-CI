@@ -219,8 +219,18 @@ content_hash() {
 write_meta() {
   mkdir -p "${META_DIR}"
   local arch="${ARCH:-amd64}"
-  jq -n --arg h "$1" --argjson s "$2" --argjson d "$3" \
-    '{hash: $h, skipped: $s, debs: $d}' >"${META_DIR}/${PACKAGE}-${arch}.json"
+  # The election record (the SBOM source the track/sibling gates wrote)
+  # rides the package metadata: it is publish data, NEVER a content-hash
+  # input (it changes only when the election resolves a new candidate).
+  if [[ -n "${ELECTION_RECORD:-}" && -s "${ELECTION_RECORD}" ]]; then
+    jq -n --arg h "$1" --argjson s "$2" --argjson d "$3" \
+      --slurpfile e "${ELECTION_RECORD}" \
+      '{hash: $h, skipped: $s, debs: $d, election: $e[0]}' \
+      >"${META_DIR}/${PACKAGE}-${arch}.json"
+  else
+    jq -n --arg h "$1" --argjson s "$2" --argjson d "$3" \
+      '{hash: $h, skipped: $s, debs: $d}' >"${META_DIR}/${PACKAGE}-${arch}.json"
+  fi
 }
 
 #######################################

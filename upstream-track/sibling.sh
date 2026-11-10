@@ -128,13 +128,83 @@ ENTRY="$(sib_field "${NAME}" '.entry')"
 REPO="$(sib_field "${NAME}" '.repo')"
 DEPTH="$(sib_field "${NAME}" '.depth // 30')"
 SUBJECT_RE="$(sib_field "${NAME}" '.subject // ""')"
+PKG="sibling-${NAME}"   # the selection.log package field of the gate records
+# shellcheck source=upstream-track/security_gate.sh
+source "${HERE}/security_gate.sh"  # consumes it (exported below)
+export PKG
 mkdir -p "${CACHE}"
+
+LORE_DIR=""
+GATE_CARE_VERDICT="pass"
+GATE_FLUX_VERDICT="pass"
+
+#######################################
+# The care-delay judge over one candidate commit (the bypass judges — CISA
+# KEV + linux-cve-announce — lift the delay; the commit date comes from the
+# GitHub commits API or the lore mirror). rc 0 = pass/bypass, 3 = hold.
+# Arguments:
+#   $1 - candidate commit sha
+#######################################
+gate_care_for_commit() {
+  local sha="$1" date="" rc
+  if gate_bypass; then
+    GATE_CARE_VERDICT="bypass"
+    return 0
+  fi
+  if [[ "${HISTORY}" == "github-commits" ]]; then
+    date=$(curl --retry 3 -fsSL "${AUTH[@]}" \
+      "https://api.github.com/repos/${REPO#https://github.com/}/commits/${sha}" \
+      | yq -p=json -r '.commit.committer.date // ""') || date=""
+  else
+    [[ -n "${LORE_DIR}" ]] \
+      && date=$(GIT_DIR="${LORE_DIR}" git show -s --format=%cI "${sha}" \
+        2>/dev/null)
+  fi
+  gate_care_delay "${date}" "sibling ${NAME} ${sha}"
+  rc=$?
+  [[ "${rc}" -eq 0 ]] && GATE_CARE_VERDICT="pass" || GATE_CARE_VERDICT="hold"
+  return "${rc}"
+}
+
+#######################################
+# The flux judge over one candidate commit: the OSV.dev advisory stream of
+# the commit, plus the GHSA advisories of the source repository (a GitHub
+# sibling only; the lore mirrors carry no advisory stream). rc 0 = pass or
+# a loud unreachable, 3 = hold.
+# Arguments:
+#   $1 - candidate commit sha
+#######################################
+gate_flux_for_commit() {
+  local sha="$1" rc verdict
+  if [[ "${GATE_FLUX_COMMIT:-}" == "${sha}" ]]; then
+    [[ "${GATE_FLUX_VERDICT}" == hold ]] && return 3 || return 0
+  fi
+  GATE_FLUX_COMMIT="${sha}"
+  if [[ "${HISTORY}" == "github-commits" ]]; then
+    gate_flux "$(printf '{"commit":"%s"}' "${sha}")" \
+      "${REPO#https://github.com/}"
+  else
+    gate_flux "$(printf '{"commit":"%s"}' "${sha}")" ""
+  fi
+  rc=$?
+  case "${rc}" in
+    0) GATE_FLUX_VERDICT="pass" ;;
+    3) GATE_FLUX_VERDICT="hold" ; return 3 ;;
+    *) GATE_FLUX_VERDICT="unreachable" ; return 0 ;;
+  esac
+  return 0
+}
+
 
 elected="" elected_ref="" elected_blob=""
 
 if [[ "${HISTORY}" == "github-commits" ]]; then
   FILE_TPL="$(sib_field "${NAME}" '.file')"
   for c in $(commit_history "${REPO}" "${DEPTH}"); do
+    if ! gate_care_for_commit "${c}"; then
+      echo "sibling ${NAME}: candidate ${c} HELD (care delay, no bypass cited)" >&2
+      continue
+    fi
     while IFS= read -r s; do
       [[ -n "${s}" ]] || continue
       url="https://raw.githubusercontent.com/${REPO#https://github.com/}/${c}/$(printf '%s' "${FILE_TPL}" | sed "s/{series}/${s}/")"
@@ -144,10 +214,18 @@ if [[ "${HISTORY}" == "github-commits" ]]; then
         continue
       fi
       if dryrun_files "${f}"; then
+        if ! gate_flux_for_commit "${c}"; then
+          echo "sibling ${NAME}: candidate ${c} HELD (open OSV/GHSA advisory)" >&2
+          continue
+        fi
         elected="${c}"
         elected_ref="commit ${c}"
         elected_blob="$(sha256sum "${f}" | cut -d' ' -f1)"
         elected_pinned_url="${REPO}/${c}/$(printf '%s' "${FILE_TPL}" | sed "s/{series}/${s}/")"
+        gate_record "${NAME}" "sibling" "${c}" "${elected_pinned_url}" \
+          "${elected_blob}" "" "${GATE_CARE_VERDICT}" "${GATE_FLUX_VERDICT}"
+        gate_log election sibling "${c}" \
+          "ELECTED sibling ${NAME}: ${c} (care=${GATE_CARE_VERDICT} flux=${GATE_FLUX_VERDICT})"
         break 2
       fi
       echo "sibling ${NAME} (${s}, ${c}): dry-run FAIL" >&2
@@ -155,10 +233,15 @@ if [[ "${HISTORY}" == "github-commits" ]]; then
   done
 elif [[ "${HISTORY}" == "git-log" ]]; then
   dir="$(lore_history "${REPO}" "${DEPTH}")"
+  LORE_DIR="${dir}"
   # The sibling SET of the newest series version: every commit whose
   # message carries the same v<N> marker, ordered by its [n/N] index.
   while IFS=$'\t' read -r c subj; do
     [[ -n "${c}" ]] || continue
+    if ! gate_care_for_commit "${c}"; then
+      echo "sibling ${NAME}: candidate ${c} HELD (care delay, no bypass cited)" >&2
+      continue
+    fi
     mid="$(lore_message_id "${dir}" "${c}")"
     [[ -n "${mid}" ]] || continue
     mbox="${CACHE}/ifpc-${c}.mbox"
@@ -166,10 +249,18 @@ elif [[ "${HISTORY}" == "git-log" ]]; then
       || { echo "sibling ${NAME}: raw fetch failed for ${mid}" >&2; continue; }
     echo "sibling ${NAME}: commit ${c} = ${subj} (mid ${mid})" >&2
     if dryrun_files "${mbox}"; then
+      if ! gate_flux_for_commit "${c}"; then
+        echo "sibling ${NAME}: candidate ${c} HELD (open OSV/GHSA advisory)" >&2
+        continue
+      fi
       elected="${c}"
       elected_ref="lore commit ${c} (${subj})"
       elected_blob="$(sha256sum "${mbox}" | cut -d' ' -f1)"
       elected_pinned_url="${REPO%/0}/${mid}/raw"
+      gate_record "${NAME}" "sibling" "${c}" "${elected_pinned_url}" \
+        "${elected_blob}" "" "${GATE_CARE_VERDICT}" "${GATE_FLUX_VERDICT}"
+      gate_log election sibling "${c}" \
+        "ELECTED sibling ${NAME}: ${c} (care=${GATE_CARE_VERDICT} flux=${GATE_FLUX_VERDICT})"
       break
     fi
   done < <(lore_history "${REPO}" "${DEPTH}")

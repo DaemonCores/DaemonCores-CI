@@ -34,6 +34,12 @@ inputs:
       included in the content hash, so toggling them invalidates the cache.
     required: false
     default: ''
+  election-record:
+    description: >-
+      Path of the election record file the track step wrote (the SBOM
+      source). Empty = the package metadata carries no election entry.
+    required: false
+    default: ''
   deb-glob:
     description: 'Glob (relative to /debs, without .deb) matching this package output. Defaults to <package>_*.'
     required: false
@@ -84,6 +90,7 @@ runs:
         PAGES_URL: ${{ inputs.pages-url }}
         ARCH: ${{ inputs.arch }}
         SKIP_BUILD: ${{ inputs.skip }}
+        ELECTION_RECORD: ${{ inputs.election-record }}
       run: bash "${GITHUB_ACTION_PATH}/build-deb.sh"
 
     # P-44/P-45 drain: the build may have signed kernel modules with the
