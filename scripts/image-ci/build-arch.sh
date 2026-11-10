@@ -371,11 +371,18 @@ boot_stack() {
   # ARM_DEVICES lists the device module packages built against that kernel:
   # the 4 KB one for the pre-RK3588 generations (Pi 3/4 — the rpi3 module
   # package carries the Pi Zero 2 W/BCM2710A1 —, RK3399, the sun50i H616/
-  # H613/A64 family, the i.MX8M family, the MT8167-8183 family), the 16 KB
-  # one for the recent rockchip hardware (RK3588, RK356x).
-  ARM_DEVICES="rpi3 rpi4 rk3399 h616 imx8m mt8183"
+  # H613/A64 family, the i.MX8M family, the MT8167-8183 family, RK356x), the
+  # 16 KB one for the RK3588 generation. The split FOLLOWS the debs lane
+  # (packages.yml linux-modules-arm-device): the page size is decided per
+  # ARCHITECTURE class, and RK356x (RK3566/RK3568, Cortex-A55) has no 16 KB
+  # granule — its modules build against the armv8.0 kernel and carry a
+  # versioned Depends on it, so listing rk3566 in the -16k image co-installed
+  # a foreign armv8.0 kernel tree (run 42823827845: the boot test then
+  # insmod'd a module of that tree and the image failed). The debs lane is
+  # the master: a device deb's Depends names the kernel it was built against.
+  ARM_DEVICES="rpi3 rpi4 rk3399 h616 imx8m mt8183 rk3566"
   if [[ "${kernel_suffix}" == -16k* ]]; then
-    ARM_DEVICES="rpi5 rk3588 rk3566"
+    ARM_DEVICES="rpi5 rk3588"
   fi
 }
 
