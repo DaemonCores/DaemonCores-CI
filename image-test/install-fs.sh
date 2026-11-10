@@ -396,7 +396,16 @@ find "${T}"/boot/efi -iname '*systemd*boot*' -o -iname 'sdboot*' 2>/dev/null | h
 for _pvecfg in "${T}"/boot/grub2/grub.cfg "${T}"/boot/grub2/grubenv; do
   [ -e "${_pvecfg}" ] || continue
   echo "===== ${_pvecfg} ====="
-  cat "${_pvecfg}" 2>/dev/null | head -40
+  # Full content: an earlier head -40 hid the console/timeout lines and the
+  # configs.d dropins (blscfg) bootupd 0.3.2 appends, and led to a false
+  # truncated-config diagnosis; the chain verdict needs the whole file.
+  cat "${_pvecfg}" 2>/dev/null
 done
 [ -e "${T}"/boot/grub2 ] || echo "(no /boot/grub2 dir on the boot partition)"
+# grub loads its own modules (blscfg.mod lives in x86_64-efi) from this tree:
+# a pruned or missing modules dir makes the chained grub.cfg fail silently.
+echo "--- /boot/grub2 tree (modules the chained config may need) ---"
+find "${T}"/boot/grub2 -maxdepth 2 2>/dev/null | sort | head -30
+test -e "${T}"/boot/grub2/x86_64-efi/blscfg.mod \
+  || echo "(no blscfg.mod under boot/grub2/x86_64-efi)"
 echo "=== end post-deploy boot config ==="

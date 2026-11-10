@@ -38,6 +38,9 @@ SERIAL="${STATE}/serial.log"
 MONITOR="${STATE}/monitor.sock"
 PIDFILE="${STATE}/qemu.pid"
 VARS_RUN="${STATE}/OVMF_VARS.fd"
+# OVMF firmware debug console (I/O port 0x402): the firmware log that decides
+# Secure-Build-vs-grub debates when the guest serial stays empty.
+DEBUGCON="${STATE}/ovmf-debugcon.log"
 VARSTORES="${STATE}/varstore"
 SBTOOL="${STATE}/sbtool"
 VIRT_FW="${SBTOOL}/bin/virt-fw-vars"
@@ -562,6 +565,7 @@ boot_vm() {
       -netdev "user,id=n0,hostfwd=tcp::${SSH_PORT}-:22" \
       -device "virtio-net,netdev=n0,romfile=" \
       -display none -serial "file:${SERIAL}" -monitor "unix:${MONITOR},server,nowait" \
+      -debugcon "file:${DEBUGCON}" -global isa-debugcon.iobase=0x402 \
       -daemonize -pidfile "${PIDFILE}"
   fi
 }
@@ -611,6 +615,12 @@ wait_ssh() {
   done
   echo "  … no SSH answer within ${timeout}s; guest console tail:"
   sudo tail -n 100 "${SERIAL}" 2>/dev/null | sed 's/^/    | /' || true
+  # Firmware-side truth: OVMF debug log (Secure Boot verdicts, boot option
+  # enumeration, shim/grub load attempts happen here, not on the serial).
+  if [ -s "${DEBUGCON}" ]; then
+    echo "  … OVMF debugcon tail:"
+    sudo tail -n 120 "${DEBUGCON}" 2>/dev/null | sed 's/^/    | /' || true
+  fi
   if nc -z -w 3 localhost "${SSH_PORT}" 2>/dev/null; then
     echo "  … port ${SSH_PORT} open"
   else
