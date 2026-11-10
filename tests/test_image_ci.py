@@ -602,8 +602,8 @@ def test_build_order_and_no_cache_flags(sb: Sandbox) -> None:
     # base, latest, (twin: no), (4k: no), other
     assert nocache == [True, True, False, False, True]
     assert 'KERNEL_SUFFIX=-16k-nosign' in builds[2]
-    assert 'ARM_DEVICES=rpi5 rk3588 rk3566' in builds[1]
-    assert 'ARM_DEVICES=rpi3 rpi4 rk3399 h616 imx8m mt8183' in builds[3]
+    assert 'ARM_DEVICES=rpi5 rk3588' in builds[1]
+    assert 'ARM_DEVICES=rpi3 rpi4 rk3399 h616 imx8m mt8183 rk3566' in builds[3]
     assert '--tag ' + f'{IMAGE}:latest ' not in ' '.join(builds)
 
 

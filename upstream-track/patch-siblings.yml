@@ -41,6 +41,32 @@ siblings:
     file: "{series}/sched/0001-bore-cachy.patch"
     series: ["7.3", "7.2"]
     depth: 15
+  - name: bore-xanmod
+    # BORE ALTERNATE SOURCE (owner order: the xanmod linux-patches GitLab set
+    # is a legal second candidate carrier — alternate SIBLING of the same
+    # `bore` entry, a candidate for the gate, never a local patch edit).
+    # Repo layout facts (GitLab API + GitHub mirror tree walk, 2026-11-14):
+    # the per-series topic dirs resolve as
+    # `linux-<series>.y-xanmod/<topic>/<NNNN>-XANMOD-*.patch`, so the bore
+    # sibling would live at the {file} path below. VERDICT (documented
+    # K-PORT): the xanmod/linux-patches repo ships NO bore file AT ALL —
+    # 0 path matching 'bore' in the full 2565-file tree, 7.2/7.3/eol
+    # included — the probe therefore returns K-PORT ("no sibling") without
+    # a single dry-run; the overall bore verdict stays K-PORT (CachyOS also
+    # KO). xanmod vendors BORE inside its kernel source tree, not as a
+    # standalone sched patch that any vanilla-tree dry-run could consume.
+    # The election re-judges automatically: if xanmod ever publishes the
+    # file at this path, the probe elects it and re-pins the `entry` blob.
+    # An OK verdict here would ALSO need the manifest URL of the shared
+    # `bore` entry swapped to the xanmod raw URL in the same pass (the pin
+    # script writes sha256 only, never the url).
+    manifest: build-deb/kernel-shared/patches-shared.yml
+    entry: bore
+    repo: https://github.com/xanmod/linux-patches
+    history: github-commits
+    file: "linux-{series}.y-xanmod/xanmod/0009-XANMOD-fair-bore.patch"
+    series: ["7.3", "7.2"]
+    depth: 5
   - name: msm-adreno-devfreq-ifpc
     # msm IFPC (owner mandate ARM OPTI 2026-11-09, feasibility item 6): the
     # devfreq [17/17] relax rides the [16/17] a6xx X1-85 enablement — the
