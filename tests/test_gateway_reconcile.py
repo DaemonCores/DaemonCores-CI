@@ -35,17 +35,21 @@ BLOC_OK = (
 def run(conf_dir: Path, out: Path) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         ["bash", str(SCRIPT), "testnode"],
-        capture_output=True, text=True,
-        env={"GW_CONF_DIR": str(conf_dir), "GW_OUT": str(out), "PATH": "/usr/bin:/bin:/usr/local/bin"},
+        capture_output=True,
+        text=True,
+        env={
+            "GW_CONF_DIR": str(conf_dir),
+            "GW_OUT": str(out),
+            "PATH": "/usr/bin:/bin:/usr/local/bin"
+        },
     )
 
 
 def make_conf(tmp_path: Path, vmid: int, description: str) -> Path:
     d = tmp_path / "conf"
     d.mkdir(exist_ok=True)
-    (d / f"{vmid}.conf").write_text(
-        "description: " + description.replace("\n", "\\n") + "\n"
-    )
+    (d / f"{vmid}.conf"
+     ).write_text("description: " + description.replace("\n", "\\n") + "\n")
     return d
 
 
@@ -70,7 +74,8 @@ def test_renders_routers_and_ids_by_ct(tmp_path: Path) -> None:
 
 def test_skips_broken_router_but_keeps_valid_ones_exit4(tmp_path: Path) -> None:
     conf = make_conf(
-        tmp_path, 122,
+        tmp_path,
+        122,
         "<!--gateway\n```yaml\nrouters:\n  broken:\n    rule: Host(`x`)\n"
         "  good:\n    rule: Host(`y`)\n    service: http://10.0.0.122:80\n"
         "```\ngateway-->",
@@ -102,12 +107,14 @@ def test_guest_without_bloc_writes_empty_header(tmp_path: Path) -> None:
     out = tmp_path / "dynamic.yml"
     r = run(conf, out)
     assert r.returncode == 0, r.stderr
-    assert out.read_text().startswith("# gateway-reconcile: no gateway NOTES bloc found")
+    assert out.read_text(
+    ).startswith("# gateway-reconcile: no gateway NOTES bloc found")
 
 
 def test_variant_a_flat_bloc_is_refused(tmp_path: Path) -> None:
     conf = make_conf(
-        tmp_path, 120,
+        tmp_path,
+        120,
         "<!--gateway\nforge: rule=Host(`x`); service=http://10.0.0.120:3000\n"
         "gateway-->",
     )
@@ -119,7 +126,8 @@ def test_variant_a_flat_bloc_is_refused(tmp_path: Path) -> None:
 
 def test_routers_without_fence_is_refused(tmp_path: Path) -> None:
     conf = make_conf(
-        tmp_path, 140,
+        tmp_path,
+        140,
         "<!--gateway\nrouters:\n  forge:\n    rule: Host(`x`)\n"
         "    service: http://10.0.0.140:3000\ngateway-->",
     )
@@ -131,7 +139,8 @@ def test_routers_without_fence_is_refused(tmp_path: Path) -> None:
 
 def test_unparsable_yaml_refused_exit4(tmp_path: Path) -> None:
     conf = make_conf(
-        tmp_path, 120,
+        tmp_path,
+        120,
         "<!--gateway\n```yaml\nrouters:\n  forge:\n    rule: {unclosed\n"
         "```\ngateway-->",
     )
@@ -143,7 +152,8 @@ def test_unparsable_yaml_refused_exit4(tmp_path: Path) -> None:
 
 def test_middlewares_list_rendered(tmp_path: Path) -> None:
     conf = make_conf(
-        tmp_path, 130,
+        tmp_path,
+        130,
         "<!--gateway\n```yaml\nrouters:\n  mail:\n    rule: Host(`mail.test`)\n"
         "    service: http://10.0.0.130:3500\n"
         "    middlewares:\n      - rate-limit\n      - basic-auth\n"
@@ -156,11 +166,14 @@ def test_middlewares_list_rendered(tmp_path: Path) -> None:
     assert "      middlewares:" in text
     assert "        - rate-limit" in text and "        - basic-auth" in text
 
+
 def test_script_embeds_no_heredoc_and_helpers_are_real_files() -> None:
     """The helper programs are repo files referenced by path, not heredocs."""
     text = SCRIPT.read_text()
     assert "<<" not in text
     assert "cat >" not in text
-    for helper in ("gateway-reconcile-collect.py", "gateway-reconcile-render.py"):
+    for helper in (
+        "gateway-reconcile-collect.py", "gateway-reconcile-render.py"
+    ):
         assert (SCRIPT.parent / helper).is_file()
         assert helper in text

@@ -33,12 +33,24 @@
 #     time): the newest 7.2.x wins while it streams, and the entry
 #     auto-advances when the series moves.
 #
-# `require-patches` on the entry restricts the choice to the newest stable or
-# longterm release whose series has every patch URL of that entry upstream, so a
-# kernel that a patch source (CachyOS, ROCKNIX) has not caught up with is
-# skipped instead of built and failed. The value is `native` (the entry's
-# `patches:` data — the canonical form, no patches.yml file in any repository)
-# or a patches.yml path relative to the package manifest. It never resolves a
+#     RETIRED (owner order 2026-11-10): the `series:` stream anchor is gone.
+#     The election is the LATEST-PASSING-GATE, never a constant: the
+#     candidates are probed from the NEWEST kernel.org stable/longterm
+#     release downward, each judged by THE dry-run of the full patch set
+#     (all-or-nothing, the manifest's declared fuzz levels, default 0) on
+#     the real tarball tree; the first candidate whose whole set applies is
+#     the elected version. Within a failing series the probe descends to
+#     the next point release, and a series that fails whole moves on to the
+#     next lower series. A patch that dry-runs but does not compile stays a
+#     documented K-PORT, never a reason to pin a series.
+#
+# `require-patches` on the entry names the patch manifest(s) the dry-run
+# election judges: `engine` resolves the canonical BUILD ENGINE set
+# (patches-shared.yml + patches-pve.yml + the linux-tree gpu manifests next
+# to this script's repository root — the debs builder runs the track step
+# from the engine checkout, so the path is local, never a dist fetch between
+# production repositories), `native` is the entry's `patches:` data, a path
+# is a patches.yml relative to the package manifest. It never resolves a
 # kernel older than the highest one already published (debs-cache/hashes.json):
 # the build then fails and the last-good deb is kept, instead of a downgrade.
 #
@@ -66,11 +78,22 @@
 #   STRICT    true to turn unresolved / behind into a failure
 #   GH_TOKEN  optional token, only to lift the API rate limit
 #   KERNEL_ORG_URL  root of kernel.org (default https://www.kernel.org)
+#   GIT_TAGS_URL    stable git tree for the pass-2 point-release walk of a
+#                   failing series (default the kernel.org stable tree)
+#   KERNEL_ELECT_CACHE  scratch dir of the election (default
+#                   ${RUNNER_TEMP:-/tmp}/dc-kernel-elect)
+#   CI_ENGINE_ROOT  build-engine root for the `engine` patch set and the
+#                   dry-run helpers (default beside this script)
 #   GITHUB_API_URL, PAGES_URL, GITHUB_REPOSITORY, GITHUB_OUTPUT as in Actions.
 set -euo pipefail
 
 MAN="${MAN:-workflows/bootc-debs-builder/packages.yml}"
 API="${GITHUB_API_URL:-https://api.github.com}"
+# Default when UNSET only; an explicitly empty value disables the walk
+# (tests) — the `+x` test honours the difference.
+if [[ -z "${GIT_TAGS_URL+x}" ]]; then
+  GIT_TAGS_URL="https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git"
+fi
 
 #######################################
 # Fetch the latest (non-prerelease) release of a repository as JSON.
@@ -211,77 +234,279 @@ kernel_digests() {
 }
 
 #######################################
-# Print the releases.json entry to build, as JSON.  Without `require-patches`
-# on the entry it is the first release of the moniker.  With it (`native`, the
-# entry's `patches:` data, or a patches.yml path relative to the package
-# manifest), it is the newest stable or
-# longterm release whose series has every patch of the entry upstream, so a
-# mainline release that CachyOS or another patch source has not caught up with
-# yet is skipped instead of failing the build.
+# Patch manifests the dry-run election judges, colon-separated. Resolved
+# from the `require-patches` value: `engine` = the build-engine canonical
+# kernel-tree set (the nvidia manifest is NOT in the set — it patches the
+# NVIDIA module tree, and its series rides the elected kernel anyway).
+# Arguments:
+#   $1 - require-patches value
+#   $2 - package name
+#######################################
+election_manifests() {
+  local req="$1" pkg="$2" root
+  if [[ "${req}" == "engine" ]]; then
+    root="${CI_ENGINE_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
+    local shared="${root}/build-deb/kernel-shared"
+    [[ -r "${shared}/patches-shared.yml" ]] || {
+      echo "engine patch manifest not found: ${shared}" >&2
+      return 1
+    }
+    printf '%s\n' \
+      "${shared}/patches-shared.yml:${shared}/patches-pve.yml:${shared}/patches-gpu/amd.yml:${shared}/patches-gpu/intel.yml"
+  else
+    patch_urls "${req}" "${pkg}" >/dev/null || return 1
+    # native / path: the single manifest named by the entry.
+    local man
+    if [[ "${req}" == "native" ]]; then
+      man="${MAN}"
+    else
+      man="$(dirname "${SOURCE_MAN:-${MAN}}")/${req}"
+    fi
+    printf '%s\n' "${man}"
+  fi
+}
+
+#######################################
+# Point releases of one stable series from the released tags of the stable
+# tree (a releases.json entry names only the newest point of a series; a
+# descender probe of a failing series walks its older points too). Versions
+# whose tarball has no line in sha256sums.asc are filtered later by
+# kernel_digests. Empty when GIT_TAGS_URL is unset.
+# Arguments:
+#   $1 - series, e.g. 7.3
+#######################################
+series_point_releases() {
+  local series="$1" refs
+  [[ -n "${GIT_TAGS_URL:-}" ]] || return 0
+  refs=$(git ls-remote --refs --tags "${GIT_TAGS_URL}" "refs/tags/v${series}.*" \
+    2>/dev/null | awk '{print $2}' | sed 's#refs/tags/##' | grep -E '^v[0-9.]+$' || true)
+  printf '%s\n' "${refs}" | sed 's/^v//' | sort -rV
+  return 0
+}
+
+#######################################
+# THE dry-run judge (owner order 2026-11-10): resolve a tarball, fetch its
+# sha256 from kernel.org sha256sums.asc, extract and dry-run EVERY manifest
+# of the election set (common + arm64 stages — the patch matching is
+# arch-blind, one tree serves both arches). The first candidate whose FULL
+# set applies fuzz-0 wins; a candidate is judged on an untouched tree and
+# never modified by the probe.
+# Arguments:
+#   $1 - package name
+#   $2 - env variable key
+#   $3 - kernel version
+#   $4 - tarball URL (kernel.org source)
+#######################################
+election_dryrun() {
+  local pkg="$1" key="$2" version="$3" source="$4" cache tree sha arch manifest
+  cache="${KERNEL_ELECT_CACHE:-${RUNNER_TEMP:-/tmp}/dc-kernel-elect}"
+  mkdir -p "${cache}"
+  tree="${cache}/tree-${version}"
+  if [[ ! -f "${tree}/.elected-tree" ]]; then
+    # The digest comes from the SAME sha256sums.asc the resolution pins —
+    # a candidate with an unpublished checksum is NOT READY (rc 2: nothing
+    # to build), never a dry-run verdict.
+    sha=$(kernel_digests "${pkg}" "${key}" "${version}" "${source}") || return 2
+    (cd "${cache}" && curl --retry 3 -fsSL "${source}" -o "linux-${version}.tar.xz")
+    [[ "$(sha256sum "${cache}/linux-${version}.tar.xz" | cut -d' ' -f1)" \
+      == "$(cut -d'=' -f2 <<<"${sha}")" ]] || return 1
+    rm -rf "${tree}"
+    mkdir -p "${tree}"
+    tar -xJf "${cache}/linux-${version}.tar.xz" -C "${tree}" --strip-components=1
+    touch "${tree}/.elected-tree"
+  fi
+  # Engine helpers: they LIVE in this script's own checkout (the debs
+  # builder runs the track step from the engine tree); CI_ENGINE_ROOT only
+  # re-points the patch manifests for the fixture tests.
+  local root
+  root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+  [[ -r "${root}/scripts/kernel_helpers.sh" ]] \
+    || { echo "engine helpers missing: ${root}/scripts/kernel_helpers.sh" >&2; return 1; }
+  # shellcheck source=/dev/null
+  source "${root}/scripts/kernel_helpers.sh"
+  local manifests
+  manifests=$(election_manifests "$(election_require "$1" "$2")" "${pkg}") || return 1
+  IFS=':' read -r -a manifests <<<"${manifests}"
+  for manifest in "${manifests[@]}"; do
+    for arch in amd64 arm64; do
+      if kernel_dryrun_patches "${manifest}" "${arch}" "${version}" "${tree}"; then
+        echo "election: ${manifest} [${arch}] dry-run PASS on ${version}" >&2
+      else
+        echo "election: ${manifest} [${arch}] dry-run FAIL on ${version}" >&2
+        return 1
+      fi
+    done
+  done
+  return 0
+}
+
+#######################################
+# Print the `require-patches` value of a tracked entry, empty when it has
+# none.
+# Arguments:
+#   $1 - package name
+#   $2 - env variable key
+#######################################
+election_require() {
+  yq ".packages[] | select(.name == \"$1\") | .track.\"$2\".\"require-patches\" // \"\"" \
+    "${MAN}"
+}
+
+#######################################
+# Print the releases.json entry to build, as JSON. THE LATEST-PASSING-GATE
+# (owner order 2026-11-10): the candidates are probed from the newest
+# stable/longterm release downward — each judged by the dry-run of the
+# entry's patch set on the real tarball tree; the FIRST candidate whose
+# whole set applies is elected. Within a failing series the probe descends
+# to the older point releases (the stable git tags), and a series that
+# fails whole moves on to the next lower series. The URL-availability probe
+# stays as the cheap prefilter (a patch upstream cannot serve is a failed
+# download anyway). No series anchor and no fixed version ever select.
 # Arguments:
 #   $1 - package name
 #   $2 - env variable key
 #   $3 - moniker
 # Returns:
-#   0 with the entry on stdout; 2 when no release is eligible yet (upstream is
-#   not ready: patches or checksums unpublished, or only older than what is
-#   published), which is a legitimate "nothing to build"; 1 on any other error.
+#   0 with the entry on stdout; 2 when no release is eligible yet (nothing
+#   passes, nothing is published: a legitimate "nothing to build"); 1 on
+#   any other error.
 #######################################
 select_kernel_release() {
+  local pkg="$1" key="$2" moniker="$3"
   local req urls version floor entry series
-  req=$(yq ".packages[] | select(.name == \"$1\") | .track.\"$2\".\"require-patches\" // \"\"" \
-    "${MAN}")
-  # SERIES anchor (owner 2026-11-05: the kernel version is NEVER a fixed
-  # env): restrict the candidates to the stable stream the patch set is
-  # proven for ("7.2" -> any 7.2.x, newest first). Data, not a version —
-  # the series itself rolls when the patch gate proves the next one.
-  series=$(yq ".packages[] | select(.name == \"$1\") | .track.\"$2\".series // \"\"" \
-    "${MAN}")
-  if [[ -z "${req}" && -z "${series}" ]]; then
-    fetch_kernel_release "$3"
-    return
-  fi
-  # {seriesdir}/{topic} placeholders of the manifest URLs resolve inside the
-  # builder (kernel_patch_list); the availability probe only needs {series}
-  # and {version}, so the raw URL list is what patch_urls prints either way
-  # (native `patches:` data or a patches.yml path).
+  req=$(election_require "${pkg}" "${key}")
   local urls=""
   if [[ -n "${req}" ]]; then
-    urls=$(patch_urls "${req}" "$1") || return 1
+    urls=$(patch_urls "${req}" "${pkg}") || return 1
   fi
-  floor=$(published_kernel_floor "$1")
-  while IFS= read -r version; do
-    [[ -n "${version}" ]] || continue
-    # Series anchor: only the declared stable stream is eligible.
-    [[ -z "${series}" || "${version}" == "${series}".* ]] || continue
-    # Never publish an older kernel than the one already out: when the newest
-    # releases lack a patch, keep the published deb instead of downgrading.
-    if [[ -n "${floor}" && "$(printf '%s\n%s\n' "${floor}" "${version}" \
-      | sort -V | head -n1)" != "${floor}" ]]; then
-      echo "kernel ${version} is older than the published ${floor}" >&2
-      return 2
-    fi
-    # No require-patches: the series anchor alone selects (availability is
-    # not probed — an empty URL list is trivially available anyway). With
-    # require-patches, the stream must carry every patch URL upstream, so
-    # a series a patch source has not caught up with is skipped.
-    if [[ -n "${req}" ]] && ! patch_urls_available "${urls}" "${version}"; then
-      continue
-    fi
-    entry=$(curl --retry 3 -fsSL "${KERNEL_ORG_URL:-https://www.kernel.org}/releases.json" \
-      | V="${version}" yq -p=json -o=json \
-        '[.releases[] | select(.version == strenv(V))] | .[0]')
-    # A release listed in releases.json before its tarball digest is
-    # published cannot be built (nothing to pin): try the next one.
-    kernel_digests "$1" "$2" "${version}" "$(yq -p=json '.source // ""' <<<"${entry}")" \
-      >/dev/null || continue
-    printf '%s\n' "${entry}"
-    return
-  done < <(curl --retry 3 -fsSL "${KERNEL_ORG_URL:-https://www.kernel.org}/releases.json" \
+  floor=$(published_kernel_floor "${pkg}")
+  local judged=""
+  local pass
+  # Two passes: the releases.json stream first (the newest point of every
+  # stable/longterm series); when nothing passes, the older point releases
+  # of the failing series are walked from the stable git tags (never an
+  # -rc, never a downgrade past the published floor).
+  for pass in 1 2; do
+    while IFS= read -r version; do
+      [[ -n "${version}" ]] || continue
+      # Never publish an older kernel than the one already out: when the
+      # newest releases fail, keep the published deb instead of
+      # downgrading.
+      if [[ -n "${floor}" && "$(printf '%s\n%s\n' "${floor}" "${version}" \
+        | sort -V | head -n1)" != "${floor}" ]]; then
+        echo "kernel ${version} is older than the published ${floor}" >&2
+        return 2
+      fi
+      # Nothing to judge (no require-patches) = the newest wins (digests
+      # still gate the resolution below).
+      if [[ -n "${req}" ]]; then
+        patch_urls_available "${urls}" "${version}" || continue
+        # Already probed and failed (pass 1) — only NEW candidates
+        # (the pass-2 point releases) get judged here.
+        [[ "$(grep -c "${version//./\\.} " <<<"${judged}")" -eq 0 ]] || continue
+        local jrc=0
+        local source
+        source="$(releases_entry_source "${version}")"
+        [[ -n "${source}" ]] \
+          || source="$(release_source_for "${version}")"
+        election_dryrun "${pkg}" "${key}" "${version}" "${source}" || jrc=$?
+        if [[ "${jrc}" -eq 2 ]]; then
+          continue       # not ready (checksum unpublished): skip silently
+        fi
+        if [[ "${jrc}" -ne 0 ]]; then
+          judged+="${version} "$'\n'
+          continue
+        fi
+      fi
+      entry=$(releases_entry "${version}")
+      # A pass-2 point release is not IN releases.json: build the entry the
+      # resolution consumes from the version and the source the judge used.
+      if [[ -z "${entry}" || "${entry}" == "null" ]]; then
+        entry=$(printf '{"moniker": "stable", "version": "%s", "source": "%s"}' \
+          "${version}" "${source}")
+      fi
+      kernel_digests "${pkg}" "${key}" "${version}" \
+        "$(yq -p=json '.source // ""' <<<"${entry}")" \
+        >/dev/null || continue
+      printf '%s\n' "${entry}"
+      return
+    done < <(election_candidates "${pass}" "${judged}")
+  done
+  echo "no kernel release passes the dry-run of the patch set of the entry '$1'" >&2
+  return 2
+}
+
+#######################################
+# Print the source URL of a releases.json version.
+# Arguments:
+#   $1 - kernel version
+#######################################
+releases_entry_source() {
+  curl --retry 3 -fsSL "${KERNEL_ORG_URL:-https://www.kernel.org}/releases.json" \
+    | V="$1" yq -p=json -r '.releases[] | select(.version == strenv(V)) | .source // ""'
+}
+
+#######################################
+# Print the full releases.json entry of a version.
+# Arguments:
+#   $1 - kernel version
+#######################################
+releases_entry() {
+  curl --retry 3 -fsSL "${KERNEL_ORG_URL:-https://www.kernel.org}/releases.json" \
+    | V="$1" yq -p=json -o=json \
+      '[.releases[] | select(.version == strenv(V))] | .[0]'
+}
+
+#######################################
+# Print the tarball source URL of a version absent from releases.json (a
+# pass-2 point release walked from the stable tags): the same directory as
+# any release of the same major series — kernel.org serves every point in
+# the same v<MAJOR>.x archive directory.
+# Arguments:
+#   $1 - kernel version
+#######################################
+release_source_for() {
+  local dir
+  dir=$(curl --retry 3 -fsSL \
+    "${KERNEL_ORG_URL:-https://www.kernel.org}/releases.json" \
+    | yq -p=json -r '.releases[] | select(.moniker == "stable" or .moniker == "longterm") | .source' \
+    | head -n1 | xargs -r dirname)
+  [[ -n "${dir}" ]] || return 0
+  printf '%s/linux-%s.tar.xz\n' "${dir}" "$1"
+}
+
+#######################################
+# Election candidates: pass 1 = every stable/longterm version in
+# releases.json (newest first); pass 2 = the same list plus the older point
+# releases of the series already probed and failed (from the stable git
+# tags) — the probe descends inside a series before leaving it.
+# Arguments:
+#   $1 - pass (1 or 2)
+#   $2 - failed versions probed in pass 1 ("7.3.3 \n7.3.2 \n")
+#######################################
+election_candidates() {
+  local pass="$1" judged="$2" all
+  all=$(curl --retry 3 -fsSL "${KERNEL_ORG_URL:-https://www.kernel.org}/releases.json" \
     | yq -p=json '.releases[] | select(.moniker == "stable" or .moniker == "longterm")
       | .version' | sort -rV)
-  echo "no kernel release has every patch of the entry '$1' (require-patches: ${req})" >&2
-  return 2
+  if [[ "${pass}" == 1 ]]; then
+    printf '%s\n' "${all}"
+    return
+  fi
+  local version series
+  while IFS= read -r version; do
+    [[ -n "${version}" ]] || continue
+    version="${version// /}"
+    printf '%s\n' "${version}"
+  done <<<"${all}"
+  # Descend inside the series that failed whole (oldest point first here —
+  # sort -rV restores the newest-first probe order over the merged list).
+  while IFS= read -r version; do
+    [[ -n "${version}" ]] || continue
+    version="${version// /}"
+    [[ "$(grep -c "${version//./\\.} " <<<"${judged}")" -eq 1 ]] || continue
+    series_point_releases "${version%.*}"
+  done <<<"${judged}" | sort -rV | uniq
 }
 
 #######################################

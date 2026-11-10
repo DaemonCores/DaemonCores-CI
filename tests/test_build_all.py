@@ -19,7 +19,8 @@ ROOT = Path(__file__).resolve().parents[1]
 
 pytestmark = pytest.mark.skipif(
     shutil.which('yq') is None or shutil.which('jq') is None,
-    reason='yq and jq are required by build-all.sh')
+    reason='yq and jq are required by build-all.sh'
+)
 
 MANIFEST = """
 packages:
@@ -74,8 +75,8 @@ def _sandbox(tmp_path: Path) -> Path:
     (tmp_path / 'build-deb').mkdir()
     for name in ('build-all.sh', 'plan.py'):
         shutil.copy(ROOT / 'build-deb' / name, tmp_path / 'build-deb' / name)
-    for rel, body in (('pkg-def/pkg-def.sh', PKG_DEF),
-                      ('upstream-track/track.sh', TRACK),
+    for rel, body in (('pkg-def/pkg-def.sh',
+                       PKG_DEF), ('upstream-track/track.sh', TRACK),
                       ('build-deb/build-deb.sh', BUILD_DEB)):
         path = tmp_path / rel
         path.parent.mkdir(exist_ok=True)
@@ -86,7 +87,10 @@ def _sandbox(tmp_path: Path) -> Path:
     return tmp_path
 
 
-def _run(root: Path, env_extra: dict[str, str] | None = None) -> subprocess.CompletedProcess:
+def _run(
+    root: Path,
+    env_extra: dict[str, str] | None = None
+) -> subprocess.CompletedProcess:
     """Run build-all.sh in the sandbox.
 
     Args:
@@ -97,28 +101,33 @@ def _run(root: Path, env_extra: dict[str, str] | None = None) -> subprocess.Comp
         The completed process.
     """
     base = {k: v for k, v in os.environ.items() if k != 'GITHUB_TOKEN'}
-    env = dict(base,
-               DEBS_DIR=str(root / 'debs'),
-               BUILD_DIR=str(root / 'build'),
-               TMPDIR=str(root / 'tmp'),
-               STUB_LOG=str(root / 'log'),
-               GITHUB_OUTPUT=str(root / 'out'),
-               GITHUB_API_URL='http://127.0.0.1:9',
-               GITHUB_REPOSITORY='o/r',
-               GITHUB_SERVER_URL='http://127.0.0.1:9',
-               GITHUB_RUN_ID='1',
-               SECRETVAL_GITHUB_TOKEN='t')
+    env = dict(
+        base,
+        DEBS_DIR=str(root / 'debs'),
+        BUILD_DIR=str(root / 'build'),
+        TMPDIR=str(root / 'tmp'),
+        STUB_LOG=str(root / 'log'),
+        GITHUB_OUTPUT=str(root / 'out'),
+        GITHUB_API_URL='http://127.0.0.1:9',
+        GITHUB_REPOSITORY='o/r',
+        GITHUB_SERVER_URL='http://127.0.0.1:9',
+        GITHUB_RUN_ID='1',
+        SECRETVAL_GITHUB_TOKEN='t'
+    )
     if env_extra:
         env.update(env_extra)
     (root / 'build').mkdir(exist_ok=True)
     (root / 'tmp').mkdir(exist_ok=True)
-    return subprocess.run(
-        ['bash', str(root / 'build-deb' / 'build-all.sh'),
-         str(root / 'm.yml'), str(root / 'm.yml')],
-        env=env,
-        capture_output=True,
-        text=True,
-        check=False)
+    return subprocess.run([
+        'bash',
+        str(root / 'build-deb' / 'build-all.sh'),
+        str(root / 'm.yml'),
+        str(root / 'm.yml')
+    ],
+                          env=env,
+                          capture_output=True,
+                          text=True,
+                          check=False)
 
 
 def test_results_order_and_exit_status(tmp_path: Path) -> None:
@@ -181,7 +190,8 @@ def test_cleanup_keeps_what_the_build_image_ships(tmp_path: Path) -> None:
 
 
 def test_repeat_failure_refreshes_the_issue_body_without_a_comment(
-        tmp_path: Path) -> None:
+    tmp_path: Path
+) -> None:
     """A broken build with an open issue PATCHes its body, never comments.
 
     Args:
@@ -189,7 +199,8 @@ def test_repeat_failure_refreshes_the_issue_body_without_a_comment(
     """
     root = _sandbox(tmp_path)
     api = issues_api.FakeIssuesApi(
-        open_issues=[issues_api.broken_issue(7, 'broken')])
+        open_issues=[issues_api.broken_issue(7, 'broken')]
+    )
     try:
         done = _run(root, issues_api.actions_env(api, 'broken'))
         assert 'result broken: kept' in done.stdout, done.stderr
@@ -236,7 +247,8 @@ def test_recovery_comments_once_and_closes_the_issue(tmp_path: Path) -> None:
     """
     root = _sandbox(tmp_path)
     api = issues_api.FakeIssuesApi(
-        open_issues=[issues_api.broken_issue(5, 'app')])
+        open_issues=[issues_api.broken_issue(5, 'app')]
+    )
     try:
         done = _run(root, issues_api.actions_env(api, 'app'))
         assert 'result app: built' in done.stdout, done.stderr

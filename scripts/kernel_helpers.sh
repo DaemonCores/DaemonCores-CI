@@ -29,6 +29,8 @@
 #   kernel_patch_list <manifest> <arch> [class]       -> name url lines (yq)
 #   kernel_apply_patches <manifest> <arch> <ver> <tree> [class]
 #                                                     -> dry-run ALL, apply ALL
+#   kernel_dryrun_patches <manifest> <arch> <ver> <tree> [class]
+#                                                     -> dry-run ALL only
 #   kernel_merge_config <tree> <fragment>...          -> append + olddefconfig
 #   kernel_flavour_kcflags <flavour>                  -> -march=x86-64-vN |
 #                                                        -mcpu=<arm core>
@@ -240,6 +242,84 @@ kernel_patch_sha() {
 }
 
 #######################################
+# DRY-RUN ONLY gate of one manifest against a tree (owner order 2026-11-10:
+# the kernel election judges every candidate release by THE dry-run, not by
+# a URL-presence probe). Fetches every patch (the sha256 pin still applies),
+# then dry-runs the WHOLE set against an untouched tree. Nothing is applied.
+# On success the GLOBAL arrays KERNEL_PATCH_NAMES/FILES/FUZZES hold the set
+# (kernel_apply_patches uses them to apply); a caller that only probes can
+# ignore them. FAILURE RETURNS 1 (the election moves on to the next
+# candidate) — it never exits.
+# Arguments:
+#   $1 - manifest path (patches.yml)
+#   $2 - architecture/stage (amd64 or arm64)
+#   $3 - kernel version, e.g. 6.12.107 or 7.3.0
+#   $4 - kernel source tree (never modified)
+#   $5 - optional class (kernel or module)
+# Globals:
+#   KERNEL_PATCH_NAMES / KERNEL_PATCH_FILES / KERNEL_PATCH_FUZZES (set)
+#######################################
+kernel_dryrun_patches() {
+  local manifest="$1" arch="$2" version="$3" tree="$4" class="${5:-}"
+  local series="${version%.*}" name url dir file
+  local saved_series="${PATCHES_SERIES:-}"
+  export PATCHES_SERIES="${PATCHES_SERIES:-$series}"
+  local -a names=() files=() fuzzes=()
+  [[ "${version}" == *.*.* ]] || series="${version}"
+  dir=$(mktemp -d)
+  while read -r name url; do
+    [[ -n "${name}" ]] || continue
+    file="${dir}/${#files[@]}.patch"
+    if ! curl --retry 3 -fsSL "${url}" -o "${file}"; then
+      echo "cannot download patch ${name}: ${url}" >&2
+      [[ -n "${saved_series}" ]] && export PATCHES_SERIES="${saved_series}"
+      return 1
+    fi
+    local want sha
+    want=$(kernel_patch_sha "${manifest}" "${name}")
+    if [[ -n "${want}" ]]; then
+      [[ "${want}" =~ ^[0-9a-f]{64}$ ]] \
+        || { echo "ERROR: ${name}: sha256 pin '${want}' is not a 64-hex digest" >&2; exit 1; }
+      sha=$(sha256sum "${file}" | cut -d' ' -f1)
+      if [[ "${sha}" != "${want}" ]]; then
+        echo "patch ${name} sha256 ${sha} != pinned ${want}" >&2
+        return 1
+      fi
+    fi
+    names+=("${name}")
+    files+=("${file}")
+    fuzzes+=("$(kernel_patch_fuzz "${manifest}" "${name}")")
+  done < <(kernel_patch_list "${manifest}" "${arch}" "${version}" "${class}")
+  if [[ "${saved_series}" ]]; then
+    export PATCHES_SERIES="${saved_series}"
+  else
+    unset PATCHES_SERIES
+  fi
+  KERNEL_PATCH_NAMES=("${names[@]+"${names[@]}"}")
+  KERNEL_PATCH_FILES=("${files[@]+"${files[@]}"}")
+  KERNEL_PATCH_FUZZES=("${fuzzes[@]+"${fuzzes[@]}"}")
+  ((${#files[@]})) || return 0
+  local i dry
+  for i in "${!files[@]}"; do
+    if ! dry=$(patch -d "${tree}" -p1 --fuzz="${fuzzes[i]}" \
+      --no-backup-if-mismatch --dry-run <"${files[i]}" 2>&1); then
+      echo "patch ${names[i]} does not apply to ${version}" >&2
+      printf '%s\n' "${dry}" >&2
+      return 1
+    fi
+    if ((fuzzes[i] > 0)); then
+      if patch -d "${tree}" -p1 --fuzz=0 --no-backup-if-mismatch --dry-run \
+        <"${files[i]}" >/dev/null 2>&1; then
+        echo "::warning::patch ${names[i]}: fuzz ${fuzzes[i]} is no longer needed on ${version}, remove it from the manifest" >&2
+      else
+        echo "::warning::patch ${names[i]} applies on ${version} only with fuzz ${fuzzes[i]}: $(grep -c 'with fuzz' <<<"${dry}") hunk(s) placed by fuzz, re-check the placement" >&2
+      fi
+    fi
+  done
+  return 0
+}
+
+#######################################
 # Download the patches of one manifest, dry-run the WHOLE set
 # (all-or-nothing), then apply them in manifest order.
 # Nothing is tolerated: a patch that cannot be downloaded or does not apply
@@ -255,70 +335,27 @@ kernel_patch_sha() {
 #   $3 - kernel version, e.g. 6.12.107 or 7.3.0
 #   $4 - kernel source tree
 #   $5 - optional class (kernel or module)
+# Globals:
+#   KERNEL_PATCH_NAMES / KERNEL_PATCH_FILES / KERNEL_PATCH_FUZZES
+#     (filled by kernel_dryrun_patches)
 #######################################
 kernel_apply_patches() {
   local manifest="$1" arch="$2" version="$3" tree="$4" class="${5:-}"
-  local series="${version%.*}" name url dir file
-  # The GPU driver manifests patch a DIFFERENT tree (patches-gpu/nvidia.yml
-  # applies to the NVIDIA open-module tree) but resolve {series} as the
-  # KERNEL series — the caller exports PATCHES_SERIES. The export is kept
-  # scoped to this call ONLY: the process substitution feeding the fetch
-  # loop below needs the environment, anything set before restores after.
   local saved_series="${PATCHES_SERIES:-}"
-  export PATCHES_SERIES="${PATCHES_SERIES:-$series}"
-  local -a names=() files=() fuzzes=()
-  [[ "${version}" == *.*.* ]] || series="${version}"
-  dir=$(mktemp -d)
-  while read -r name url; do
-    [[ -n "${name}" ]] || continue
-    file="${dir}/${#files[@]}.patch"
-    curl --retry 3 -fsSL "${url}" -o "${file}" \
-      || {
-        echo "ERROR: cannot download patch ${name}: ${url}" >&2
-        exit 1
-      }
-    # Optional immutability pin: a manifest entry may pin the exact bytes;
-    # failure fails the build BEFORE any touch of the tree (all-or-nothing).
-    local want sha
-    want=$(kernel_patch_sha "${manifest}" "${name}")
-    if [[ -n "${want}" ]]; then
-      [[ "${want}" =~ ^[0-9a-f]{64}$ ]] \
-        || { echo "ERROR: ${name}: sha256 pin '${want}' is not a 64-hex digest" >&2; exit 1; }
-      sha=$(sha256sum "${file}" | cut -d' ' -f1)
-      [[ "${sha}" == "${want}" ]] \
-        || { echo "ERROR: patch ${name} sha256 ${sha} != pinned ${want}" >&2; exit 1; }
-    fi
-    names+=("${name}")
-    files+=("${file}")
-    fuzzes+=("$(kernel_patch_fuzz "${manifest}" "${name}")")
-  done < <(kernel_patch_list "${manifest}" "${arch}" "${version}" "${class}")
-  ((${#files[@]})) || return 0
+  # The dry-run gate downloads, checksums and dry-runs every patch BEFORE
+  # any touch of the tree (all-or-nothing); on failure the last good deb is
+  # kept. The set stays loaded in the KERNEL_PATCH_* arrays for the apply.
+  kernel_dryrun_patches "${manifest}" "${arch}" "${version}" "${tree}" "${class}" \
+    || { echo "ERROR: the patch set ${manifest} fails the dry-run gate on ${version}" >&2; exit 1; }
+  ((${#KERNEL_PATCH_FILES[@]})) || return 0
 
   local i
-  # Every patch must dry-run before ANY touch of the tree.
-  local dry
-  for i in "${!files[@]}"; do
-    dry=$(patch -d "${tree}" -p1 --fuzz="${fuzzes[i]}" --no-backup-if-mismatch --dry-run <"${files[i]}") \
-      || {
-        echo "ERROR: patch ${names[i]} does not apply to ${version}" >&2
-        exit 1
-      }
-    # Drift report, never silent: a fuzz override that is no longer needed
-    # (the strict dry-run passes) or hunks that only apply thanks to the
-    # override are surfaced as warnings so the manifest is revisited.
-    if ((fuzzes[i] > 0)); then
-      if patch -d "${tree}" -p1 --fuzz=0 --no-backup-if-mismatch --dry-run <"${files[i]}" >/dev/null 2>&1; then
-        echo "::warning::patch ${names[i]}: fuzz ${fuzzes[i]} is no longer needed on ${version}, remove it from the manifest"
-      else
-        echo "::warning::patch ${names[i]} applies on ${version} only with fuzz ${fuzzes[i]}: $(grep -c 'with fuzz' <<<"${dry}") hunk(s) placed by fuzz, re-check the placement"
-      fi
-    fi
+  for i in "${!KERNEL_PATCH_FILES[@]}"; do
+    patch -d "${tree}" -p1 --fuzz="${KERNEL_PATCH_FUZZES[i]}" --no-backup-if-mismatch \
+      <"${KERNEL_PATCH_FILES[i]}" >/dev/null
+    echo "applied patch ${KERNEL_PATCH_NAMES[i]}"
   done
-  for i in "${!files[@]}"; do
-    patch -d "${tree}" -p1 --fuzz="${fuzzes[i]}" --no-backup-if-mismatch <"${files[i]}" >/dev/null
-    echo "applied patch ${names[i]}"
-  done
-  rm -rf "${dir}"
+  rm -rf "$(dirname "${KERNEL_PATCH_FILES[0]}")"
   if [[ -n "${saved_series}" ]]; then
     export PATCHES_SERIES="${saved_series}"
   else

@@ -22,7 +22,8 @@ CI = ROOT / 'scripts' / 'image-ci'
 WORKFLOW = ROOT / '.github' / 'workflows' / 'bootc-build.yml'
 OLD_REV = '28dd042'
 JQ_WORKS = shutil.which('jq') is not None and subprocess.run(
-    ['jq', '-n', '1'], capture_output=True, check=False).returncode == 0
+    ['jq', '-n', '1'], capture_output=True, check=False
+).returncode == 0
 needs_jq = pytest.mark.skipif(not JQ_WORKS, reason='a working jq is required')
 DIGEST = 'sha256:' + 'a' * 64
 REPO = 'DaemonCores/debian-bootc'
@@ -122,11 +123,15 @@ exec "$@"
 """
 
 BASE_CF = 'FROM debian:trixie\nARG ARCH=amd64\n'
-MAIN_CF = ('ARG BASE_IMAGE=localhost/debian-bootc-base\n'
-           'FROM ${BASE_IMAGE}\nARG ARCH=amd64\n')
-ISO_CF = ('ARG ARCH=amd64\n'
-          'ARG BASE_IMAGE=ghcr.io/daemoncores/debian-bootc:latest_${ARCH}\n'
-          'FROM ${BASE_IMAGE}\n')
+MAIN_CF = (
+    'ARG BASE_IMAGE=localhost/debian-bootc-base\n'
+    'FROM ${BASE_IMAGE}\nARG ARCH=amd64\n'
+)
+ISO_CF = (
+    'ARG ARCH=amd64\n'
+    'ARG BASE_IMAGE=ghcr.io/daemoncores/debian-bootc:latest_${ARCH}\n'
+    'FROM ${BASE_IMAGE}\n'
+)
 
 
 def _script(path: Path, body: str) -> None:
@@ -160,8 +165,8 @@ class Sandbox:
         self.published.mkdir()
         bindir = tmp / 'bin'
         for name, body in (('podman', PODMAN), ('skopeo', SKOPEO),
-                           ('curl', CURL), ('trivy', TRIVY),
-                           ('cosign', COSIGN), ('sudo', SUDO)):
+                           ('curl', CURL), ('trivy', TRIVY), ('cosign', COSIGN),
+                           ('sudo', SUDO)):
             _script(bindir / name, body)
         self.image_test = tmp / 'image-test.sh'
         _script(self.image_test, IMAGE_TEST)
@@ -173,29 +178,33 @@ class Sandbox:
         git = ['git', '-c', 'user.email=t@t', '-c', 'user.name=t']
         subprocess.run(['git', 'init', '-q'], cwd=self.root, check=True)
         subprocess.run(['git', 'add', '-A'], cwd=self.root, check=True)
-        subprocess.run(git + ['commit', '-q', '-m', 'init'],
-                       cwd=self.root,
-                       check=True)
-        self.env = dict(os.environ,
-                        PATH=f'{bindir}:{os.environ["PATH"]}',
-                        SUDO='',
-                        STUB_LOG=str(self.log),
-                        PUBLISHED=str(self.published),
-                        RUNNER_TEMP=str(self.runner_temp),
-                        GITHUB_STEP_SUMMARY=str(self.summary),
-                        GITHUB_REPOSITORY=REPO,
-                        GITHUB_EVENT_NAME='push',
-                        GITHUB_REF='refs/heads/feature',
-                        GLOBAL_HASH='g' * 64,
-                        IMAGE_TEST=str(self.image_test),
-                        COSIGN_PUBLIC_KEY='pub')
+        subprocess.run(
+            git + ['commit', '-q', '-m', 'init'], cwd=self.root, check=True
+        )
+        self.env = dict(
+            os.environ,
+            PATH=f'{bindir}:{os.environ["PATH"]}',
+            SUDO='',
+            STUB_LOG=str(self.log),
+            PUBLISHED=str(self.published),
+            RUNNER_TEMP=str(self.runner_temp),
+            GITHUB_STEP_SUMMARY=str(self.summary),
+            GITHUB_REPOSITORY=REPO,
+            GITHUB_EVENT_NAME='push',
+            GITHUB_REF='refs/heads/feature',
+            GLOBAL_HASH='g' * 64,
+            IMAGE_TEST=str(self.image_test),
+            COSIGN_PUBLIC_KEY='pub'
+        )
         self.env.pop('FORCE_NO_CACHE', None)
 
-    def run(self,
-            entries: list[dict[str, str]],
-            *phases: str,
-            arch: str = 'amd64',
-            **env: str) -> subprocess.CompletedProcess[str]:
+    def run(
+        self,
+        entries: list[dict[str, str]],
+        *phases: str,
+        arch: str = 'amd64',
+        **env: str
+    ) -> subprocess.CompletedProcess[str]:
         """Run build-arch.sh in the repository.
 
         Args:
@@ -209,7 +218,8 @@ class Sandbox:
         """
         import json
         full = dict(self.env, ARCH=arch, ENTRIES=json.dumps(entries), **env)
-        return subprocess.run(['bash', str(CI / 'build-arch.sh'), *phases],
+        return subprocess.run(['bash',
+                               str(CI / 'build-arch.sh'), *phases],
                               cwd=self.root,
                               env=full,
                               capture_output=True,
@@ -268,10 +278,12 @@ class Sandbox:
         (self.published / key).write_text(label + '\n')
 
 
-def entry(tag: str,
-          file: str = 'Containerfile',
-          suffix: str = '',
-          twin: str = '') -> dict[str, str]:
+def entry(
+    tag: str,
+    file: str = 'Containerfile',
+    suffix: str = '',
+    twin: str = ''
+) -> dict[str, str]:
     """Build one matrix entry.
 
     Args:
@@ -315,18 +327,20 @@ def _old_chash_script() -> str:
     Returns:
         The shell text, GitHub expressions replaced by their values.
     """
-    text = subprocess.run(
-        ['git', 'show', f'{OLD_REV}:.github/workflows/bootc-build.yml'],
-        cwd=ROOT,
-        check=True,
-        capture_output=True,
-        text=True).stdout
+    text = subprocess.run([
+        'git', 'show', f'{OLD_REV}:.github/workflows/bootc-build.yml'
+    ],
+                          cwd=ROOT,
+                          check=True,
+                          capture_output=True,
+                          text=True).stdout
     workflow = cast(dict[str, Any], yaml.safe_load(text))
     steps = workflow['jobs']['build-test-push']['steps']
     run = next(s['run'] for s in steps if s.get('id') == 'chash')
     values = {'github.event_name': 'push', 'inputs.force_no_cache': 'false'}
-    return re.sub(r'\$\{\{\s*([\w.]+)\s*\}\}',
-                  lambda m: values[m.group(1)], run)
+    return re.sub(
+        r'\$\{\{\s*([\w.]+)\s*\}\}', lambda m: values[m.group(1)], run
+    )
 
 
 @needs_jq
@@ -341,27 +355,32 @@ def test_hash_is_identical_to_the_former_workflow_step(sb: Sandbox) -> None:
     byte-identical to the formula the published hashes came from.
     """
     out = sb.root.parent / 'old.out'
-    env = dict(sb.env,
-               SUDO='sudo',
-               CF_FILE='Containerfile',
-               CF_TAG='latest',
-               ARCH='amd64',
-               PRIMARY='latest_amd64',
-               IMAGE=IMAGE,
-               BOOTC_GPG_SHA256='key',
-               GITHUB_OUTPUT=str(out))
+    env = dict(
+        sb.env,
+        SUDO='sudo',
+        CF_FILE='Containerfile',
+        CF_TAG='latest',
+        ARCH='amd64',
+        PRIMARY='latest_amd64',
+        IMAGE=IMAGE,
+        BOOTC_GPG_SHA256='key',
+        GITHUB_OUTPUT=str(out)
+    )
     subprocess.run(['bash', '-c', _old_chash_script()],
                    cwd=sb.root,
                    env=env,
                    check=True,
                    capture_output=True)
     old = dict(
-        ln.split('=', 1) for ln in out.read_text().splitlines() if '=' in ln)
-    script = (f'. {CI}/hash.sh; ci_hash_inputs; h=$(ci_image_hash '
-              'Containerfile latest); echo "hash=$h"; '
-              'echo "twin_hash=$(ci_twin_hash "$h")"; '
-              'echo "debs_hash=${DEBS_HASH}"; '
-              'echo "kernel_debs_hash=${KERNEL_DEBS_HASH}"')
+        ln.split('=', 1) for ln in out.read_text().splitlines() if '=' in ln
+    )
+    script = (
+        f'. {CI}/hash.sh; ci_hash_inputs; h=$(ci_image_hash '
+        'Containerfile latest); echo "hash=$h"; '
+        'echo "twin_hash=$(ci_twin_hash "$h")"; '
+        'echo "debs_hash=${DEBS_HASH}"; '
+        'echo "kernel_debs_hash=${KERNEL_DEBS_HASH}"'
+    )
     done = subprocess.run(['bash', '-c', script],
                           cwd=sb.root,
                           env=dict(env, SUDO='sudo'),
@@ -376,7 +395,8 @@ def test_hash_is_identical_to_the_former_workflow_step(sb: Sandbox) -> None:
 
 @needs_jq
 def test_hash_ignores_a_base_rebuild_with_identical_content(
-        sb: Sandbox) -> None:
+    sb: Sandbox
+) -> None:
     """A rebuilt base moves only its digest, not its content-hash label.
 
     The debian-bootc base pipeline rebuilds :latest with identical content;
@@ -387,13 +407,18 @@ def test_hash_ignores_a_base_rebuild_with_identical_content(
     (sb.root / 'Containerfile').write_text('FROM scratch\n')
 
     def image_hash(label: str | None = None) -> str:
-        script = (f'. {CI}/hash.sh; ci_hash_inputs; '
-                  'ci_image_hash Containerfile latest')
+        script = (
+            f'. {CI}/hash.sh; ci_hash_inputs; '
+            'ci_image_hash Containerfile latest'
+        )
         envv: dict[str, str] = dict(sb.env, SUDO='sudo', ARCH='amd64')
         if label:
             envv['BASE_LABEL'] = label
-        return subprocess.run(['bash', '-c', script], cwd=sb.root, env=envv,
-                              check=True, capture_output=True,
+        return subprocess.run(['bash', '-c', script],
+                              cwd=sb.root,
+                              env=envv,
+                              check=True,
+                              capture_output=True,
                               text=True).stdout.strip()
 
     first = image_hash()
@@ -412,14 +437,25 @@ def test_hash_follows_the_files_the_containerfile_copies(sb: Sandbox) -> None:
     (sb.root / 'src' / 'a.conf').write_text('one\n')
     (sb.root / 'other.txt').write_text('x\n')
     (sb.root / 'Containerfile').write_text('FROM scratch\nCOPY ./src /\n')
-    env = dict(sb.env, SUDO='sudo', ARCH='amd64', GITHUB_REPOSITORY=REPO,
-               GLOBAL_HASH='g' * 64, BOOTC_GPG_SHA256='key')
+    env = dict(
+        sb.env,
+        SUDO='sudo',
+        ARCH='amd64',
+        GITHUB_REPOSITORY=REPO,
+        GLOBAL_HASH='g' * 64,
+        BOOTC_GPG_SHA256='key'
+    )
 
     def image_hash() -> str:
-        script = (f'. {CI}/hash.sh; ci_hash_inputs; '
-                  'ci_image_hash Containerfile latest')
-        return subprocess.run(['bash', '-c', script], cwd=sb.root, env=env,
-                              check=True, capture_output=True,
+        script = (
+            f'. {CI}/hash.sh; ci_hash_inputs; '
+            'ci_image_hash Containerfile latest'
+        )
+        return subprocess.run(['bash', '-c', script],
+                              cwd=sb.root,
+                              env=env,
+                              check=True,
+                              capture_output=True,
                               text=True).stdout.strip()
 
     before = image_hash()
@@ -439,8 +475,9 @@ def test_hash_follows_the_files_the_containerfile_copies(sb: Sandbox) -> None:
         ('', 'push', 'false', 'build'),
     ],
 )
-def test_skip_decision(prior: str, event: str, force: str,
-                       expected: str) -> None:
+def test_skip_decision(
+    prior: str, event: str, force: str, expected: str
+) -> None:
     """A matching published hash skips, except on a refresh run.
 
     Args:
@@ -450,12 +487,13 @@ def test_skip_decision(prior: str, event: str, force: str,
         expected: Decision.
     """
     env = dict(os.environ, GITHUB_EVENT_NAME=event, FORCE_NO_CACHE=force)
-    done = subprocess.run(
-        ['bash', '-c', f'. {CI}/hash.sh; ci_skip_decision "{prior}" abc'],
-        env=env,
-        check=True,
-        capture_output=True,
-        text=True)
+    done = subprocess.run([
+        'bash', '-c', f'. {CI}/hash.sh; ci_skip_decision "{prior}" abc'
+    ],
+                          env=env,
+                          check=True,
+                          capture_output=True,
+                          text=True)
     assert done.stdout.strip() == expected
 
 
@@ -480,7 +518,8 @@ def test_hash_phase_skips_unchanged_images(sb: Sandbox) -> None:
     ('arm64', {'qemu-system-arm', 'qemu-efi-aarch64'}),
 ])
 def test_prepare_lists_the_packages_of_the_architecture(
-        arch: str, expected: set[str]) -> None:
+    arch: str, expected: set[str]
+) -> None:
     """One package list per architecture, with the common tools.
 
     Args:
@@ -500,8 +539,10 @@ def test_prepare_lists_the_packages_of_the_architecture(
 
 def test_prepare_installs_in_one_apt_call(sb: Sandbox) -> None:
     """A single apt-get install receives every package."""
-    _script(sb.root.parent / 'bin' / 'apt-get',
-            '#!/bin/bash\necho "apt-get $*" >>"${STUB_LOG}"\n')
+    _script(
+        sb.root.parent / 'bin' / 'apt-get',
+        '#!/bin/bash\necho "apt-get $*" >>"${STUB_LOG}"\n'
+    )
     done = subprocess.run(['bash', str(CI / 'prepare.sh')],
                           env=dict(sb.env, ARCH='arm64'),
                           check=False,
@@ -527,7 +568,8 @@ def test_prepare_rejects_an_unknown_architecture() -> None:
 # ---------------------------------------------------------------- build ----
 @needs_jq
 def test_parent_of_a_derived_image_is_read_from_its_from_line(
-        sb: Sandbox) -> None:
+    sb: Sandbox
+) -> None:
     """FROM naming an image of this repository records its parent tag."""
     sb.run(LATEST, 'hash')
     assert sb.row('iso')[5] == 'latest'
@@ -543,16 +585,14 @@ def test_build_order_and_no_cache_flags(sb: Sandbox) -> None:
         entry('other', 'Containerfile.other'),
     ]
     (sb.root / 'Containerfile.other').write_text(MAIN_CF)
-    done = sb.run(entries,
-                  'hash',
-                  'build',
-                  arch='arm64',
-                  FORCE_NO_CACHE='true')
+    done = sb.run(entries, 'hash', 'build', arch='arm64', FORCE_NO_CACHE='true')
     assert done.returncode == 0, done.stderr
     builds = sb.calls('podman build')
     assert len(builds) == 5
-    tags = [re.search(r'--tag (\S+)', b).group(1)  # type: ignore[union-attr]
-            for b in builds]
+    tags = [
+        re.search(r'--tag (\S+)', b).group(1)  # type: ignore[union-attr]
+        for b in builds
+    ]
     assert tags[0] == 'localhost/debian-bootc-base'
     assert [t for t in tags if t.endswith('_arm64')] == [
         f'{IMAGE}:latest_arm64', f'{IMAGE}:latest-nosign_arm64',
@@ -569,7 +609,8 @@ def test_build_order_and_no_cache_flags(sb: Sandbox) -> None:
 
 @needs_jq
 def test_cache_to_only_on_main_and_canonical_tags_only_on_amd64(
-        sb: Sandbox) -> None:
+    sb: Sandbox
+) -> None:
     """The layer cache is written on main; extra tags follow the arch."""
     sb.run([entry('latest')], 'hash', 'build')
     assert not [b for b in sb.calls('podman build') if '--cache-to' in b]
@@ -603,8 +644,7 @@ def test_stale_cache_blob_retries_without_cache_to(sb: Sandbox) -> None:
 
 
 @needs_jq
-def test_a_failed_build_is_recorded_and_the_loop_continues(
-        sb: Sandbox) -> None:
+def test_a_failed_build_is_recorded_and_the_loop_continues(sb: Sandbox) -> None:
     """The twin fails; the primary still goes through; exit status is 1."""
     entries = [entry('latest', twin='-nosign'), entry('second')]
     done = sb.run(entries, 'hash', 'build', FAIL_BUILD='latest-nosign_amd64')
@@ -621,11 +661,13 @@ def test_a_failed_build_is_recorded_and_the_loop_continues(
 @needs_jq
 def test_a_failed_base_fails_every_image_of_the_wave(sb: Sandbox) -> None:
     """Nothing is built on a base that did not build."""
-    done = sb.run(LATEST,
-                  'hash',
-                  'build',
-                  'wave2',
-                  FAIL_BUILD='localhost/debian-bootc-base')
+    done = sb.run(
+        LATEST,
+        'hash',
+        'build',
+        'wave2',
+        FAIL_BUILD='localhost/debian-bootc-base'
+    )
     assert done.returncode == 1
     assert sb.states() == {
         'latest': 'build-failed',
@@ -638,7 +680,8 @@ def test_a_failed_base_fails_every_image_of_the_wave(sb: Sandbox) -> None:
 # ---------------------------------------------------------------- waves ----
 @needs_jq
 def test_the_derived_image_is_built_after_the_tests_on_the_local_parent(
-        sb: Sandbox) -> None:
+    sb: Sandbox
+) -> None:
     """Wave 2 follows the boot test of its parent and builds on it."""
     done = sb.run(LATEST)
     assert done.returncode == 0, done.stderr
@@ -650,9 +693,12 @@ def test_the_derived_image_is_built_after_the_tests_on_the_local_parent(
     assert '--pull=never' in iso[0]
     assert sb.states()['iso'] == 'ok'
     # The installer image has no SSH server: no boot test, lint only.
-    assert not [t for t in sb.calls('image-test test') if '/iso' in t
-                or ':iso_' in t]
-    lint_calls = [c for c in sb.calls('podman run') if f'{IMAGE}:iso_amd64' in c]
+    assert not [
+        t for t in sb.calls('image-test test') if '/iso' in t or ':iso_' in t
+    ]
+    lint_calls = [
+        c for c in sb.calls('podman run') if f'{IMAGE}:iso_amd64' in c
+    ]
     assert lint_calls
     # The lint runs through an explicit sh entrypoint (bib's image-builder
     # entrypoint would eat the arguments) and keeps the image ok.
@@ -662,7 +708,8 @@ def test_the_derived_image_is_built_after_the_tests_on_the_local_parent(
 
 @needs_jq
 def test_a_derived_image_never_falls_back_to_the_published_parent(
-        sb: Sandbox) -> None:
+    sb: Sandbox
+) -> None:
     """A parent rebuilt in this run but absent locally fails the child.
 
     Pulling the published tag would build on the previous publication and
@@ -676,7 +723,8 @@ def test_a_derived_image_never_falls_back_to_the_published_parent(
 
 @needs_jq
 def test_a_derived_vendor_image_is_built_and_boot_tested_in_the_same_job(
-        sb: Sandbox) -> None:
+    sb: Sandbox
+) -> None:
     """A derived image that runs a VM is built on its tested parent, then tested.
 
     Unlike the installer image it is not in the boot-test skip list: it is a
@@ -687,7 +735,9 @@ def test_a_derived_vendor_image_is_built_and_boot_tested_in_the_same_job(
     done = sb.run([entry('latest'), entry('vendor', 'Containerfile.vendor')])
     assert done.returncode == 0, done.stderr
     log = sb.log.read_text()
-    vendor = [b for b in sb.calls('podman build') if 'Containerfile.vendor' in b]
+    vendor = [
+        b for b in sb.calls('podman build') if 'Containerfile.vendor' in b
+    ]
     assert len(vendor) == 1
     assert f'--build-arg BASE_IMAGE={IMAGE}:latest_amd64' in vendor[0]
     tests = [t for t in sb.calls('image-test test') if ':vendor_' in t]
@@ -699,7 +749,8 @@ def test_a_derived_vendor_image_is_built_and_boot_tested_in_the_same_job(
 
 @needs_jq
 def test_the_derived_image_is_blocked_when_its_parent_failed(
-        sb: Sandbox) -> None:
+    sb: Sandbox
+) -> None:
     """A parent that did not pass blocks the image built on it."""
     done = sb.run(LATEST, FAIL_TEST='latest_amd64')
     assert done.returncode == 1
@@ -711,7 +762,8 @@ def test_the_derived_image_is_blocked_when_its_parent_failed(
 
 @needs_jq
 def test_a_skipped_parent_lets_the_derived_image_build_on_the_published_one(
-        sb: Sandbox) -> None:
+    sb: Sandbox
+) -> None:
     """With an unchanged parent the derived image is built, pulling it."""
     sb.run(LATEST, 'hash')
     sb.publish('latest', 'amd64', sb.row('latest')[6])
@@ -728,7 +780,8 @@ def test_a_skipped_parent_lets_the_derived_image_build_on_the_published_one(
 
 @needs_jq
 def test_an_unchanged_derived_image_follows_a_rebuilt_parent(
-        sb: Sandbox) -> None:
+    sb: Sandbox
+) -> None:
     """The derived image is rebuilt when its parent was, even if unchanged."""
     sb.run(LATEST, 'hash')
     sb.publish('iso', 'amd64', sb.row('iso')[6])
@@ -764,7 +817,8 @@ def test_lint_failure_is_recorded(sb: Sandbox) -> None:
 
 @needs_jq
 def test_boot_tests_use_one_prepare_and_one_child_process_per_image(
-        sb: Sandbox) -> None:
+    sb: Sandbox
+) -> None:
     """Prepare once, test each image with its RAM budget, teardown once."""
     entries = [entry('latest', twin='-nosign'), entry('extra')]
     (sb.root / 'Containerfile.extra').write_text(MAIN_CF)
@@ -788,7 +842,8 @@ def test_boot_tests_use_one_prepare_and_one_child_process_per_image(
 
 @needs_jq
 def test_a_failed_boot_test_is_recorded_with_its_serial_log(
-        sb: Sandbox) -> None:
+    sb: Sandbox
+) -> None:
     """The failure is reported with the serial log; the next image runs."""
     entries = [entry('latest', twin='-nosign')]
     done = sb.run(entries, FAIL_TEST='latest_amd64')
@@ -803,7 +858,8 @@ def test_a_failed_boot_test_is_recorded_with_its_serial_log(
 @needs_jq
 def test_a_hung_boot_test_is_killed_by_the_timeout(sb: Sandbox) -> None:
     """The child process is bounded by BOOT_TEST_TIMEOUT."""
-    done = sb.run([entry('latest')], HANG_TEST='latest_amd64',
+    done = sb.run([entry('latest')],
+                  HANG_TEST='latest_amd64',
                   BOOT_TEST_TIMEOUT='1')
     assert done.returncode == 1
     assert sb.row('latest')[7] == 'test-failed'
@@ -844,10 +900,12 @@ def test_nothing_is_pushed_outside_main(sb: Sandbox) -> None:
 @needs_jq
 def test_main_pushes_ok_images_and_signs_once(sb: Sandbox) -> None:
     """Per-arch and canonical tags are pushed, one sign call covers all."""
-    done = sb.run(LATEST,
-                  FAIL_TEST='latest-nosign_amd64',
-                  GITHUB_REF='refs/heads/main',
-                  COSIGN_PRIVATE_KEY='k')
+    done = sb.run(
+        LATEST,
+        FAIL_TEST='latest-nosign_amd64',
+        GITHUB_REF='refs/heads/main',
+        COSIGN_PRIVATE_KEY='k'
+    )
     assert done.returncode == 1
     states = sb.states()
     assert states['latest'] == 'pushed'
@@ -872,9 +930,9 @@ def test_main_pushes_ok_images_and_signs_once(sb: Sandbox) -> None:
 def test_a_failed_push_is_recorded_and_not_signed(sb: Sandbox) -> None:
     """The failing image has no signature; the other ones go on."""
     entries = [entry('latest'), entry('second')]
-    done = sb.run(entries,
-                  GITHUB_REF='refs/heads/main',
-                  FAIL_PUSH='latest_amd64')
+    done = sb.run(
+        entries, GITHUB_REF='refs/heads/main', FAIL_PUSH='latest_amd64'
+    )
     assert done.returncode == 1
     states = sb.states()
     assert states['latest'] == 'push-failed'
@@ -933,13 +991,10 @@ def test_workflow_keeps_every_input() -> None:
     # YAML 1.1 reads the key `on` as the boolean True.
     triggers = cast(dict[Any, Any], _workflow())[True]
     inputs = triggers['workflow_call']['inputs']
-    assert set(inputs) == {
-        'force_no_cache', 'bootc_gpg_sha256', 'apt_url'
-    }
+    assert set(inputs) == {'force_no_cache', 'bootc_gpg_sha256', 'apt_url'}
     # L1: the unsigned-kernel twin input (nosign_images) is gone; one image
     # per variant, enforcement decided at install.
     assert 'nosign_images' not in inputs
-
 
 
 @needs_jq
@@ -952,22 +1007,25 @@ def test_the_thin_twin_is_derived_with_the_owner_tags(sb: Sandbox) -> None:
     <primary>-<twin>.
     """
     (sb.root / 'Containerfile.thpalways').write_text(ISO_CF)
-    done = sb.run([entry('latest'),
-                   entry('latest', 'Containerfile.thpalways',
-                         twin='thpalways')])
+    done = sb.run([
+        entry('latest'),
+        entry('latest', 'Containerfile.thpalways', twin='thpalways')
+    ])
     assert done.returncode == 0, done.stderr
     states = sb.states()
     assert states['latest-thpalways'] == 'ok'
-    builds = [b for b in sb.calls('podman build')
-              if 'Containerfile.thpalways' in b]
+    builds = [
+        b for b in sb.calls('podman build') if 'Containerfile.thpalways' in b
+    ]
     assert len(builds) == 1
     assert f'--build-arg BASE_IMAGE={IMAGE}:latest_amd64' in builds[0]
     assert '--pull=never' in builds[0]
-    tests = [c.split()[1:4]
-             for c in sb.calls('image-test')
-             if c.startswith('image-test test') and 'thpalways' in c]
+    tests = [
+        c.split()[1:4] for c in sb.calls('image-test')
+        if c.startswith('image-test test') and 'thpalways' in c
+    ]
     assert tests == [['test', f'{IMAGE}:latest_amd64-thpalways', '15']]
     # The boot test of the twin comes after the boot test of its parent.
     log = sb.log.read_text()
-    assert log.index('image-test test') < log.rindex(
-        f'{IMAGE}:latest_amd64-thpalways')
+    assert log.index('image-test test'
+                     ) < log.rindex(f'{IMAGE}:latest_amd64-thpalways')

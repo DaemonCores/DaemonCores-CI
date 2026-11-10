@@ -21,9 +21,11 @@ def old_script() -> str:
     Returns:
         The script source at ``OLD_REV``.
     """
-    return subprocess.run(
-        ['git', 'show', f'{OLD_REV}:build-deb/build-deb.sh'],
-        cwd=ROOT, check=True, capture_output=True, text=True).stdout
+    return subprocess.run(['git', 'show', f'{OLD_REV}:build-deb/build-deb.sh'],
+                          cwd=ROOT,
+                          check=True,
+                          capture_output=True,
+                          text=True).stdout
 
 
 @pytest.fixture
@@ -62,12 +64,17 @@ def run_hash(prelude: str, env: dict[str, str]) -> str:
     Returns:
         The hash printed on stdout.
     """
-    script = (prelude + '\nif declare -F merge_extra_env >/dev/null; '
-              'then merge_extra_env; else '
-              'EXTRA_ENV="${EXTRA_ENV}${EXTRA_ENV:+$\'\\n\'}${EXTRA_ENV_CI}"; '
-              'fi\ncontent_hash 2>/dev/null\n')
-    return subprocess.run(['bash', '-c', script], env=env, check=True,
-                          capture_output=True, text=True).stdout.strip()
+    script = (
+        prelude + '\nif declare -F merge_extra_env >/dev/null; '
+        'then merge_extra_env; else '
+        'EXTRA_ENV="${EXTRA_ENV}${EXTRA_ENV:+$\'\\n\'}${EXTRA_ENV_CI}"; '
+        'fi\ncontent_hash 2>/dev/null\n'
+    )
+    return subprocess.run(['bash', '-c', script],
+                          env=env,
+                          check=True,
+                          capture_output=True,
+                          text=True).stdout.strip()
 
 
 def test_hash_matches_pre_split_script(fixture_env: dict[str, str]) -> None:
@@ -89,7 +96,8 @@ def test_secret_keys_do_not_feed_the_hash(fixture_env: dict[str, str]) -> None:
 
 
 def test_hash_follows_the_shared_build_scripts(
-        fixture_env: dict[str, str], tmp_path: Path) -> None:
+    fixture_env: dict[str, str], tmp_path: Path
+) -> None:
     """A change to a sourced helper script rebuilds the packages.
 
     Without this, a fixed ``deb_helpers.sh`` never replaced a deb built by the
@@ -108,14 +116,20 @@ def test_hash_follows_the_shared_build_scripts(
 
 
 def test_default_helper_scripts_exist_and_feed_the_hash(
-        fixture_env: dict[str, str]) -> None:
+    fixture_env: dict[str, str]
+) -> None:
     """With no override the hash covers the real scripts builds source."""
     with_default = run_hash(f'. {LIB}', fixture_env)
     fixture_env['CI_HELPER_SCRIPTS'] = ''
     assert with_default != run_hash(f'. {LIB}', fixture_env)
-    listed = subprocess.run(
-        ['bash', '-c', f'. {LIB}; printf "%s" "$CI_HELPER_SCRIPTS"'],
-        env={'PATH': '/usr/bin:/bin'}, check=True, capture_output=True,
-        text=True).stdout.split()
+    listed = subprocess.run([
+        'bash', '-c', f'. {LIB}; printf "%s" "$CI_HELPER_SCRIPTS"'
+    ],
+                            env={
+                                'PATH': '/usr/bin:/bin'
+                            },
+                            check=True,
+                            capture_output=True,
+                            text=True).stdout.split()
     assert listed
     assert all(Path(f).is_file() for f in listed)

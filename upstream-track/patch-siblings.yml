@@ -1,0 +1,55 @@
+---
+# PATCH SIBLING ELECTION registry (owner order 2026-11-10). A third-party
+# patch that lives as SIBLINGS inside an upstream repository (a series the
+# patch source re-bases per kernel series, or a lore mbox series re-sent as
+# new versions) is ELECTED, never pinned by hand: the last (newest) commit
+# whose patch bytes pass the fuzz-0 dry-run against the elected kernel tree
+# wins, the elected blob sha256 is re-pinned into the manifest entry BY the
+# re-probe (`upstream-track/sibling.sh`), and a sibling that fails is a
+# documented K-PORT — never a reason to pin a kernel series.
+#
+# Schema per entry:
+#   name      the patch entry name in `manifest`
+#   manifest  patches.yml this election re-pins (path relative to the
+#             engine root)
+#   entry     the `patches:` entry the sha256 pin lands on
+#   repo      the git repository the siblings live in (GitHub API reachable
+#             for `history: github-commits`; a public-inbox lore mirror for
+#             `history: git-log`)
+#   history   candidate enumeration: `github-commits` (newest commits of the
+#             default branch, `depth` window) or `git-log` (subjects matching
+#             `subject`, message-id recovered from the public-inbox commit
+#             blob, `/raw` mbox served by the gnuweeb mirror)
+#   file      path of the patch file inside the repo ({series} = kernel
+#             series) — `github-commits` only
+#   series    the sibling series dir(s) to probe (github-commits only)
+#   subject   the commit subject regex of the series (git-log only)
+#   stages    the patches of ONE series verdict ordered by their [n/N]
+#             index (git-log only): the whole sibling SET dry-runs in
+#             series order
+#   depth     commit window walked, newest first
+siblings:
+  - name: bore
+    # BORE (owner: the CachyOS patch set): the sched sibling per series dir;
+    # the election judges whether ANY sibling applies to the elected kernel
+    # tree (it currently K-PORTs against vanilla 7.2/7.3 — the re-probe is
+    # automatic, no manual re-arm).
+    manifest: build-deb/kernel-shared/patches-shared.yml
+    entry: bore
+    repo: https://github.com/CachyOS/kernel-patches
+    history: github-commits
+    file: "{series}/sched/0001-bore-cachy.patch"
+    series: ["7.3", "7.2"]
+    depth: 15
+  - name: msm-adreno-devfreq-ifpc
+    # msm IFPC (owner mandate ARM OPTI 2026-11-09, feasibility item 6): the
+    # devfreq [17/17] relax rides the [16/17] a6xx X1-85 enablement — the
+    # whole lore series is the sibling set; candidates = the public-inbox
+    # git mirror commits (gnuweeb), /raw mbox by message-id bare-curl.
+    manifest: build-deb/kernel-shared/patches-shared.yml
+    entry: msm-adreno-devfreq-ifpc
+    repo: https://lore-kernel.gnuweeb.org/dri-devel/0
+    history: git-log
+    subject: "PATCH.*ifpc-support"
+    stages: true
+    depth: 400

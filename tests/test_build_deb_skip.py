@@ -27,19 +27,25 @@ def _pages(tmp_path: Path) -> Path:
         'Maintainer: ci <ci@example.invalid>\nDescription: test\n'
     )
     (pages / 'debs-cache').mkdir(parents=True)
-    subprocess.run(
-        ['dpkg-deb', '--build', str(pkg.parent),
-         str(pages / 'debs-cache' / DEB)],
-        check=True, capture_output=True
-    )
+    subprocess.run([
+        'dpkg-deb', '--build',
+        str(pkg.parent),
+        str(pages / 'debs-cache' / DEB)
+    ],
+                   check=True,
+                   capture_output=True)
     (pages / 'debs-cache' / 'hashes.json').write_text(
-        json.dumps({'kernel-amd64': {'hash': PRIOR_HASH, 'debs': [DEB]}})
+        json.dumps({'kernel-amd64': {
+            'hash': PRIOR_HASH,
+            'debs': [DEB]
+        }})
     )
     return pages
 
 
-def _run(tmp_path: Path, skip: str, build: str) -> tuple[
-        subprocess.CompletedProcess[str], list[str], Path]:
+def _run(
+    tmp_path: Path, skip: str, build: str
+) -> tuple[subprocess.CompletedProcess[str], list[str], Path]:
     """Run build-deb.sh against the fixture Pages.
 
     Args:
@@ -56,14 +62,20 @@ def _run(tmp_path: Path, skip: str, build: str) -> tuple[
     out = tmp_path / 'out'
     out.touch()
     env = {
-        'PATH': '/usr/bin:/bin', 'PACKAGE': 'kernel', 'ARCH': 'amd64',
-        'BUILD': build, 'PAGES_URL': f'file://{pages}',
-        'GITHUB_OUTPUT': str(out), 'GITHUB_WORKSPACE': str(tmp_path),
-        'DEBS_DIR': str(debs), 'SKIP_BUILD': skip,
+        'PATH': '/usr/bin:/bin',
+        'PACKAGE': 'kernel',
+        'ARCH': 'amd64',
+        'BUILD': build,
+        'PAGES_URL': f'file://{pages}',
+        'GITHUB_OUTPUT': str(out),
+        'GITHUB_WORKSPACE': str(tmp_path),
+        'DEBS_DIR': str(debs),
+        'SKIP_BUILD': skip,
     }
-    done = subprocess.run(
-        ['bash', str(SCRIPT)], env=env, capture_output=True, text=True
-    )
+    done = subprocess.run(['bash', str(SCRIPT)],
+                          env=env,
+                          capture_output=True,
+                          text=True)
     return done, out.read_text().splitlines(), debs
 
 
@@ -83,7 +95,8 @@ def test_nothing_to_build_keeps_the_last_good_deb(tmp_path: Path) -> None:
 
 
 def test_without_skip_a_failing_build_is_still_a_failure(
-        tmp_path: Path) -> None:
+    tmp_path: Path
+) -> None:
     """Only an explicit skip avoids the build; a failing build stays flagged.
 
     Args:

@@ -52,13 +52,15 @@ def make_apt_repo(base: Path, repo_dir: str, versions: list[str]) -> None:
     d.mkdir(parents=True, exist_ok=True)
     recs = []
     for v in versions:
-        recs.append("\n".join([
-            "Package: libcuda1",
-            f"Version: {v}",
-            "Architecture: amd64",
-            "Multi-Arch: same",
-            "",
-        ]))
+        recs.append(
+            "\n".join([
+                "Package: libcuda1",
+                f"Version: {v}",
+                "Architecture: amd64",
+                "Multi-Arch: same",
+                "",
+            ])
+        )
     (d / "Packages.gz").write_bytes(gzip.compress("\n".join(recs).encode()))
 
 
@@ -80,28 +82,39 @@ def make_tagged_repo(base: Path, tags: list[str]) -> str:
     wd.mkdir()
     (wd / "f").write_text("x\n")
     for cmd in (
-        ["git", "init", "-q", "-b", "main", str(wd)],
+        ["git", "init", "-q", "-b", "main",
+         str(wd)],
         ["git", "-C", str(wd), "add", "f"],
         ["git", "-C", str(wd), "commit", "-qm", "x"],
     ):
         subprocess.run(cmd, check=True, env=git_env)
     bare = base / "modules.git"
-    subprocess.run(["git", "init", "-q", "--bare", str(bare)],
-                   check=True, env=git_env)
+    subprocess.run(["git", "init", "-q", "--bare",
+                    str(bare)],
+                   check=True,
+                   env=git_env)
     subprocess.run(
-        ["git", "-C", str(wd), "push", "-q", str(bare), "main"],
-        check=True, env=git_env,
+        ["git", "-C", str(wd), "push", "-q",
+         str(bare), "main"],
+        check=True,
+        env=git_env,
     )
     for t in tags:
         subprocess.run(["git", "-C", str(wd), "tag", t],
-                       check=True, env=git_env)
-    subprocess.run(["git", "-C", str(wd), "push", "-q", str(bare), "--tags"],
-                   check=True, env=git_env)
+                       check=True,
+                       env=git_env)
+    subprocess.run(["git", "-C",
+                    str(wd), "push", "-q",
+                    str(bare), "--tags"],
+                   check=True,
+                   env=git_env)
     return f"file://{bare}"
 
 
-def run_roll(tmp: Path, repo_dir: str, repo_versions: list[str],
-             tags: list[str], **env_over: str) -> subprocess.CompletedProcess:
+def run_roll(
+    tmp: Path, repo_dir: str, repo_versions: list[str], tags: list[str],
+    **env_over: str
+) -> subprocess.CompletedProcess:
     """Whole fixture: fake apt repo + fake tag repo + one helper run."""
     base = tmp / "repo"
     make_apt_repo(base, repo_dir, repo_versions)
@@ -139,7 +152,8 @@ def test_rolling_takes_the_newest_tagged_candidate() -> None:
     with tempfile.TemporaryDirectory() as td:
         tmp = Path(td)
         r = run_roll(
-            tmp, "debian13",
+            tmp,
+            "debian13",
             ["620.70.06-1", "615.71.10-1", "615.71.09-2"],
             ["615.71.10", "615.71.09", "640.10.09"],
         )
@@ -168,13 +182,15 @@ def test_nvidia_apt_repo_is_an_argument() -> None:
         }
         by_env = run_detect(
             "nvidia_driver_detect && echo VER=${NVIDIA_DRIVER_VERSION}",
-            NVIDIA_APT_REPO="debian10", **common,
+            NVIDIA_APT_REPO="debian10",
+            **common,
         )
         assert by_env.returncode == 0, by_env.stderr
         assert "VER=640.10.09" in by_env.stdout
         by_arg = run_detect(
             "nvidia_driver_detect debian13 && echo VER=${NVIDIA_DRIVER_VERSION}",
-            NVIDIA_APT_REPO="debian10", **common,
+            NVIDIA_APT_REPO="debian10",
+            **common,
         )
         assert by_arg.returncode == 0, by_arg.stderr
         assert "VER=615.71.10" in by_arg.stdout
@@ -208,7 +224,9 @@ def test_no_tagged_candidate_fails_the_lane() -> None:
     with tempfile.TemporaryDirectory() as td:
         tmp = Path(td)
         r = run_roll(
-            tmp, "debian13", ["620.70.06-1", "610.57.04-1"],
+            tmp,
+            "debian13",
+            ["620.70.06-1", "610.57.04-1"],
             ["640.10.09"],
         )
         assert r.returncode == 1, r.stdout

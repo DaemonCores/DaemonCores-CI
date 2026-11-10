@@ -37,8 +37,9 @@ packages:
       echo plain
 """
 
-pytestmark = pytest.mark.skipif(shutil.which('yq') is None,
-                                reason='yq is required')
+pytestmark = pytest.mark.skipif(
+    shutil.which('yq') is None, reason='yq is required'
+)
 
 
 def old_step() -> str:
@@ -47,9 +48,13 @@ def old_step() -> str:
     Returns:
         The step's ``run`` text at ``OLD_REV``.
     """
-    text = subprocess.run(
-        ['git', 'show', f'{OLD_REV}:.github/workflows/build-one-deb.yml'],
-        cwd=ROOT, check=True, capture_output=True, text=True).stdout
+    text = subprocess.run([
+        'git', 'show', f'{OLD_REV}:.github/workflows/build-one-deb.yml'
+    ],
+                          cwd=ROOT,
+                          check=True,
+                          capture_output=True,
+                          text=True).stdout
     workflow = yaml.safe_load(text)
     for job in workflow['jobs'].values():
         for step in job['steps']:
@@ -73,12 +78,19 @@ def run(script: Path, tmp: Path, pkg: str) -> str:
     manifest.write_text(MANIFEST)
     out = tmp / f'{script.stem}-{pkg}.out'
     out.write_text('')
-    subprocess.run(
-        ['bash', str(script)],
-        env={'PATH': f'{Path(shutil.which("yq")).parent}:/usr/bin:/bin',
-             'MAN': str(manifest), 'PKG': pkg, 'ARCH': 'amd64',
-             'GITHUB_OUTPUT': str(out), 'SECRETVAL_GITHUB_TOKEN': 'tok-123'},
-        check=True, capture_output=True, text=True)
+    subprocess.run(['bash', str(script)],
+                   env={
+                       'PATH':
+                       f'{Path(shutil.which("yq")).parent}:/usr/bin:/bin',
+                       'MAN': str(manifest),
+                       'PKG': pkg,
+                       'ARCH': 'amd64',
+                       'GITHUB_OUTPUT': str(out),
+                       'SECRETVAL_GITHUB_TOKEN': 'tok-123'
+                   },
+                   check=True,
+                   capture_output=True,
+                   text=True)
     return out.read_text()
 
 

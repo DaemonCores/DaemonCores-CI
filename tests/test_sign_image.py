@@ -19,13 +19,20 @@ def run(tmp_path, refs, key=""):
         "REFS": refs,
         "COSIGN_PRIVATE_KEY": key,
     }
-    r = subprocess.run(["bash", str(SCRIPT)], env=env, capture_output=True, text=True)
+    r = subprocess.run(["bash", str(SCRIPT)],
+                       env=env,
+                       capture_output=True,
+                       text=True)
     calls = log.read_text().splitlines() if log.exists() else []
     return r, calls
 
 
 def test_signs_each_ref_lowercased(tmp_path):
-    r, calls = run(tmp_path, f"GHCR.io/Org/Img@{DIGEST}\n\nghcr.io/org/two@{DIGEST}\n", key="k")
+    r, calls = run(
+        tmp_path,
+        f"GHCR.io/Org/Img@{DIGEST}\n\nghcr.io/org/two@{DIGEST}\n",
+        key="k"
+    )
     assert r.returncode == 0
     assert calls == [
         f"sign --yes --key env://COSIGN_PRIVATE_KEY ghcr.io/org/img@{DIGEST}",

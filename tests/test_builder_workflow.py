@@ -23,7 +23,8 @@ WORKFLOW = ROOT / '.github' / 'workflows' / 'build-one-deb.yml'
 pytestmark = pytest.mark.skipif(
     not all(shutil.which(tool) for tool in ('jq', 'curl', 'bash'))
     or not WORKFLOW.exists(),
-    reason='jq, curl and the workflow file are required')
+    reason='jq, curl and the workflow file are required'
+)
 
 
 def _step_run(step_name: str) -> str:
@@ -53,17 +54,24 @@ def _run_step(script: str, env: dict[str, str]) -> subprocess.CompletedProcess:
     """
     base_env = dict(os.environ)
     base_env.update(env)
-    return subprocess.run(['bash'], input=script, env=base_env,
-                          capture_output=True, text=True, check=False)
+    return subprocess.run(['bash'],
+                          input=script,
+                          env=base_env,
+                          capture_output=True,
+                          text=True,
+                          check=False)
 
 
 def test_flag_step_refreshes_the_existing_issue_without_commenting() -> None:
     """A repeat failure PATCHes the issue body; no comment is appended."""
     api = issues_api.FakeIssuesApi(
-        open_issues=[issues_api.broken_issue(7, 'linux-modules-nvidia')])
+        open_issues=[issues_api.broken_issue(7, 'linux-modules-nvidia')]
+    )
     try:
-        done = _run_step(_step_run('Flag broken build'),
-                         issues_api.actions_env(api, 'linux-modules-nvidia'))
+        done = _run_step(
+            _step_run('Flag broken build'),
+            issues_api.actions_env(api, 'linux-modules-nvidia')
+        )
         assert done.returncode == 0, done.stderr
         patches = api.calls('PATCH', '/repos/o/r/issues/7')
         assert len(patches) == 1, api.requests
@@ -81,8 +89,10 @@ def test_flag_step_opens_one_english_issue_when_none_exists() -> None:
     """The first failure creates exactly one issue with an English body."""
     api = issues_api.FakeIssuesApi()
     try:
-        done = _run_step(_step_run('Flag broken build'),
-                         issues_api.actions_env(api, 'linux-modules-nvidia'))
+        done = _run_step(
+            _step_run('Flag broken build'),
+            issues_api.actions_env(api, 'linux-modules-nvidia')
+        )
         assert done.returncode == 0, done.stderr
         created = api.calls('POST', '/repos/o/r/issues')
         assert len(created) == 1, api.requests
@@ -99,10 +109,13 @@ def test_flag_step_opens_one_english_issue_when_none_exists() -> None:
 def test_close_step_comments_once_and_closes_the_issue() -> None:
     """Recovery posts a single English comment and closes the issue."""
     api = issues_api.FakeIssuesApi(
-        open_issues=[issues_api.broken_issue(3, 'linux-modules-nvidia')])
+        open_issues=[issues_api.broken_issue(3, 'linux-modules-nvidia')]
+    )
     try:
-        done = _run_step(_step_run('Close broken-build issue on success'),
-                         issues_api.actions_env(api, 'linux-modules-nvidia'))
+        done = _run_step(
+            _step_run('Close broken-build issue on success'),
+            issues_api.actions_env(api, 'linux-modules-nvidia')
+        )
         assert done.returncode == 0, done.stderr
         comments = api.calls('POST', '/repos/o/r/issues/3/comments')
         assert len(comments) == 1, api.requests
@@ -123,7 +136,8 @@ def test_issue_writer_stays_english_and_noise_free() -> None:
     close = _step_run('Close broken-build issue on success')
     for script in (flag, close):
         assert '/comments' not in script or 'succeeded' in script, (
-            'only the close step may comment')
+            'only the close step may comment'
+        )
         assert script.count('POST') <= 1
     assert '⚠️ Broken build: ${PKG} (last valid .deb reused)' in flag
     assert 'last valid .deb reused)' in close

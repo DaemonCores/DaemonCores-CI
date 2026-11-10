@@ -19,7 +19,9 @@ ROOT = Path(__file__).resolve().parents[1] / "image-test"
 SCRIPT = ROOT / "image-test.sh"
 LIB = ROOT / "lib.sh"
 
-needs_yq = pytest.mark.skipif(shutil.which("yq") is None, reason="yq is required")
+needs_yq = pytest.mark.skipif(
+    shutil.which("yq") is None, reason="yq is required"
+)
 
 MANIFEST = textwrap.dedent(
     """\
@@ -36,19 +38,34 @@ MANIFEST = textwrap.dedent(
 )
 
 
-def sh(snippet: str, env: dict[str, str], tmp: Path) -> subprocess.CompletedProcess[str]:
+def sh(snippet: str, env: dict[str, str],
+       tmp: Path) -> subprocess.CompletedProcess[str]:
     """Run a bash snippet with lib.sh sourced under the harness's own options."""
-    full = {"PATH": f"{tmp / 'bin'}:{os.environ['PATH']}", "HOME": str(tmp), **env}
+    full = {
+        "PATH": f"{tmp / 'bin'}:{os.environ['PATH']}",
+        "HOME": str(tmp),
+        **env
+    }
     return subprocess.run(
         ["bash", "-c", f'set -euo pipefail\nsource "{LIB}"\n{snippet}'],
-        capture_output=True, text=True, env=full,
+        capture_output=True,
+        text=True,
+        env=full,
     )
 
 
-def cli(args: list[str], env: dict[str, str], tmp: Path) -> subprocess.CompletedProcess[str]:
-    full = {"PATH": f"{tmp / 'bin'}:{os.environ['PATH']}", "HOME": str(tmp), **env}
+def cli(args: list[str], env: dict[str, str],
+        tmp: Path) -> subprocess.CompletedProcess[str]:
+    full = {
+        "PATH": f"{tmp / 'bin'}:{os.environ['PATH']}",
+        "HOME": str(tmp),
+        **env
+    }
     return subprocess.run(
-        ["bash", str(SCRIPT), *args], capture_output=True, text=True, env=full,
+        ["bash", str(SCRIPT), *args],
+        capture_output=True,
+        text=True,
+        env=full,
     )
 
 
@@ -83,7 +100,10 @@ def test_calibrated_timeout_caps_measured_plus_margin(stubs: Path) -> None:
         compute_timeout 60 arm64:signed
         echo "${{CALIBRATED_TIMEOUT}}"
         """,
-        {"ARCH": "arm64", "TCG_TIMEOUT_SCALE": "5"},
+        {
+            "ARCH": "arm64",
+            "TCG_TIMEOUT_SCALE": "5"
+        },
         stubs,
     )
     assert r.returncode == 0, r.stderr
@@ -100,11 +120,15 @@ def test_calibrated_timeout_not_scaled_when_calibrated(stubs: Path) -> None:
         compute_timeout 60 arm64:signed
         echo "${{CALIBRATED_TIMEOUT}}"
         """,
-        {"ARCH": "arm64", "TCG_TIMEOUT_SCALE": "5"},
+        {
+            "ARCH": "arm64",
+            "TCG_TIMEOUT_SCALE": "5"
+        },
         stubs,
     )
     assert r.returncode == 0, r.stderr
-    assert r.stdout.strip().splitlines()[-1] == "225"  # 110 * 2 + 5, no TCG scale
+    assert r.stdout.strip().splitlines(
+    )[-1] == "225"  # 110 * 2 + 5, no TCG scale
 
 
 def test_uncalibrated_timeout_keeps_manifest_and_tcg_scale(stubs: Path) -> None:
@@ -117,7 +141,10 @@ def test_uncalibrated_timeout_keeps_manifest_and_tcg_scale(stubs: Path) -> None:
         compute_timeout 60 amd64:signed
         echo "${{CALIBRATED_TIMEOUT}}"
         """,
-        {"ARCH": "amd64", "TCG_TIMEOUT_SCALE": "5"},
+        {
+            "ARCH": "amd64",
+            "TCG_TIMEOUT_SCALE": "5"
+        },
         stubs,
     )
     assert r.returncode == 0, r.stderr
@@ -133,7 +160,10 @@ def test_uncalibrated_kvm_timeout_is_the_manifest_value(stubs: Path) -> None:
         compute_timeout 60 amd64:signed
         echo "${{CALIBRATED_TIMEOUT}}"
         """,
-        {"ARCH": "amd64", "TCG_TIMEOUT_SCALE": "5"},
+        {
+            "ARCH": "amd64",
+            "TCG_TIMEOUT_SCALE": "5"
+        },
         stubs,
     )
     assert r.returncode == 0, r.stderr
@@ -150,7 +180,10 @@ def test_calibrated_timeout_never_below_manifest(stubs: Path) -> None:
         compute_timeout 60 amd64:signed
         echo "${{CALIBRATED_TIMEOUT}}"
         """,
-        {"ARCH": "amd64", "TCG_TIMEOUT_SCALE": "5"},
+        {
+            "ARCH": "amd64",
+            "TCG_TIMEOUT_SCALE": "5"
+        },
         stubs,
     )
     assert r.returncode == 0, r.stderr
@@ -167,14 +200,19 @@ def test_calibrated_timeout_ceiling_600(stubs: Path) -> None:
         compute_timeout 60 arm64:uboot
         echo "${{CALIBRATED_TIMEOUT}}"
         """,
-        {"ARCH": "arm64", "TCG_TIMEOUT_SCALE": "5"},
+        {
+            "ARCH": "arm64",
+            "TCG_TIMEOUT_SCALE": "5"
+        },
         stubs,
     )
     assert r.returncode == 0, r.stderr
     assert r.stdout.strip().splitlines()[-1] == "600"
 
 
-def test_calibration_seed_used_when_state_file_has_no_entry(stubs: Path) -> None:
+def test_calibration_seed_used_when_state_file_has_no_entry(
+    stubs: Path
+) -> None:
     """The committed seed file calibrates the first run after a job restart."""
     seed = stubs / "seed.env"
     seed.write_text("amd64:signed=19\n")
@@ -186,7 +224,10 @@ def test_calibration_seed_used_when_state_file_has_no_entry(stubs: Path) -> None
         compute_timeout 60 amd64:signed
         echo "${{CALIBRATED_TIMEOUT}}"
         """,
-        {"ARCH": "amd64", "TCG_TIMEOUT_SCALE": "5"},
+        {
+            "ARCH": "amd64",
+            "TCG_TIMEOUT_SCALE": "5"
+        },
         stubs,
     )
     assert r.returncode == 0, r.stderr
@@ -230,7 +271,9 @@ def test_calibration_reboot_key_recorded_separately(stubs: Path) -> None:
     assert r.stdout.strip().splitlines()[-1] == "127/145"
 
 
-def test_state_init_touches_the_calibration_file_and_seed_exists(stubs: Path) -> None:
+def test_state_init_touches_the_calibration_file_and_seed_exists(
+    stubs: Path
+) -> None:
     """prepare leaves the calibration file ready for the record and the cache."""
     r = sh(
         f"""
@@ -265,7 +308,10 @@ def test_unknown_subcommand_is_rejected(stubs: Path) -> None:
     assert "unknown sub-command" in r.stderr
 
 
-@pytest.mark.parametrize("args", [["test"], ["test", ""], ["test", "i", "1", "x"], ["prepare", "x"], ["teardown", "x"]])
+@pytest.mark.parametrize(
+    "args", [["test"], ["test", ""], ["test", "i", "1", "x"], ["prepare", "x"],
+             ["teardown", "x"]]
+)
 def test_bad_arity_prints_usage(stubs: Path, args: list[str]) -> None:
     r = cli(args, {"IMAGE_TEST_STATE": str(stubs / "st")}, stubs)
     assert r.returncode == 2
@@ -273,7 +319,8 @@ def test_bad_arity_prints_usage(stubs: Path, args: list[str]) -> None:
 
 
 def test_ram_max_must_be_an_integer(stubs: Path) -> None:
-    r = cli(["test", "img:latest", "abc"], {"IMAGE_TEST_STATE": str(stubs / "st")}, stubs)
+    r = cli(["test", "img:latest", "abc"],
+            {"IMAGE_TEST_STATE": str(stubs / "st")}, stubs)
     assert r.returncode == 2
     assert "ram-max" in r.stderr
 
@@ -285,7 +332,8 @@ def test_no_subcommand_needs_image(stubs: Path) -> None:
 
 
 def test_test_without_prepare_fails_clearly(stubs: Path) -> None:
-    r = cli(["test", "img:latest", "15"], {"IMAGE_TEST_STATE": str(stubs / "st")}, stubs)
+    r = cli(["test", "img:latest", "15"],
+            {"IMAGE_TEST_STATE": str(stubs / "st")}, stubs)
     assert r.returncode == 1
     assert "image-test.sh prepare" in r.stdout
 
@@ -301,7 +349,10 @@ def test_help_exits_zero(stubs: Path) -> None:
 
 def test_state_dir_from_env_is_private(stubs: Path) -> None:
     st = stubs / "custom" / "st"
-    r = sh("state_init; stat -c %a \"${STATE}\"; ls \"${STATE}\"", {"IMAGE_TEST_STATE": str(st)}, stubs)
+    r = sh(
+        "state_init; stat -c %a \"${STATE}\"; ls \"${STATE}\"",
+        {"IMAGE_TEST_STATE": str(st)}, stubs
+    )
     assert r.returncode == 0, r.stderr
     assert r.stdout.split()[0] == "700"
     assert {"logs", "varstore"} <= set(r.stdout.split()[1:])
@@ -321,13 +372,20 @@ def test_state_roundtrip_and_env_wins(stubs: Path) -> None:
         'state_init; ARCH=arm64; KVM=0; OVMF_DIR="/a b"; TESTS_FILE=/m/t.yml; save_state\n'
         'ARCH=amd64; KVM=1; OVMF_DIR=; TESTS_FILE=; load_state\n'
         'echo "${ARCH}|${KVM}|${OVMF_DIR}|${TESTS_FILE}"',
-        env, stubs,
+        env,
+        stubs,
     )
     assert r.returncode == 0, r.stderr
     assert r.stdout.strip() == "arm64|0|/a b|/m/t.yml"
-    r = sh('TESTS_FILE=/other.yml; load_state; echo "${TESTS_FILE}"', {**env, "ARCH": "amd64"}, stubs)
+    r = sh(
+        'TESTS_FILE=/other.yml; load_state; echo "${TESTS_FILE}"', {
+            **env, "ARCH": "amd64"
+        }, stubs
+    )
     assert r.stdout.strip() == "/other.yml"
-    assert sh('echo "${ARCH}"; load_state', {**env}, stubs).stdout.startswith("amd64")
+    assert sh('echo "${ARCH}"; load_state', {
+        **env
+    }, stubs).stdout.startswith("amd64")
 
 
 def test_state_dir_root_is_refused(stubs: Path) -> None:
@@ -362,7 +420,8 @@ def test_fingerprint_tracks_crt_and_mok(stubs: Path) -> None:
         fps[d.name] = r.stdout.strip()
     assert fps["a"] == fps["same"]
     assert len({fps[k] for k in ("a", "crt", "mok", "extra", "nomok")}) == 5
-    other_arch = sh(f'ARCH=arm64; sb_fingerprint "{a}"', {}, stubs).stdout.strip()
+    other_arch = sh(f'ARCH=arm64; sb_fingerprint "{a}"', {},
+                    stubs).stdout.strip()
     assert other_arch != fps["a"]
 
 
@@ -398,7 +457,8 @@ def test_varstore_cache_hit_then_rebuild_on_change(stubs: Path) -> None:
     r = sh(snippet, env, stubs)
     assert r.returncode == 0, r.stderr
     assert calls.read_text().count("build") == 2
-    assert r.stdout.count("cache hit") == 1 and r.stdout.count("cache miss") == 2
+    assert r.stdout.count("cache hit"
+                          ) == 1 and r.stdout.count("cache miss") == 2
 
 
 def test_varstore_given_to_vm_is_a_pristine_copy(stubs: Path) -> None:
@@ -410,7 +470,8 @@ def test_varstore_given_to_vm_is_a_pristine_copy(stubs: Path) -> None:
         'echo "BootOrder-leak" >>"${VARS_RUN}"\n'
         f'prepare_sb_varstore "{a}"\n'
         'cat "${VARS_RUN}"',
-        env, stubs,
+        env,
+        stubs,
     )
     assert r.returncode == 0, r.stderr
     assert "leak" not in r.stdout.split("cache hit")[-1]
@@ -419,27 +480,42 @@ def test_varstore_given_to_vm_is_a_pristine_copy(stubs: Path) -> None:
 
 def test_varstore_without_tooling_fails(stubs: Path) -> None:
     a = certdir(stubs, "a", "CRT1", {})
-    r = sh(f'state_init; prepare_sb_varstore "{a}"', {"IMAGE_TEST_STATE": str(stubs / "st")}, stubs)
+    r = sh(
+        f'state_init; prepare_sb_varstore "{a}"',
+        {"IMAGE_TEST_STATE": str(stubs / "st")}, stubs
+    )
     assert r.returncode == 1
     assert "Secure Boot needed" in r.stdout
 
 
-@pytest.mark.skipif(shutil.which("openssl") is None, reason="openssl is required")
+@pytest.mark.skipif(
+    shutil.which("openssl") is None, reason="openssl is required"
+)
 def test_build_skips_private_keys_and_passes_certs(stubs: Path) -> None:
     env = varstore_env(stubs)
     d = certdir(stubs, "a", "CRT1", {})
     pem = stubs / "m.pem"
     subprocess.run(
-        ["openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes", "-subj", "/CN=t",
-         "-keyout", str(stubs / "m.key"), "-out", str(pem)],
-        check=True, capture_output=True,
+        [
+            "openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes", "-subj",
+            "/CN=t", "-keyout",
+            str(stubs / "m.key"), "-out",
+            str(pem)
+        ],
+        check=True,
+        capture_output=True,
     )
     (d / "mok.d" / "pub.pem").write_text(pem.read_text())
     (d / "mok.d" / "priv.pem").write_text((stubs / "m.key").read_text())
     (d / "mok.d" / "note.txt").write_text("ignored")
     stub = stubs / "st" / "sbtool" / "bin" / "virt-fw-vars"
-    stub.write_text('#!/bin/bash\nprintf "%s\\n" "$@" >"$(dirname "$0")/args"\nwhile [ $# -gt 0 ]; do [ "$1" = -o ] && : >"$2"; shift; done\n')
-    r = sh(f'state_init; SB_GUID=g; SB_CERTS=/c; build_sb_vars "{d}" "{stubs}/out.fd"', env, stubs)
+    stub.write_text(
+        '#!/bin/bash\nprintf "%s\\n" "$@" >"$(dirname "$0")/args"\nwhile [ $# -gt 0 ]; do [ "$1" = -o ] && : >"$2"; shift; done\n'
+    )
+    r = sh(
+        f'state_init; SB_GUID=g; SB_CERTS=/c; build_sb_vars "{d}" "{stubs}/out.fd"',
+        env, stubs
+    )
     assert r.returncode == 0, r.stderr
     args = (stubs / "st" / "sbtool" / "bin" / "args").read_text()
     assert "pub.pem.pem" in args
@@ -459,7 +535,9 @@ def test_validate_manifest_accepts_complete_manifest(stubs: Path) -> None:
 
 @needs_yq
 @pytest.mark.parametrize("missing", ["diag", "run", "name"])
-def test_validate_manifest_rejects_missing_field(stubs: Path, missing: str) -> None:
+def test_validate_manifest_rejects_missing_field(
+    stubs: Path, missing: str
+) -> None:
     fields = {"name": "a", "run": "true", "diag": "echo a"}
     del fields[missing]
     body = ", ".join(f'{k}: "{v}"' for k, v in fields.items())
@@ -471,7 +549,10 @@ def test_validate_manifest_rejects_missing_field(stubs: Path, missing: str) -> N
 
 @needs_yq
 def test_validate_manifest_checks_reboot_tests(stubs: Path) -> None:
-    m = manifest(stubs, 'tests:\n  - {name: a, run: x, diag: y}\nreboot_tests:\n  - {name: b, run: x}\n')
+    m = manifest(
+        stubs,
+        'tests:\n  - {name: a, run: x, diag: y}\nreboot_tests:\n  - {name: b, run: x}\n'
+    )
     r = sh("validate_manifest", {"TESTS_FILE": str(m)}, stubs)
     assert r.returncode == 1
     assert "reboot_tests" in r.stdout
@@ -486,11 +567,17 @@ def test_validate_manifest_checks_reboot_tests(stubs: Path) -> None:
         ("img:extra-4k_amd64", "k4", "0"),
     ],
 )
-def test_select_category_secure_boot_per_tag(stubs: Path, tag: str, category: str, secure: str) -> None:
+def test_select_category_secure_boot_per_tag(
+    stubs: Path, tag: str, category: str, secure: str
+) -> None:
     m = manifest(stubs)
     r = sh(
         f'IMAGE="{tag}"; select_category >/dev/null; echo "${{CATEGORY}} ${{SECURE_BOOT}}"',
-        {"TESTS_FILE": str(m), "ARCH": "amd64"}, stubs,
+        {
+            "TESTS_FILE": str(m),
+            "ARCH": "amd64"
+        },
+        stubs,
     )
     assert r.returncode == 0, r.stdout + r.stderr
     assert r.stdout.split() == [category, secure]
@@ -499,8 +586,13 @@ def test_select_category_secure_boot_per_tag(stubs: Path, tag: str, category: st
 @needs_yq
 def test_secure_boot_env_overrides_category(stubs: Path) -> None:
     m = manifest(stubs)
-    r = sh('IMAGE="img:x-4k_amd64"; select_category >/dev/null; echo "${SECURE_BOOT}"',
-           {"TESTS_FILE": str(m), "SECURE_BOOT": "1"}, stubs)
+    r = sh(
+        'IMAGE="img:x-4k_amd64"; select_category >/dev/null; echo "${SECURE_BOOT}"',
+        {
+            "TESTS_FILE": str(m),
+            "SECURE_BOOT": "1"
+        }, stubs
+    )
     assert r.stdout.strip().splitlines()[-1] == "1"
 
 
@@ -509,7 +601,9 @@ def test_secure_boot_env_overrides_category(stubs: Path) -> None:
     ("env_sb", "arch", "needed"),
     [("", "amd64", 0), ("0", "amd64", 1), ("1", "amd64", 0)],
 )
-def test_needs_secure_boot(stubs: Path, env_sb: str, arch: str, needed: int) -> None:
+def test_needs_secure_boot(
+    stubs: Path, env_sb: str, arch: str, needed: int
+) -> None:
     m = manifest(stubs)
     env = {"TESTS_FILE": str(m), "ARCH": arch, "SECURE_BOOT": env_sb}
     r = sh("manifest_needs_secure_boot && echo yes || echo no", env, stubs)
@@ -519,9 +613,15 @@ def test_needs_secure_boot(stubs: Path, env_sb: str, arch: str, needed: int) -> 
 
 @needs_yq
 def test_no_secure_boot_category_for_arch(stubs: Path) -> None:
-    m = manifest(stubs, "categories:\n  - {name: p, arch: amd64, suffix: '', secure_boot: 0, reference: true}\n"
-                        "tests:\n  - {name: a, run: x, diag: y}\n")
-    r = sh("manifest_needs_secure_boot && echo yes || echo no", {"TESTS_FILE": str(m)}, stubs)
+    m = manifest(
+        stubs,
+        "categories:\n  - {name: p, arch: amd64, suffix: '', secure_boot: 0, reference: true}\n"
+        "tests:\n  - {name: a, run: x, diag: y}\n"
+    )
+    r = sh(
+        "manifest_needs_secure_boot && echo yes || echo no",
+        {"TESTS_FILE": str(m)}, stubs
+    )
     assert r.stdout.strip() == "no"
 
 
@@ -531,21 +631,34 @@ def test_no_secure_boot_category_for_arch(stubs: Path) -> None:
 @needs_yq
 def test_two_categories_on_one_tag_are_all_listed(stubs: Path) -> None:
     m = manifest(stubs)
-    r = sh('IMAGE="img:x-enf_amd64"; list_categories', {"TESTS_FILE": str(m), "ARCH": "amd64"}, stubs)
+    r = sh(
+        'IMAGE="img:x-enf_amd64"; list_categories', {
+            "TESTS_FILE": str(m),
+            "ARCH": "amd64"
+        }, stubs
+    )
     assert r.stdout.split() == ["enforce", "lax"]
 
 
 @needs_yq
 @pytest.mark.parametrize(
     ("category", "kargs"),
-    [("", "module.sig_enforce=1 quiet"), ("enforce", "module.sig_enforce=1 quiet"), ("lax", "")],
+    [("", "module.sig_enforce=1 quiet"),
+     ("enforce", "module.sig_enforce=1 quiet"), ("lax", "")],
 )
-def test_select_category_from_environment_exports_kargs(stubs: Path, category: str, kargs: str) -> None:
+def test_select_category_from_environment_exports_kargs(
+    stubs: Path, category: str, kargs: str
+) -> None:
     m = manifest(stubs)
     r = sh(
         'IMAGE="img:x-enf_amd64"; select_category >/dev/null; '
         'echo "${CATEGORY}|${INSTALL_KARGS}"; bash -c \'echo "exp:${INSTALL_KARGS}"\'',
-        {"TESTS_FILE": str(m), "ARCH": "amd64", "CATEGORY": category}, stubs,
+        {
+            "TESTS_FILE": str(m),
+            "ARCH": "amd64",
+            "CATEGORY": category
+        },
+        stubs,
     )
     assert r.returncode == 0, r.stdout + r.stderr
     lines = r.stdout.splitlines()
@@ -556,17 +669,26 @@ def test_select_category_from_environment_exports_kargs(stubs: Path, category: s
 @needs_yq
 def test_category_not_matching_the_tag_is_rejected(stubs: Path) -> None:
     m = manifest(stubs)
-    r = sh('IMAGE="img:x-enf_amd64"; select_category', {"TESTS_FILE": str(m), "ARCH": "amd64", "CATEGORY": "k4"}, stubs)
+    r = sh(
+        'IMAGE="img:x-enf_amd64"; select_category', {
+            "TESTS_FILE": str(m),
+            "ARCH": "amd64",
+            "CATEGORY": "k4"
+        }, stubs
+    )
     assert r.returncode == 1
     assert 'no category "k4"' in r.stdout
 
 
 @needs_yq
-@pytest.mark.parametrize("karg", ["a b", "x;rm", "$(id)", "=v", "a=b c", "a='b'"])
+@pytest.mark.parametrize(
+    "karg", ["a b", "x;rm", "$(id)", "=v", "a=b c", "a='b'"]
+)
 def test_bad_karg_is_rejected(stubs: Path, karg: str) -> None:
     m = manifest(
         stubs,
-        "categories:\n  - {name: p, arch: amd64, suffix: '', secure_boot: 0, reference: true, kargs: [\"" + karg + "\"]}\n"
+        "categories:\n  - {name: p, arch: amd64, suffix: '', secure_boot: 0, reference: true, kargs: [\""
+        + karg + "\"]}\n"
         "tests:\n  - {name: a, run: x, diag: y}\n",
     )
     r = sh("validate_manifest", {"TESTS_FILE": str(m)}, stubs)
@@ -587,7 +709,9 @@ def test_kargs_must_be_a_list(stubs: Path) -> None:
 
 @needs_yq
 @pytest.mark.parametrize(("second_name", "ok"), [("other", True), ("p", False)])
-def test_duplicate_rule_is_arch_suffix_name(stubs: Path, second_name: str, ok: bool) -> None:
+def test_duplicate_rule_is_arch_suffix_name(
+    stubs: Path, second_name: str, ok: bool
+) -> None:
     m = manifest(
         stubs,
         "categories:\n  - {name: p, arch: amd64, suffix: '', secure_boot: 0, reference: true}\n"
@@ -604,7 +728,9 @@ def test_duplicate_rule_is_arch_suffix_name(stubs: Path, second_name: str, ok: b
 
 
 def test_stop_vm_without_pidfile_is_a_noop(stubs: Path) -> None:
-    r = sh("state_init; stop_vm", {"IMAGE_TEST_STATE": str(stubs / "st")}, stubs)
+    r = sh(
+        "state_init; stop_vm", {"IMAGE_TEST_STATE": str(stubs / "st")}, stubs
+    )
     assert r.returncode == 0, r.stderr
 
 
@@ -614,7 +740,12 @@ def test_stop_vm_kills_a_guest_that_ignores_poweroff(stubs: Path) -> None:
     proc = subprocess.Popen(["sleep", "60"])
     try:
         (st / "qemu.pid").write_text(str(proc.pid))
-        r = sh("stop_vm", {"IMAGE_TEST_STATE": str(st), "STOP_GRACE_S": "1"}, stubs)
+        r = sh(
+            "stop_vm", {
+                "IMAGE_TEST_STATE": str(st),
+                "STOP_GRACE_S": "1"
+            }, stubs
+        )
         assert r.returncode == 0, r.stderr
         assert "poweroff requested" in r.stdout and "killing QEMU" in r.stdout
         assert proc.wait(timeout=10) != 0
@@ -640,8 +771,12 @@ def test_teardown_keeps_logs_and_removes_secrets(stubs: Path) -> None:
     r = sh(
         'state_init; touch "${KEY}" "${KEY}.pub" "${STATE}/PK.key" "${DISK}" "${LOGS}/i.serial.log"\n'
         'mkdir -p "${VARSTORES}/x"; cmd_teardown',
-        {"IMAGE_TEST_STATE": str(st)}, stubs,
+        {"IMAGE_TEST_STATE": str(st)},
+        stubs,
     )
     assert r.returncode == 0, r.stderr
     assert (st / "logs" / "i.serial.log").exists()
-    assert not any((st / n).exists() for n in ("test-key", "test-key.pub", "PK.key", "test-disk.raw", "varstore"))
+    assert not any(
+        (st / n).exists() for n in
+        ("test-key", "test-key.pub", "PK.key", "test-disk.raw", "varstore")
+    )

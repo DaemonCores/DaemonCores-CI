@@ -4,6 +4,7 @@ The GitHub API is replaced by a directory tree served through ``file://``: a
 release is the JSON file ``repos/<owner>/<repo>/releases/latest``.
 """
 
+import hashlib
 import json
 import os
 import subprocess
@@ -323,7 +324,7 @@ def test_resolve_kernel_without_digest_stays_unset(api: Path) -> None:
     )
     assert result.returncode == 0
     assert _env_output(api) == ['A=1']
-    assert '::warning::' in result.stderr
+    assert '::notice::' in result.stderr
 
 
 def test_check_matches_kernel_deb_revision(api: Path) -> None:
@@ -406,73 +407,174 @@ def test_resolve_skips_a_kernel_the_patches_do_not_cover(api: Path) -> None:
     ]
 
 
-def _kernel_with_series(
-    api: Path,
-    series: str,
-    versions: list[str]
-) -> None:
-    """Serve a kernel.org tree with several stable stream releases and a
-    ``series:`` anchor on the entry (the owner order 2026-11-05: the
-    version is dynamic, the stream is the patch-proven one)."""
+def _bore_patch(api: Path, version: str, applies: bool) -> None:
+    """Write the ``bore.patch`` of one kernel version.
+
+    The patch applies fuzz-0 to the fixture tree exactly when ``applies``.
+
+    Args:
+        api: API tree root.
+        version: Kernel version the patch lives under.
+        applies: Whether the patch context matches the fixture tree.
+    """
+    patch = api / version / 'bore.patch'
+    patch.parent.mkdir(parents=True, exist_ok=True)
+    context = ' feature' if applies else ' absent'
+    patch.write_text(f'--- a/k\n+++ b/k\n@@ -1 +1,2 @@\n{context}\n+elected\n')
+
+
+def _kernel_point(api: Path, cdn: Path, version: str,
+                  applies: bool) -> dict[str, str]:
+    """Serve one kernel release end to end.
+
+    The fixture writes the real tarball, its digest line in
+    ``sha256sums.asc`` and its bore patch.
+
+    Args:
+        api: API tree root.
+        cdn: Directory serving the tarballs and sums.
+        version: Kernel version.
+        applies: Whether the bore patch applies fuzz-0.
+
+    Returns:
+        The tarball digest under the version key.
+    """
+    staging = api / f'linux-{version}'
+    staging.mkdir(exist_ok=True)
+    (staging / 'k').write_text('feature\n')
+    tarball = cdn / f'linux-{version}.tar.xz'
+    subprocess.run([
+        'tar', '-cJf',
+        str(tarball), '-C',
+        str(api), f'linux-{version}'
+    ],
+                   check=True)
+    digest = hashlib.sha256(tarball.read_bytes()).hexdigest()
+    with (cdn / 'sha256sums.asc').open('a') as sums:
+        sums.write(f'{digest}  linux-{version}.tar.xz\n')
+    _bore_patch(api, version, applies)
+    return {version: digest}
+
+
+def _kernel_election(api: Path, entries: list[tuple[str,
+                                                    bool]]) -> dict[str, str]:
+    """Serve kernel.org stable releases judged by a bore patch set.
+
+    The manifest declares ``require-patches: patches.yml`` so the dry-run
+    election of the entry runs.
+
+    Args:
+        api: API tree root.
+        entries: (version, applies) pairs, newest kernel.org release first.
+
+    Returns:
+        The tarball digests by version.
+    """
     (api / 'packages.yml').write_text(
-        KERNEL_MANIFEST.replace('kernel-org: stable',
-                                f'kernel-org: stable\n        series: {series}')
+        KERNEL_MANIFEST.replace(
+            'kernel-org: stable',
+            'kernel-org: stable\n        require-patches: patches.yml'
+        )
     )
     cdn = api / 'cdn'
     cdn.mkdir(exist_ok=True)
-    (cdn / 'sha256sums.asc').write_text(
-        ''.join(f'{DIGEST}  linux-{v}.tar.xz\n' for v in versions))
+    digests: dict[str, str] = {}
+    for version, applies in entries:
+        digests.update(_kernel_point(api, cdn, version, applies))
+    (api / 'patches.yml').write_text(
+        'patches:\n'
+        '  - name: bore\n'
+        '    stage: common\n'
+        f'    url: file://{api}/{{version}}/bore.patch\n'
+    )
     releases = [{
         'moniker': 'stable',
-        'version': v,
-        'source': f'file://{cdn}/linux-{v}.tar.xz'
-    } for v in versions]
+        'version': version,
+        'source': f'file://{cdn}/linux-{version}.tar.xz'
+    } for version, _ in entries]
     (api / 'releases.json').write_text(json.dumps({'releases': releases}))
+    return digests
 
 
-def test_resolve_series_anchor_takes_the_newest_of_that_stream(
-    api: Path
+def test_resolve_elects_the_newest_release_the_patch_set_applies_to(
+    api: Path, tmp_path: Path
 ) -> None:
-    """A ``series:`` anchor keeps the newest release of that stable stream
-    (7.2.x), never the newer stream the patches do not cover, and never a
-    fixed version."""
-    _kernel_with_series(api, '7.2', ['7.3.1', '7.2.15', '7.2.11'])
+    """The election elects the newest release the patch set passes.
+
+    The latest-passing-gate: the newest kernel.org release whose whole
+    patch set dry-runs fuzz-0 wins, the failing newer one is a documented
+    K-PORT, never a pinned series.
+
+    Args:
+        api: API tree root.
+        tmp_path: Scratch directory for the election cache.
+    """
+    digests = _kernel_election(api, [('7.3.1', False), ('7.2.15', True)])
     result = _run(
         api,
         'resolve',
         PKG='kernel',
         BASE_ENV='A=1',
-        KERNEL_ORG_URL=f'file://{api}'
+        KERNEL_ORG_URL=f'file://{api}',
+        KERNEL_ELECT_CACHE=str(tmp_path / 'elect')
     )
     assert result.returncode == 0, result.stderr
     assert _env_output(api) == [
-        'A=1', 'KERNEL_VER=7.2.15', f'KERNEL_SHA256={DIGEST}'
+        'A=1', 'KERNEL_VER=7.2.15', f'KERNEL_SHA256={digests["7.2.15"]}'
     ]
+    assert 'election: ' in result.stderr
+    assert 'dry-run FAIL on 7.3.1' in result.stderr
 
 
-def test_resolve_series_anchor_skips_when_the_stream_has_no_digest(
-    api: Path
+def test_resolve_walks_an_old_point_release_of_a_failing_series(
+    api: Path, tmp_path: Path
 ) -> None:
-    """With no digest published inside the anchored stream the entry is a
-    skip (last-good deb), not a fallback onto another series."""
-    _kernel_with_series(api, '7.2', ['7.3.1', '7.2.15'])
-    (api / 'cdn' / 'sha256sums.asc').write_text(
-        f'{DIGEST}  linux-7.3.1.tar.xz\\n')
+    """A failing series is walked down before the next lower series.
+
+    When the newest release of a series fails, the probe descends to the
+    older point releases of the same series from the stable git tags
+    before it falls to the next lower series.
+
+    Args:
+        api: API tree root.
+        tmp_path: Scratch directory for the election cache.
+    """
+    digests = _kernel_election(api, [('7.3.3', False), ('7.2.15', False)])
+    digests.update(_kernel_point(api, api / 'cdn', '7.3.2', True))
+    repo = api / 'stable.git'
+    git = ['git', '-C', str(repo), '-c', 'user.name=t', '-c', 'user.email=t@t']
+    subprocess.run(['git', 'init', '-q', '-b', 'main', str(repo)], check=True)
+    subprocess.run([*git, 'commit', '-q', '--allow-empty', '-m', 'seed'],
+                   check=True)
+    for tag in ('7.3.3', '7.3.2'):
+        subprocess.run([*git, 'tag', '-m', f'v{tag}', f'v{tag}'], check=True)
     result = _run(
         api,
         'resolve',
         PKG='kernel',
         BASE_ENV='A=1',
-        KERNEL_ORG_URL=f'file://{api}'
+        KERNEL_ORG_URL=f'file://{api}',
+        GIT_TAGS_URL=f'file://{repo}',
+        KERNEL_ELECT_CACHE=str(tmp_path / 'elect')
     )
     assert result.returncode == 0, result.stderr
-    assert not any(line.startswith('KERNEL_VER') for line in _env_output(api))
+    assert _env_output(api) == [
+        'A=1', 'KERNEL_VER=7.3.2', f'KERNEL_SHA256={digests["7.3.2"]}'
+    ]
+    assert 'dry-run FAIL on 7.3.3' in result.stderr
 
 
 def _kernel_with_engine(api: Path, engine: Path, available: set[str]) -> None:
-    """Point ``require-patches: engine`` at a fake engine and serve the
-    series dirs as the xanmod layout ({seriesdir}/{topic}); some series are
-    unavailable (e.g. 7.3 without a bore sibling)."""
+    """Point ``require-patches: engine`` at a fake engine.
+
+    The series dirs use the xanmod layout ({seriesdir}/{topic}); some
+    series are unavailable (e.g. 7.3 without a bore sibling).
+
+    Args:
+        api: API tree root.
+        engine: Fake engine root receiving the shared manifests.
+        available: Series whose bore sibling exists.
+    """
     (api / 'packages.yml').write_text(
         KERNEL_MANIFEST.replace(
             'kernel-org: stable',
@@ -513,8 +615,10 @@ def _kernel_with_engine(api: Path, engine: Path, available: set[str]) -> None:
 def test_resolve_engine_mode_falls_back_to_the_covered_series(
     api: Path, tmp_path: Path
 ) -> None:
-    """``require-patches: engine`` probes the engine's shared set: the
-    newest series whose every patch upstream wins (7.3 without bore → 7.2).
+    """``require-patches: engine`` probes the engine's shared set.
+
+    The newest series whose every patch is upstream wins (7.3 without
+    bore → 7.2).
 
     Args:
         api: API tree fixture.
@@ -544,8 +648,8 @@ def test_resolve_skips_a_kernel_whose_digest_is_not_published(
         api: API tree fixture.
     """
     _kernel_with_patches(api, {'7.2', '7.1'})
-    (api / 'cdn' / 'sha256sums.asc'
-     ).write_text(f'{DIGEST}  linux-7.1.20.tar.xz\n')
+    (api / 'cdn' /
+     'sha256sums.asc').write_text(f'{DIGEST}  linux-7.1.20.tar.xz\n')
     result = _run(
         api,
         'resolve',

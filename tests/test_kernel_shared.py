@@ -30,13 +30,17 @@ def _write_temp_runner():
         'run_build >/dev/null 2>&1 || true\n'
         'printf "%s|%s" "${CI_KERNEL_SHARED}" "${CI_SCRIPTS}"',
     )
-    tmp = Path(tempfile.NamedTemporaryFile(
-        "w", suffix=".sh", delete=False,
-        dir=str(BUILD_DEB_SH.parent)).name)
+    tmp = Path(
+        tempfile.NamedTemporaryFile(
+            "w", suffix=".sh", delete=False, dir=str(BUILD_DEB_SH.parent)
+        ).name
+    )
     tmp.write_text(runner, encoding="utf-8")
     try:
-        r = subprocess.run(["bash", str(tmp)], capture_output=True,
-                           text=True, cwd=str(REPO))
+        r = subprocess.run(["bash", str(tmp)],
+                           capture_output=True,
+                           text=True,
+                           cwd=str(REPO))
     finally:
         tmp.unlink()
     return r
@@ -91,7 +95,6 @@ def test_arch_overlays_folded_into_the_base_config() -> None:
     ):
         assert promoted in cfg, promoted
 
-
     # The device fragments are NOT engine data anymore: they moved back to the
     # debian-bootc lane (KERNEL FINAL v2). The page-size overlays stay here.
     assert not (SHARED_DATA / 'modules').exists()
@@ -103,8 +106,15 @@ def test_arch_overlays_folded_into_the_base_config() -> None:
     )
     if bootc_modules.is_dir():
         for device in (
-            'rpi3', 'rpi4', 'rpi5', 'rk3588', 'rk3566',
-            'rk3399', 'h616', 'imx8m', 'mt8183',
+            'rpi3',
+            'rpi4',
+            'rpi5',
+            'rk3588',
+            'rk3566',
+            'rk3399',
+            'h616',
+            'imx8m',
+            'mt8183',
         ):
             assert (bootc_modules / device).is_file(), device
 
@@ -214,8 +224,7 @@ def test_arm_opti_entries_pinned_and_staged() -> None:
     assert entries["0166-sched-fair-remove-upper-limit"]["license"] == \
         "GPL-2.0-only"
     assert "msm-adreno-devfreq-ifpc-relax" not in entries
-    pins = {p["name"]: p["sha256"] for p in doc["patches"]
-            if p.get("sha256")}
+    pins = {p["name"]: p["sha256"] for p in doc["patches"] if p.get("sha256")}
     # the pin recorded by the 2026-11-09 dry-run proof
     assert pins["0166-sched-fair-remove-upper-limit"] == \
         "e6a7bfa9844f5f6bde6ef0a149dd58a7ad7dcfceae45cb08a9a4fd638d6ff0e9"

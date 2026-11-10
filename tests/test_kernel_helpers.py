@@ -17,9 +17,8 @@ HELPER = REPO / "scripts" / "kernel_helpers.sh"
 # canonical shared manifest lives in THIS repository, inside the build-deb
 # action; the engine exports it as CI_KERNEL_SHARED and both lanes consume
 # it from that checkout (no copy in any consumer repo).
-SHARED_DATA = Path(__file__).resolve().parents[
-    1
-] / "build-deb" / "kernel-shared"
+SHARED_DATA = Path(__file__
+                   ).resolve().parents[1] / "build-deb" / "kernel-shared"
 VE_MANIFEST = SHARED_DATA / "patches-shared.yml"
 
 ENV = {"KERNEL_CDN": "", "PATH": os.environ["PATH"], "HOME": os.environ["HOME"]}
@@ -58,8 +57,7 @@ def test_patch_list_from_native_manifest():
         p for p in yaml.safe_load(manifest.read_text())["packages"]
         if p["name"] == "linux-image" and "patches" in p
     ]
-    patches = json.dumps(
-        yaml.safe_load(VE_MANIFEST.read_text())["patches"])
+    patches = json.dumps(yaml.safe_load(VE_MANIFEST.read_text())["patches"])
     r = run_helper(
         'kernel_patch_list - amd64 6.12.107 kernel', PATCHES_JSON=patches
     )
@@ -73,8 +71,10 @@ def test_patch_list_from_native_manifest():
     assert r.returncode == 0, r.stderr
     # arm64 module class: the RTL8733BU carrier when the manifest carries it
     # (owner arbitration 2026-11-03 13:05 moved it lane-side).
-    carrier = any(p.get("name") == "rocknix-btrtl-rtl8733bu"
-                  for p in yaml.safe_load(VE_MANIFEST.read_text())["patches"])
+    carrier = any(
+        p.get("name") == "rocknix-btrtl-rtl8733bu"
+        for p in yaml.safe_load(VE_MANIFEST.read_text())["patches"]
+    )
     if carrier:
         assert r.stdout.strip().startswith("rocknix-btrtl-rtl8733bu ")
     else:
@@ -115,8 +115,7 @@ def test_patch_list_from_native_patches_json():
 
     entries = _json.loads(patches)
     expected = sum(
-        1 for p in entries
-        if "7.0" not in (p.get("exclude-series") or [])
+        1 for p in entries if "7.0" not in (p.get("exclude-series") or [])
         and p.get("stage", "common") in ("common", "amd64")
     )
     assert int(r.stdout.strip()) == expected

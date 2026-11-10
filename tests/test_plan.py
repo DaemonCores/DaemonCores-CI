@@ -21,7 +21,9 @@ def _plan(tmp_path: Path, packages: list[dict]) -> list[str]:
     """
     manifest = tmp_path / 'm.json'
     manifest.write_text(json.dumps({'packages': packages}), encoding='utf-8')
-    done = subprocess.run([sys.executable, str(SCRIPT), str(manifest)],
+    done = subprocess.run([sys.executable,
+                           str(SCRIPT),
+                           str(manifest)],
                           capture_output=True,
                           text=True,
                           check=False)
@@ -35,27 +37,49 @@ def test_dependencies_come_first(tmp_path: Path) -> None:
     Args:
         tmp_path: Scratch directory.
     """
-    order = _plan(tmp_path, [
-        {'name': 'c', 'deps': ['b']},
-        {'name': 'b', 'deps': ['a']},
-        {'name': 'a'},
-    ])
+    order = _plan(
+        tmp_path, [
+            {
+                'name': 'c',
+                'deps': ['b']
+            },
+            {
+                'name': 'b',
+                'deps': ['a']
+            },
+            {
+                'name': 'a'
+            },
+        ]
+    )
     assert order == ['a', 'b', 'c']
 
 
-def test_kernels_precede_their_level_and_modules_follow(
-        tmp_path: Path) -> None:
+def test_kernels_precede_their_level_and_modules_follow(tmp_path: Path) -> None:
     """Kernels lead their level; kernel modules follow the kernels.
 
     Args:
         tmp_path: Scratch directory.
     """
-    order = _plan(tmp_path, [
-        {'name': 'aaa-tool'},
-        {'name': 'modules', 'deps': ['kernel'], 'build': KERNEL},
-        {'name': 'kernel', 'build': KERNEL},
-        {'name': 'zzz-tool'},
-    ])
+    order = _plan(
+        tmp_path, [
+            {
+                'name': 'aaa-tool'
+            },
+            {
+                'name': 'modules',
+                'deps': ['kernel'],
+                'build': KERNEL
+            },
+            {
+                'name': 'kernel',
+                'build': KERNEL
+            },
+            {
+                'name': 'zzz-tool'
+            },
+        ]
+    )
     assert order == ['kernel', 'aaa-tool', 'zzz-tool', 'modules']
 
 

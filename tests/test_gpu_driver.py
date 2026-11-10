@@ -97,8 +97,8 @@ class TestManifestFilter:
         }
         assert _run_filter(unsigned, GPU_DRIVER='', UNSIGNED_KERNEL='no') == \
             ['mesa']
-        assert _run_filter(_manifest(), GPU_DRIVER='no', UNSIGNED_KERNEL='no'
-                           ) == ['mesa']
+        assert _run_filter(_manifest(), GPU_DRIVER='no',
+                           UNSIGNED_KERNEL='no') == ['mesa']
 
 
 class TestWiring:
@@ -110,9 +110,11 @@ class TestWiring:
         Returns:
             The parsed ``env`` mapping.
         """
-        action = cast(dict[str, Any],
-                      yaml.safe_load((ROOT / 'manifest-expand'
-                                      / 'action.yml').read_text()))
+        action = cast(
+            dict[str, Any],
+            yaml.safe_load((ROOT / 'manifest-expand' / 'action.yml').read_text()
+                           )
+        )
         return action['runs']['steps'][0]['env']
 
     def test_action_declares_and_passes_gpu_driver(self) -> None:
@@ -121,12 +123,14 @@ class TestWiring:
         Args:
             fixture_action: Parsed ``action.yml``.
         """
-        action = cast(dict[str, Any],
-                      yaml.safe_load((ROOT / 'manifest-expand'
-                                      / 'action.yml').read_text()))
+        action = cast(
+            dict[str, Any],
+            yaml.safe_load((ROOT / 'manifest-expand' / 'action.yml').read_text()
+                           )
+        )
         assert action['inputs'].get('gpu-driver', {}).get('default') == ''
-        assert self._action_env().get(
-            'GPU_DRIVER') == '${{ inputs.gpu-driver }}'
+        assert self._action_env(
+        ).get('GPU_DRIVER') == '${{ inputs.gpu-driver }}'
 
     def test_debs_builder_drops_by_default(self) -> None:
         """The deb builder maps a ``gpu_driver`` input to the filter.
@@ -142,8 +146,10 @@ class TestWiring:
     def test_full_pipeline_forwards_and_never_defaults_to_yes(self) -> None:
         """The pipeline input forwards per arch and defaults to false."""
         text = (WORKFLOWS / 'full-pipeline.yml').read_text()
-        assert text.count("gpu_driver: ${{ inputs.gpu_driver == 'true' && "
-                          "'yes' || 'no' }}") == 2
+        assert text.count(
+            "gpu_driver: ${{ inputs.gpu_driver == 'true' && "
+            "'yes' || 'no' }}"
+        ) == 2
         assert "gpu_driver:\n        type: string\n        default: 'false'" \
             in text
 

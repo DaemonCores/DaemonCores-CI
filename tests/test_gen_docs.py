@@ -60,9 +60,8 @@ def test_dangling_docs_symlink_skips_the_reference_check(
     Args:
         tmp_path: Scratch repository with a docs symlink pointing nowhere.
     """
-    (tmp_path / "Makefile").write_text(
-        "PYTHON_SRCS := m.py\nSHELL_SRCS :=\nPOSTINST_SRCS :=\n"
-    )
+    (tmp_path / "Makefile"
+     ).write_text("PYTHON_SRCS := m.py\nSHELL_SRCS :=\nPOSTINST_SRCS :=\n")
     (tmp_path / "m.py").write_text('"""Module doc."""\n')
     (tmp_path / "docs").symlink_to(tmp_path / "absent-wiki")
     sys.argv = ["gen_docs.py", "--root", str(tmp_path), "--check"]

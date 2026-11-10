@@ -38,10 +38,11 @@ def _discover_script() -> str:
     return next(s['run'] for s in steps if s.get('id') == 'list')
 
 
-def _discover(tmp_path: Path,
-              nosign: bool = False,
-              extra: dict[str, str] | None = None
-              ) -> dict[str, list[dict[str, Any]]]:
+def _discover(
+    tmp_path: Path,
+    nosign: bool = False,
+    extra: dict[str, str] | None = None
+) -> dict[str, list[dict[str, Any]]]:
     """Run the discover step on a repository with three Containerfiles.
 
     Args:
@@ -63,11 +64,12 @@ def _discover(tmp_path: Path,
     for name, content in (extra or {}).items():
         (tmp_path / name).write_text(content)
     out = tmp_path / 'out'
-    env = dict(os.environ,
-               GITHUB_OUTPUT=str(out),
-               GITHUB_REPOSITORY='DaemonCores/debian-bootc',
-               NOSIGN_IMAGES='true' if nosign else 'false'
-               )
+    env = dict(
+        os.environ,
+        GITHUB_OUTPUT=str(out),
+        GITHUB_REPOSITORY='DaemonCores/debian-bootc',
+        NOSIGN_IMAGES='true' if nosign else 'false'
+    )
     subprocess.run(['bash', '-c', _discover_script()],
                    cwd=tmp_path,
                    env=env,
@@ -102,19 +104,18 @@ def test_there_is_one_image_per_tag_and_arch(tmp_path: Path) -> None:
 
 @needs_jq
 def test_images_are_grouped_by_architecture_in_build_order(
-        tmp_path: Path) -> None:
+    tmp_path: Path
+) -> None:
     """One group per arch on its native runner, the -4k image after its parent.
 
     Args:
         tmp_path: Scratch repository root.
     """
     groups = _discover(tmp_path, nosign=False)['groups']
-    assert [(g['arch'], g['runner']) for g in groups] == [
-        ('amd64', 'ubuntu-latest'), ('arm64', 'ubuntu-24.04-arm')
-    ]
-    amd64, arm64 = (
-        [e['tag'] for e in g['entries']] for g in groups
-    )
+    assert [(g['arch'], g['runner'])
+            for g in groups] == [('amd64', 'ubuntu-latest'),
+                                 ('arm64', 'ubuntu-24.04-arm')]
+    amd64, arm64 = ([e['tag'] for e in g['entries']] for g in groups)
     assert amd64 == ['latest', 'board', 'iso']
     assert arm64 == ['latest', 'latest-4k', 'board', 'iso']
     assert all(e['arch'] == g['arch'] for g in groups for e in g['entries'])
@@ -239,7 +240,8 @@ def test_signing_flag_only_hashes_the_packages_that_sign() -> None:
 
 @needs_jq
 def test_arches_label_limits_an_image_to_its_architectures(
-        tmp_path: Path) -> None:
+    tmp_path: Path
+) -> None:
     """An image labelled amd64-only has no arm64 entry and a one-arch manifest.
 
     It stays in the amd64 job, after the Containerfile it derives from, so no
@@ -248,13 +250,15 @@ def test_arches_label_limits_an_image_to_its_architectures(
     Args:
         tmp_path: Scratch repository root.
     """
-    result = _discover(tmp_path,
-                       nosign=True,
-                       extra={
-                           'Containerfile.vendor':
-                           'FROM ghcr.io/daemoncores/debian-bootc:latest_amd64\n'
-                           'LABEL org.daemoncores.arches="amd64"\n'
-                       })
+    result = _discover(
+        tmp_path,
+        nosign=True,
+        extra={
+            'Containerfile.vendor':
+            'FROM ghcr.io/daemoncores/debian-bootc:latest_amd64\n'
+            'LABEL org.daemoncores.arches="amd64"\n'
+        }
+    )
     amd64, arm64 = ([e['tag'] for e in g['entries']] for g in result['groups'])
     assert amd64 == ['latest', 'board', 'iso', 'vendor']
     assert 'vendor' not in arm64
@@ -265,14 +269,17 @@ def test_arches_label_limits_an_image_to_its_architectures(
 
 
 @needs_jq
-def test_arches_label_with_no_known_architecture_fails(
-        tmp_path: Path) -> None:
+def test_arches_label_with_no_known_architecture_fails(tmp_path: Path) -> None:
     """A label naming no supported architecture fails the discovery.
 
     Args:
         tmp_path: Scratch repository root.
     """
     with pytest.raises(subprocess.CalledProcessError):
-        _discover(tmp_path,
-                  nosign=False,
-                  extra={'Containerfile.vendor': 'LABEL org.daemoncores.arches=riscv64\n'})
+        _discover(
+            tmp_path,
+            nosign=False,
+            extra={
+                'Containerfile.vendor': 'LABEL org.daemoncores.arches=riscv64\n'
+            }
+        )

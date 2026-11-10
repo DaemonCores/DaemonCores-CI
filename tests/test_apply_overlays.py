@@ -3,15 +3,15 @@
 import subprocess
 from pathlib import Path
 
-SCRIPT = (
-    Path(__file__).resolve().parents[1] / "scripts" / "apply_overlays.sh"
-)
+SCRIPT = (Path(__file__).resolve().parents[1] / "scripts" / "apply_overlays.sh")
 
 
 def run(overlay: Path, tree: Path) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
-        ["bash", str(SCRIPT), str(overlay), str(tree)],
-        capture_output=True, text=True,
+        ["bash", str(SCRIPT), str(overlay),
+         str(tree)],
+        capture_output=True,
+        text=True,
     )
 
 
@@ -33,23 +33,27 @@ def make_overlay(root: Path, *, drifted: bool = False) -> Path:
     overlay = root / "overlay"
     touch(overlay / "usr/share/newfile.txt", "new\n")
     if drifted:
-        touch(overlay / "usr/share/perl5/PVE/Up.pm.patch", (
-            "diff --git a/usr/share/perl5/PVE/Up.pm b/usr/share/perl5/PVE/Up.pm\n"
-            "--- a/usr/share/perl5/PVE/Up.pm\n"
-            "+++ b/usr/share/perl5/PVE/Up.pm\n"
-            "@@ -1 +1 @@\n"
-            "-absent-line\n"
-            "+replacement\n"
-        ))
+        touch(
+            overlay / "usr/share/perl5/PVE/Up.pm.patch", (
+                "diff --git a/usr/share/perl5/PVE/Up.pm b/usr/share/perl5/PVE/Up.pm\n"
+                "--- a/usr/share/perl5/PVE/Up.pm\n"
+                "+++ b/usr/share/perl5/PVE/Up.pm\n"
+                "@@ -1 +1 @@\n"
+                "-absent-line\n"
+                "+replacement\n"
+            )
+        )
     else:
-        touch(overlay / "usr/share/perl5/PVE/Two.pm.patch", (
-            "diff --git a/usr/share/perl5/PVE/Two.pm b/usr/share/perl5/PVE/Two.pm\n"
-            "--- a/usr/share/perl5/PVE/Two.pm\n"
-            "+++ b/usr/share/perl5/PVE/Two.pm\n"
-            "@@ -2 +2,2 @@\n"
-            " line2\n"
-            "+line3\n"
-        ))
+        touch(
+            overlay / "usr/share/perl5/PVE/Two.pm.patch", (
+                "diff --git a/usr/share/perl5/PVE/Two.pm b/usr/share/perl5/PVE/Two.pm\n"
+                "--- a/usr/share/perl5/PVE/Two.pm\n"
+                "+++ b/usr/share/perl5/PVE/Two.pm\n"
+                "@@ -2 +2,2 @@\n"
+                " line2\n"
+                "+line3\n"
+            )
+        )
     return overlay
 
 
@@ -113,19 +117,27 @@ def test_overlay_translates_the_triplet_for_arm64(tmp_path: Path) -> None:
         "line1\nline2\n",
     )
     overlay = tmp_path / "overlay"
-    touch(overlay / "usr/lib/x86_64-linux-gnu/perl5/5.40/Template/Provider.pm.patch", (
-        "diff --git a/usr/lib/x86_64-linux-gnu/perl5/5.40/Template/Provider.pm"
-        " b/usr/lib/x86_64-linux-gnu/perl5/5.40/Template/Provider.pm\n"
-        "--- a/usr/lib/x86_64-linux-gnu/perl5/5.40/Template/Provider.pm\n"
-        "+++ b/usr/lib/x86_64-linux-gnu/perl5/5.40/Template/Provider.pm\n"
-        "@@ -2 +2,2 @@\n"
-        " line2\n"
-        "+line3\n"
-    ))
+    touch(
+        overlay /
+        "usr/lib/x86_64-linux-gnu/perl5/5.40/Template/Provider.pm.patch", (
+            "diff --git a/usr/lib/x86_64-linux-gnu/perl5/5.40/Template/Provider.pm"
+            " b/usr/lib/x86_64-linux-gnu/perl5/5.40/Template/Provider.pm\n"
+            "--- a/usr/lib/x86_64-linux-gnu/perl5/5.40/Template/Provider.pm\n"
+            "+++ b/usr/lib/x86_64-linux-gnu/perl5/5.40/Template/Provider.pm\n"
+            "@@ -2 +2,2 @@\n"
+            " line2\n"
+            "+line3\n"
+        )
+    )
     result = subprocess.run(
-        ["bash", str(SCRIPT), str(overlay), str(tree)],
-        capture_output=True, text=True,
-        env={"BUILD_ARCH": "arm64", "PATH": "/usr/bin:/bin:/usr/sbin"},
+        ["bash", str(SCRIPT), str(overlay),
+         str(tree)],
+        capture_output=True,
+        text=True,
+        env={
+            "BUILD_ARCH": "arm64",
+            "PATH": "/usr/bin:/bin:/usr/sbin"
+        },
     )
     assert result.returncode == 0, result.stderr
     assert "line3\n" in (
