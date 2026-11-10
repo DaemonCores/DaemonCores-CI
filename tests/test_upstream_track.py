@@ -774,3 +774,93 @@ def test_resolve_reports_a_missing_patch_manifest(api: Path) -> None:
     assert 'patch manifest' in result.stderr
     assert not any(line.startswith('KERNEL_VER') for line in _env_output(api))
     assert 'skip=false' in (api / 'out').read_text().splitlines()
+
+
+VARIANT_MANIFEST = """packages:
+  - name: family
+    when:
+      arch: amd64
+    variant-name-prefix: fam-
+    variants:
+      a-x64:
+        when: {arch: amd64}
+      b-arm:
+        when: {arch: arm64}
+      c-any: {}
+    track:
+      FAM_VER:
+        repo: acme/fam
+"""
+
+
+def _variant_api(tmp_path: Path, debs: dict[str, list[str]]) -> Path:
+    """Build an API tree with a variant-expanded family entry.
+
+    Args:
+        tmp_path: Pytest scratch directory.
+        debs: Published deb file names by cache key.
+
+    Returns:
+        The API tree root.
+    """
+    tmp_path.joinpath('packages.yml').write_text(VARIANT_MANIFEST)
+    _release(tmp_path, 'acme/fam', 'v8.0.0', {})
+    _published(tmp_path, debs)
+    return tmp_path
+
+
+def test_check_expands_the_variant_cache_keys(api: Path) -> None:
+    """A variant family publishes under its per-variant keys, on its arch.
+
+    Args:
+        api: API tree fixture.
+    """
+    _variant_api(
+        api, {
+            'fam-a-x64-amd64': ['fam-a-x64_8.0.0_amd64.deb'],
+            'fam-c-any-amd64': ['fam-c-any_8.0.0_amd64.deb'],
+            'fam-b-arm-arm64': ['fam-b-arm_8.0.0_arm64.deb']
+        }
+    )
+    result = _run(api, 'check', PAGES_URL=f'file://{api}/pages', STRICT='true')
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert 'family FAM_VER: v8.0.0 is published' in result.stdout
+
+
+def test_check_one_variant_missing_is_behind(api: Path) -> None:
+    """A family is behind when one expanded variant lacks the release.
+
+    Args:
+        api: API tree fixture.
+    """
+    _variant_api(
+        api, {
+            'fam-a-x64-amd64': ['fam-a-x64_8.0.0_amd64.deb'],
+            'fam-c-any-amd64': ['fam-c-any_4.0.0_amd64.deb']
+        }
+    )
+    result = _run(api, 'check', PAGES_URL=f'file://{api}/pages', STRICT='true')
+    assert result.returncode == 1
+    assert 'family FAM_VER: upstream v8.0.0 is not published' \
+        ' (fam-c-any-amd64)' in result.stdout
+
+
+def test_check_skips_the_other_architecture(api: Path) -> None:
+    """An entry declared for another arch is not checked here.
+
+    Args:
+        api: API tree fixture.
+    """
+    _variant_api(api, {'fam-b-arm-arm64': ['fam-b-arm_8.0.0_arm64.deb']})
+    result = _run(
+        api,
+        'check',
+        PAGES_URL=f'file://{api}/pages',
+        STRICT='true',
+        ARCH='arm64'
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert 'family FAM_VER' not in result.stdout
+    # The arm64 job reports nothing for the family at all: its `when` gate
+    # excludes it here, neither via the family nor via a per-variant key.
+    assert 'fam-b-arm' not in result.stdout

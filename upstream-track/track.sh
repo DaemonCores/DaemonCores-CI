@@ -189,6 +189,40 @@ patch_urls() {
 }
 
 #######################################
+# Print the debs-cache keys a package publishes on one architecture: the
+# plain package name for a single entry, or `variant-name-prefix` + variant
+# for an expanded one — the published cache indexes the per-variant deb
+# names (linux-image-ia-x64v1-amd64), never the manifest family name, so
+# looking up the family name can only report a false "not published".
+# Prints nothing when the entry is declared for another architecture (its
+# `when:` gate): the check of this arch leaves it to the lane building it.
+# Globals:
+#   MAN
+# Arguments:
+#   $1 - package name
+#   $2 - arch
+#######################################
+published_keys() {
+  local pkg="$1" arch="$2" when prefix variants variant vwhen
+  when=$(yq ".packages[] | select(.name == \"$pkg\") | .when.arch // \"\"" "${MAN}")
+  [[ -z "${when}" || "${when}" == "${arch}" ]] || return 0
+  prefix=$(yq ".packages[] | select(.name == \"$pkg\") | .\"variant-name-prefix\" // \"\"" \
+    "${MAN}")
+  if [[ -z "${prefix}" ]]; then
+    printf '%s-%s\n' "${pkg}" "${arch}"
+    return 0
+  fi
+  variants=$(yq -o=json \
+    ".packages[] | select(.name == \"$pkg\") | (.variants // {})" "${MAN}")
+  while IFS= read -r variant; do
+    [[ -n "${variant}" ]] || continue
+    vwhen=$(yq -p=json ".\"${variant}\".when.arch // \"\"" <<<"${variants}")
+    [[ -z "${vwhen}" || "${vwhen}" == "${arch}" ]] || continue
+    printf '%s%s-%s\n' "${prefix}" "${variant}" "${arch}"
+  done < <(yq -p=json 'keys | .[]' <<<"${variants}")
+}
+
+#######################################
 # Print the highest kernel version already published for a package, empty
 # when nothing is published or the publication cannot be read.
 # Globals:
@@ -209,9 +243,16 @@ published_kernel_floor() {
     return 0
   fi
   published=$(curl --retry 3 -fsSL "${base}/debs-cache/hashes.json") || return 0
-  PK="$1-${arch}" yq -p=json '.[strenv(PK)].debs[]' <<<"${published}" 2>/dev/null \
-    | grep -oE '_[0-9]+\.[0-9]+(\.[0-9]+)?-' | tr -d '_-' | sort -rV | head -n1 \
-    || true
+  local key versions="" v
+  while IFS= read -r key; do
+    [[ -n "${key}" ]] || continue
+    v=$({
+      PK="${key}" yq -p=json '.[strenv(PK)].debs[]' <<<"${published}" 2>/dev/null \
+        | grep -oE '_[0-9]+\.[0-9]+(\.[0-9]+)?-' | tr -d '_-'
+    } || true)
+    [[ -n "${v}" ]] && versions+="${v}"$'\n'
+  done < <(published_keys "$1" "${arch}")
+  sort -rV <<<"${versions}" | head -n1 || true
 }
 
 #######################################
@@ -320,8 +361,7 @@ election_dryrun() {
     # to build), never a dry-run verdict.
     sha=$(kernel_digests "${pkg}" "${key}" "${version}" "${source}") || return 2
     (cd "${cache}" && curl --retry 3 -fsSL "${source}" -o "linux-${version}.tar.xz")
-    [[ "$(sha256sum "${cache}/linux-${version}.tar.xz" | cut -d' ' -f1)" \
-      == "$(cut -d'=' -f2 <<<"${sha}")" ]] || return 1
+    [[ "$(sha256sum "${cache}/linux-${version}.tar.xz" | cut -d' ' -f1)" == "$(cut -d'=' -f2 <<<"${sha}")" ]] || return 1
     rm -rf "${tree}"
     mkdir -p "${tree}"
     tar -xJf "${cache}/linux-${version}.tar.xz" -C "${tree}" --strip-components=1
@@ -333,7 +373,10 @@ election_dryrun() {
   local root
   root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
   [[ -r "${root}/scripts/kernel_helpers.sh" ]] \
-    || { echo "engine helpers missing: ${root}/scripts/kernel_helpers.sh" >&2; return 1; }
+    || {
+      echo "engine helpers missing: ${root}/scripts/kernel_helpers.sh" >&2
+      return 1
+    }
   # shellcheck source=/dev/null
   source "${root}/scripts/kernel_helpers.sh"
   local manifests
@@ -512,7 +555,7 @@ select_kernel_release() {
           || source="$(release_source_for "${version}")"
         election_dryrun "${pkg}" "${key}" "${version}" "${source}" || jrc=$?
         if [[ "${jrc}" -eq 2 ]]; then
-          continue       # not ready (checksum unpublished): skip silently
+          continue # not ready (checksum unpublished): skip silently
         fi
         if [[ "${jrc}" -ne 0 ]]; then
           judged+="${version} "$'\n'
@@ -868,12 +911,27 @@ check() {
       # A kernel deb is versioned <kernel>-<revision>, any other <version>.
       sep='_'
       [[ -z "$(kernel_moniker "${pkg}" "${key}")" ]] || sep='-'
-      if PK="${pkg}-${arch}" V="_${version}${sep}" yq -p=json -e \
-        '.[strenv(PK)].debs[] | select(contains(strenv(V)))' \
-        <<<"${published}" >/dev/null 2>&1; then
+      # Every published key of the family (each expanded variant on this
+      # arch) must ship the elected release: one missing variant build is
+      # the same "latest release did not build" signal as a family-wide one.
+      local count=0 good=0 missing=""
+      local ck
+      while IFS= read -r ck; do
+        [[ -n "${ck}" ]] || continue
+        count=$((count + 1))
+        if PK="${ck}" V="_${version}${sep}" yq -p=json -e \
+          '.[strenv(PK)].debs[] | select(contains(strenv(V)))' \
+          <<<"${published}" >/dev/null 2>&1; then
+          good=$((good + 1))
+        else
+          missing+="${ck} "
+        fi
+      done < <(published_keys "${pkg}" "${arch}")
+      ((count)) || continue
+      if ((good == count)); then
         echo "${pkg} ${key}: ${tag} is published"
       else
-        echo "${pkg} ${key}: upstream ${tag} is not published"
+        echo "${pkg} ${key}: upstream ${tag} is not published (${missing% })"
         behind=1
       fi
     done < <(track_keys "${pkg}")
