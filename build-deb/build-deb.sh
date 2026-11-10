@@ -105,12 +105,22 @@ run_build() {
   ) >&2; then
     return 1
   fi
-  local glob="${DEB_GLOB:-${PACKAGE}_*}"
+  local glob="${DEB_GLOB:-${PACKAGE}_*}" pat
   (
     cd "${DEBS_DIR}" || exit 0
-    # Glob expansion of DEB_GLOB is intentional to list the produced debs.
+    # DEB_GLOB may carry SEVERAL space-separated patterns (the kernel class
+    # republishes the linux-headers deb of the same build next to the image
+    # deb — the headers deb must ride the published debs list or the APT
+    # prune drops it and the cache never restores it again). The outer
+    # loop only WORD-SPLITS (globbing off — else the first pattern is
+    # already a filename and the .deb suffix double-appends); the inner
+    # subshell re-enables globbing so each pattern expands against .deb.
     # shellcheck disable=SC2086
-    ls ${glob}.deb 2>/dev/null || true
+    set -f
+    for pat in ${glob}; do
+      ( set +f; ls ${pat}.deb 2>/dev/null || true )
+    done
+    set +f
   ) | jq -R . | jq -s .
 }
 
