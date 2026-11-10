@@ -539,10 +539,16 @@ boot_vm() {
       # drivers; OVMF then reports "No bootable option or device was found" because
       # it cannot enumerate the disk at all. Fallback to any non-secboot CODE if
       # the 4M variant is absent (unlikely on Ubuntu 24.04+).
+      # Exclude the snakeoil CODE as well: it is the SMM/SecureBoot-capable
+      # build (like *secboot*), and under smm=off it silently deadlocks before
+      # BDS — 0 bytes on the serial port, guest running forever (x86, run
+      # 42839609404: "OVMF CODE: .../OVMF_CODE_4M.snakeoil.fd", reproduced
+      # locally with SB-capable firmware + smm=off; same firmware + smm=on
+      # boots through). The VARS selection below already excluded it.
       code=$(find "${OVMF_DIR}" -name 'OVMF_CODE_4M*.fd' ! -name '*secboot*' \
-        ! -name '*.ms.*' | head -1)
+        ! -name '*.ms.*' ! -name '*.snakeoil.*' | head -1)
       code="${code:-$(find "${OVMF_DIR}" -name 'OVMF_CODE*.fd' ! -name '*secboot*' \
-        ! -name '*.ms.*' | head -1)}"
+        ! -name '*.ms.*' ! -name '*.snakeoil.*' | head -1)}"
       vars=$(find "${OVMF_DIR}" -name 'OVMF_VARS_4M*.fd' ! -name '*.ms.*' \
         ! -name '*secboot*' ! -name '*snakeoil*' | sort | head -1)
       vars="${vars:-$(find "${OVMF_DIR}" -name 'OVMF_VARS*.fd' ! -name '*.ms.*' \
