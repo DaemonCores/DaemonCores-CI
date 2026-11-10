@@ -155,7 +155,26 @@ jobs:
             seen[$dep]=1
             glob=$(yq ".packages[] | select(.name == \"${dep}\") \
               | .\"deb-glob\" // \"${dep}_*\"" "${MAN}")
-            debs="${debs} /tmp/prior/${glob}.deb"
+            # Split the glob field by whitespace WITHOUT pathname expansion of
+            # the pattern words themselves (read -ra + quoted expansion): an
+            # unquoted 'for pat in ${glob}' lets a pattern that already matches
+            # a file in the cwd expand to a concrete name and break this loop.
+            read -ra glob_pats <<<"${glob}"
+            for pat in "${glob_pats[@]}"; do
+              # Each pattern is prefixed and suffixed individually: the glob
+              # field may carry several patterns, so 'linux-image-* linux-headers-*'
+              # must become two ' /tmp/prior/<pat>.deb ' words — building the whole
+              # string once left the trailing pattern bare (no path, no .deb) and
+              # apt died on 'Unable to locate package linux-headers-*.deb'.
+              # Resolve to the concrete matched files so the words survive as
+              # real paths; an unmatched pattern keeps its literal path so apt
+              # fails loud with the existing diagnostic.
+              if matches=$( (ls /tmp/prior/${pat}.deb 2>/dev/null || true) ) && [ -n "${matches}" ]; then
+                debs="${debs} $(echo ${matches} | tr '\n' ' ')"
+              else
+                debs="${debs} /tmp/prior/${pat}.deb"
+              fi
+            done
             while IFS= read -r sub; do
               [ -n "${sub}" ] && queue+=("${sub}")
             done < <(yq ".packages[] | select(.name == \"${dep}\") \
