@@ -261,7 +261,12 @@ jobs:
       # containers-image (`sigstoreSigned`); pinned to cosign 2.x which writes it.
       - name: Install cosign
         if: github.ref == 'refs/heads/main'
-        uses: sigstore/cosign-installer@v3
+        uses: sigstore/cosign-installer@d58896d6a1865668819e1d91763c7751a165e159 # v3.9.2
+        # LE TAG @v3 = figé sur l'objet tag de la commit pré-arm64 ("default
+        # cosign to v2.5.2"): sur runner arm64 son downloader tombe dans la
+        # branche "linux-arm64 build not available at v0.6.0" et tue le build
+        # image arm64 (vanilla run 42801218509, et la log montrait actions/
+        # checkout+cosign à 398d4b0e = la commit du tag). v3.9.2 = arm64-capable.
         with:
           cosign-release: v2.6.5
           install-dir: /usr/local/bin

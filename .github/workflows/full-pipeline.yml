@@ -335,7 +335,7 @@ jobs:
           persist-credentials: false
       - name: Install cosign
         if: ${{ contains(steps.need.outputs.groups, 'cosign') }}
-        uses: sigstore/cosign-installer@v3
+        uses: sigstore/cosign-installer@d58896d6a1865668819e1d91763c7751a165e159 # v3.9.2 (le tag @v3 = la commit pré-arm64 qui tue les builds images arm64)
         with:
           cosign-release: v2.6.5
       - name: Generate the missing secrets
