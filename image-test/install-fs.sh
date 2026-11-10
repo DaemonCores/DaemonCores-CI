@@ -379,4 +379,15 @@ done
 echo "--- ESP EFI binaries (${T}/boot/efi/EFI tree) ---"
 find "${T}"/boot/efi -type f -printf '%p (%s bytes)\n' 2>/dev/null | sort | head -40
 [ -d "${T}"/boot/efi/EFI ] || echo "(no EFI dir in ESP)"
+echo "--- grub configs (firmware path: shim -> grub reads (hd0,gpt2)/boot/grub/grub.cfg) ---"
+for _grubcfg in "${T}"/boot/efi/EFI/*/grub.cfg "${T}"/boot/grub/grub.cfg "${T}"/ostree/deploy/*/deploy/*/boot/grub/grub.cfg; do
+  [ -e "${_grubcfg}" ] || continue
+  echo "===== ${_grubcfg} ====="
+  cat "${_grubcfg}" 2>/dev/null | head -30
+done
+ls -d "${T}"/boot/grub 2>/dev/null || echo "(no /boot/grub dir on the boot partition)"
+find "${T}" -maxdepth 6 -name 'grub.cfg' -o -maxdepth 6 -name 'grubenv' 2>/dev/null | head -10
+echo "--- systemd-boot binaries on ESP (a BLS loader must exist) ---"
+find "${T}"/boot/efi -iname '*systemd*boot*' -o -iname 'sdboot*' 2>/dev/null | head -5
+[ -z "$(find "${T}"/boot/efi -iname '*systemd*boot*' 2>/dev/null)" ] || true
 echo "=== end post-deploy boot config ==="
