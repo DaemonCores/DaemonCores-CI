@@ -196,6 +196,26 @@ echo "--- ${T}/var (btrfs var subvol mount) ---"
 ls -la "${T}/var" 2>/dev/null || echo "(not found)"
 echo "=== end var layout ==="
 
+# Boot debug: what the firmware will actually execute. A silent serial capture
+# (0 bytes) is only decidable together with the on-disk truth: the kernel the
+# entries point at, their kernel arguments (console= must be present) and any
+# kernel-install cmdline files the packages may have staged.
+echo "=== deployed boot config ==="
+echo "--- ${T}/boot loader files ---"
+find "${T}/boot" -maxdepth 4 -type f -print -exec sh -c 'echo "===== $1 ====="; cat "$1" 2>/dev/null | head -40' _ {} \; 2>/dev/null | grep -v '^Binary file' | head -200
+echo "--- deployment etc/kernel/cmdline + usr/lib/kernel/cmdline ---"
+deploy=$(ls -d "${T}"/ostree/deploy/*/deploy/[0-9a-f]*.0 2>/dev/null | head -1)
+if [ -n "${deploy}" ]; then
+  for f in etc/kernel/cmdline usr/lib/kernel/cmdline usr/share/kernel/cmdline; do
+    if [ -f "${deploy}/${f}" ]; then echo "--- ${f} ---"; cat "${deploy}/${f}"; else echo "--- ${f}: ABSENT ---"; fi
+  done
+  echo "--- /usr/lib/modules trees ---"; ls "${deploy}/usr/lib/modules" 2>/dev/null
+  echo "--- /boot relative to deployment (ls) ---"; ls "${deploy}/boot" 2>/dev/null
+else
+  echo "no deployment found under ${T}/ostree/deploy"
+fi
+echo "=== end deployed boot config ==="
+
 # Stage a second identical deployment so CI rollback tests have two deployment
 # slots to work with. bootc install creates exactly one deployment; deploying
 # the same commit again gives the VM a rollback target without network access.
