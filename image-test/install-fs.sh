@@ -390,4 +390,13 @@ find "${T}" -maxdepth 6 -name 'grub.cfg' -o -maxdepth 6 -name 'grubenv' 2>/dev/n
 echo "--- systemd-boot binaries on ESP (a BLS loader must exist) ---"
 find "${T}"/boot/efi -iname '*systemd*boot*' -o -iname 'sdboot*' 2>/dev/null | head -5
 [ -z "$(find "${T}"/boot/efi -iname '*systemd*boot*' 2>/dev/null)" ] || true
+# PVE layout: the ESP stub falls back to (boot-partition)/grub2/grub.cfg — dump it,
+# it is the only grub config whose contents decide whether the shim->grub chain
+# can ever reach the BLS entries (baked at image build time, UUIDs shift at install).
+for _pvecfg in "${T}"/boot/grub2/grub.cfg "${T}"/boot/grub2/grubenv; do
+  [ -e "${_pvecfg}" ] || continue
+  echo "===== ${_pvecfg} ====="
+  cat "${_pvecfg}" 2>/dev/null | head -40
+done
+[ -e "${T}"/boot/grub2 ] || echo "(no /boot/grub2 dir on the boot partition)"
 echo "=== end post-deploy boot config ==="
