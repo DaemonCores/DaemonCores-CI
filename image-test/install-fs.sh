@@ -355,3 +355,25 @@ mkdir -p /varlog
 mount -o subvol=varlog LABEL=dcos /varlog
 mkdir -p /varlog/journal
 umount /varlog
+
+# Post-deploy boot truth (decides kargs-lost vs kernel-never-booted for a
+# silent serial): the earlier "deployed boot config" dump runs right after
+# bootc install, BEFORE the rollback deploy has swapped bootconfigs — the
+# loader entries the firmware will actually use only exist for sure after
+# it. Print every BLS entry with its kargs and the per-deployment origin.
+echo "=== post-deploy boot config ==="
+for _bootver in "${T}"/boot/loader "${T}"/boot/loader.0 "${T}"/boot/loader.1; do
+  [ -e "${_bootver}" ] || continue
+  echo "--- ${_bootver} → $(readlink -f "${_bootver}" 2>/dev/null || echo physical) ---"
+  for _entry in "${_bootver}"/entries/*.conf; do
+    [ -e "${_entry}" ] || continue
+    echo "===== ${_entry} ====="
+    cat "${_entry}"
+  done
+done
+for _origin in "${T}"/ostree/deploy/*/deploy/*.origin; do
+  [ -e "${_origin}" ] || continue
+  echo "===== ${_origin} ====="
+  cat "${_origin}"
+done
+echo "=== end post-deploy boot config ==="
