@@ -62,6 +62,12 @@ CONFIG_OVERLAY_FS=m
 #        erofs is never the root filesystem so no chicken-and-egg issue.
 CONFIG_EROFS_FS=m
 
+# fuse: module. Proxmox depends on it (LXC bind-mounts /dev/fuse for
+# fuse-overlayfs, and several container storages use fuse passthrough).
+# Module is sufficient: nothing needs /dev/fuse before the rootfs, so no
+# chicken-and-egg with the initramfs.
+CONFIG_FUSE_FS=m
+
 # =============================================================================
 # Virtio — built-in. For VMs (qemu, libvirt) on every arch, so a minimal guest
 # image can boot from virtio-blk + virtio-net without module loading in the
