@@ -352,22 +352,13 @@ jobs:
             FW_ARGS=(-pflash /usr/share/qemu-efi-aarch64/QEMU_EFI.fd)
           fi
 
-          KVM_ARGS=()
-          if [ -e /dev/kvm ]; then
-            KVM_ARGS=(-enable-kvm)
-            echo "KVM available"
-          else
-            echo "no /dev/kvm — TCG (slow but one-boot smoke)" >&2
-          fi
-
-          # 600 s: firmware + dracut live init + squashfs mount + switch root.
-          # Pass signal: systemd reached the live OS past the initramfs
-          # (dracut/switch-root finished, systemd targets [OK]). Hard fail:
-          # any dracut emergency shell.
-          set +e
-          timeout 600 ${QEMU} ${KVM_ARGS[@]+${KVM_ARGS[@]}} \
+          # Hosted runners expose /dev/kvm but deny access to the runner user
+          # ("Could not access KVM kernel module: Permission denied", the
+          # first ISO smoke run): always run TCG. 900 s budget.
+          timeout 900 ${QEMU} \
             "${FW_ARGS[@]}" \
             -m 4096 -smp 2 -display none \
+            -accel tcg \
             -cdrom "${ISO}" \
             -serial file:"${LOG}" 2>&1 | tail -5
           RC=$?
