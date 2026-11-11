@@ -157,7 +157,7 @@ patch_urls_available() {
 # manifest (require-patches: native), a patches.yml path relative to the
 # package manifest (the VE kernel-pve lane), or `engine` (require-patches:
 # engine): the canonical shared set of the BUILD ENGINE
-# (build-deb/kernel-shared/patches-shared.yml, resolved next to this
+# (the product repo's kernel-src/patches/kernel.yml, resolved next to the
 # script's own repository root — the debs builder runs the track step from
 # the engine checkout, so the path is local, never a dist fetch between
 # production repositories). Printed one per line.
