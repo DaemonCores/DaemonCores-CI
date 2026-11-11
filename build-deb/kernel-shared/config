@@ -62,6 +62,59 @@ CONFIG_OVERLAY_FS=m
 #        erofs is never the root filesystem so no chicken-and-egg issue.
 CONFIG_EROFS_FS=m
 
+# PVE / containers — networking (owner 11/11: the profile kernels amputated
+# netfilter/bridge/tun/veth/sched; a PVE host needs ALL of it regardless of
+# profile: iptables+NAT for the bridges (legacy xtables chain: 7.x split
+# legacy tables behind NETFILTER_XTABLES_LEGACY + *_IPTABLES_LEGACY,
+# BRIDGE_NETFILTER and VRF-family live behind NETFILTER_ADVANCED), bridge+
+# tun+veth for vmbr/veth, nftables for modern sets (NF_TABLES_NAT does not
+# exist on 7.2 — NAT rides NF_TABLES_INET), sched qdiscs, vrf (renamed
+# NET_VRF on 7.2), fuse for lxcfs and fuse-overlayfs.
+# =============================================================================
+CONFIG_BRIDGE=y
+CONFIG_BRIDGE_NETFILTER=y
+CONFIG_IP6_NF_FILTER=y
+CONFIG_IP6_NF_IPTABLES=y
+CONFIG_IP6_NF_IPTABLES_LEGACY=y
+CONFIG_IP6_NF_MANGLE=y
+CONFIG_IP6_NF_NAT=y
+CONFIG_IPV6_SIT=m
+CONFIG_IPV6_TUNNEL=m
+CONFIG_IPV6_MULTIPLE_TABLES=y
+CONFIG_IP_MULTIPLE_TABLES=y
+CONFIG_IP_NF_FILTER=y
+CONFIG_IP_NF_IPTABLES=y
+CONFIG_IP_NF_IPTABLES_LEGACY=y
+CONFIG_IP_NF_MANGLE=y
+CONFIG_IP_NF_NAT=y
+CONFIG_IP_NF_TARGET_REJECT=y
+CONFIG_LLC=y
+CONFIG_NETFILTER_ADVANCED=y
+CONFIG_NETFILTER_NETLINK_GLUE_CT=y
+CONFIG_NETFILTER_XTABLES=y
+CONFIG_NETFILTER_XTABLES_LEGACY=y
+CONFIG_NETFILTER_XT_MATCH_CONNTRACK=y
+CONFIG_NETFILTER_XT_MATCH_STATE=y
+CONFIG_NETFILTER_XT_TARGET_MASQUERADE=y
+CONFIG_NET_CLS_CGROUP=y
+CONFIG_NET_EMATCH=y
+CONFIG_NET_L3_MASTER_DEV=y
+CONFIG_NET_SCHED=y
+CONFIG_NET_SCH_CAKE=m
+CONFIG_NET_SCH_FQ=y
+CONFIG_NET_SCH_FQ_CODEL=y
+CONFIG_NET_SCH_HTB=y
+CONFIG_NF_CONNTRACK=y
+CONFIG_NF_CONNTRACK_PROCFS=y
+CONFIG_NF_TABLES=y
+CONFIG_NF_TABLES_INET=y
+CONFIG_NF_TABLES_IPV4=y
+CONFIG_NF_TABLES_IPV6=y
+CONFIG_STP=y
+CONFIG_TUN=m
+CONFIG_VETH=m
+CONFIG_NET_VRF=m
+
 # fuse: module. Proxmox depends on it (LXC bind-mounts /dev/fuse for
 # fuse-overlayfs, and several container storages use fuse passthrough).
 # Module is sufficient: nothing needs /dev/fuse before the rootfs, so no
