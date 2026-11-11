@@ -25,6 +25,7 @@ from typing import cast
 SET = re.compile(r"^(CONFIG_\w+)=(.*)$")
 UNSET = re.compile(r"^# (CONFIG_\w+) is not set$")
 DECLARED = re.compile(r"^\s*(?:menu)?config\s+(\w+)\s*$")
+PROMPT = re.compile(r"^\s*(?:bool|tristate|string|hex|int)\s*[\"'].+?")
 
 
 def parse_fragment(path: Path) -> dict[str, str]:
@@ -47,6 +48,25 @@ def parse_fragment(path: Path) -> dict[str, str]:
 
 
 def declared_symbols(tree: Path) -> set[str]:
+    return _scan_kconfigs(tree)[0]
+
+
+def prompted_symbols(tree: Path) -> set[str]:
+    """Symbols a user can actually set (they carry a prompt)."""
+    return _scan_kconfigs(tree)[1]
+
+
+def _scan_kconfigs(tree: Path) -> tuple[set[str], set[str]]:
+    """Declared symbols and prompted symbols of a kernel tree.
+
+    Args:
+        tree: Root of the kernel source.
+
+    Returns:
+        Declared symbols as ``CONFIG_<name>`` and the subset that carries a
+        user prompt (anything promptless is select-managed: a fragment ``=``
+        line is advisory, ``olddefconfig`` ignores it).
+    """
     """Collect every symbol declared by a Kconfig file of a kernel tree.
 
     Args:
@@ -55,14 +75,25 @@ def declared_symbols(tree: Path) -> set[str]:
     Returns:
         The symbols as ``CONFIG_<name>``.
     """
-    found: set[str] = set()
+    declared: set[str] = set()
+    prompted: set[str] = set()
+    current: str | None = None
+    prompted_current = False
     for kconfig in tree.rglob("Kconfig*"):
         if not kconfig.is_file():
             continue
         for line in kconfig.read_text(errors="replace").splitlines():
             if match := DECLARED.match(line):
-                found.add(f"CONFIG_{match.group(1)}")
-    return found
+                if current and prompted_current:
+                    prompted.add(f"CONFIG_{current}")
+                current = match.group(1)
+                prompted_current = False
+                declared.add(f"CONFIG_{current}")
+            elif current is not None and PROMPT.match(line):
+                prompted_current = True
+    if current and prompted_current:
+        prompted.add(f"CONFIG_{current}")
+    return declared, prompted
 
 
 def config_values(path: Path) -> dict[str, str]:
@@ -81,6 +112,7 @@ def check(
     wanted: dict[str, str],
     declared: set[str],
     final: dict[str, str] | None,
+    prompts: set[str] | None = None,
 ) -> tuple[list[str], list[str]]:
     """Compare the requested options with the kernel.
 
@@ -102,7 +134,9 @@ def check(
       through its selects/parents (its own ``=`` line is advisory).
 
     A tristate superset passes too: a requested ``=m`` honoured as ``=y``
-    (built-in includes the module).
+    (built-in includes the module). A promptless symbol (select-managed) is
+    advisory wherever its line is dropped or re-valued: ``olddefconfig``
+    handles it through the parent.
     """
     defects: list[str] = []
     advisory: list[str] = []
@@ -114,6 +148,11 @@ def check(
                 advisory.append(
                     f"WARN: {symbol}: not in .config (invisible in this "
                     "scope/architecture — dropped)"
+                )
+            elif prompts is not None and symbol not in prompts:
+                advisory.append(
+                    f"WARN: {symbol}: promptless, resolved by olddefconfig "
+                    f"({final[symbol]})"
                 )
             else:
                 has = final[symbol]
@@ -150,7 +189,8 @@ def main(argv: list[str] | None = None) -> int:
     for fragment in fragments:
         wanted.update(parse_fragment(fragment))
     final = config_values(config) if config else None
-    defects, advisory = check(wanted, declared_symbols(tree), final)
+    declared, prompts = _scan_kconfigs(tree)
+    defects, advisory = check(wanted, declared, final, prompts)
     for line in advisory:
         print(line)
     for line in defects:
