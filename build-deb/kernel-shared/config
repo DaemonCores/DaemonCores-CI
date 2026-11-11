@@ -57,6 +57,14 @@ CONFIG_TMPFS=y
 #            the rootfs is mounted.
 CONFIG_OVERLAY_FS=m
 
+# squashfs: module. The live ISO root is /LiveOS/squashfs.img (bootc-image
+# builder --type iso): without this module the live initramfs cannot mount
+# the real root and the boot dies in dracut emergency at initrd-switch-root
+# ("Failed to start initrd-switch-root.service"). Disk images never boot via
+# squashfs, which is why the image boot tests stayed green while the ISO
+# failed. ISO9660 (=y) and loop (=y) are already on.
+CONFIG_SQUASHFS=m
+
 # erofs: module. Read-only compressed filesystem used by some container
 #        image formats and by bootc's image store. Module is sufficient;
 #        erofs is never the root filesystem so no chicken-and-egg issue.
