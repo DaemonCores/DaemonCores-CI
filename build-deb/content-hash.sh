@@ -148,33 +148,14 @@ env_hash() {
 }
 
 #######################################
-# Hash the contents of the shared kernel build data (build-deb/kernel-shared:
-# the canonical patches manifest + kconfig fragments exported as
-# CI_KERNEL_SHARED). A change to it changes the patches the lanes apply and
-# the fragments they merge, so it feeds the hash like the helper scripts.
-# Globals: none
+# The shared kernel data hash: GONE (owner 11/11 — the kernel package data
+# lives in the product repos; a stale term would rebuild endlessly on the
+# repo-side changes). Kept as "none" for the formula stability.
 # Outputs:
-#   Hex digest on stdout, or "none" when the directory is absent.
+#   "none"
 #######################################
 shared_data_hash() {
-  local dir
-  # Only builds that consume the shared data (their script references
-  # CI_KERNEL_SHARED) pay with a changed hash: the other packages keep their
-  # published cache keys.
-  [[ "${BUILD:-}" == *CI_KERNEL_SHARED* ]] || {
-    echo none
-    return 0
-  }
-  dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/kernel-shared" 2>/dev/null && pwd)" || {
-    echo none
-    return 0
-  }
-  [[ -d "${dir}" ]] || {
-    echo none
-    return 0
-  }
-  find "${dir}" -type f -print0 | sort -z | xargs -0 sha256sum 2>/dev/null \
-    | sha256sum | cut -d' ' -f1
+  echo none
 }
 
 #######################################
@@ -194,7 +175,7 @@ content_hash() {
   build=$(printf '%s' "${BUILD:-}" | sha256sum | cut -d' ' -f1)
   arch="${ARCH:-amd64}"
   helpers=$(helpers_hash)
-  shared=$(shared_data_hash)
+  shared=none
   echo "content-hash(${PACKAGE}/${arch}): src=${src} upstream=${up} env=${env} helpers=${helpers} shared=${shared}" >&2
   # Published formula stays byte-identical for the builds that consume no
   # shared data: the extra terms are dropped exactly like the old script
