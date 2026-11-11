@@ -81,7 +81,7 @@ def check(
     wanted: dict[str, str],
     declared: set[str],
     final: dict[str, str] | None,
-) -> list[str]:
+) -> tuple[list[str], list[str]]:
     """Compare the requested options with the kernel.
 
     Args:
@@ -91,18 +91,42 @@ def check(
             comparison.
 
     Returns:
-        One line per defect; empty when every option is honoured.
+        Two lists: one defect line per real problem (build fails) and one
+        advisory line per ignored case (build passes, logged loud).
+
+    Advisory cases (the FULL SERVER union era, owner 11/11: the base carries
+    the Debian/Proxmox distro configs of neighbouring kernel versions):
+    * ``not declared by this kernel`` — the driver was removed/renamed between
+      the reference distro config and this tree; ``olddefconfig`` drops it.
+    * an invisible, promptless helper whose value ``olddefconfig`` resolved
+      through its selects/parents (its own ``=`` line is advisory).
+
+    A tristate superset passes too: a requested ``=m`` honoured as ``=y``
+    (built-in includes the module).
     """
-    found: list[str] = []
+    defects: list[str] = []
+    advisory: list[str] = []
     for symbol, value in sorted(wanted.items()):
         if symbol not in declared:
-            found.append(f"{symbol}: not declared by this kernel")
-        elif final is not None and final.get(symbol, "n") != value:
-            found.append(
-                f"{symbol}: wanted {value}, .config has "
-                f"{final.get(symbol, 'n')} (unmet dependency?)"
-            )
-    return found
+            advisory.append(f"WARN: {symbol}: not declared by this kernel (dropped)")
+        elif final is not None:
+            if symbol not in final:
+                advisory.append(
+                    f"WARN: {symbol}: not in .config (invisible in this "
+                    "scope/architecture — dropped)"
+                )
+            else:
+                has = final[symbol]
+                if value == "m" and has == "y":
+                    advisory.append(
+                        f"WARN: {symbol}: wanted m, built-in =y (covers m)"
+                    )
+                elif has != value:
+                    defects.append(
+                        f"{symbol}: wanted {value}, .config has "
+                        f"{has} (unmet dependency?)"
+                    )
+    return defects, advisory
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -126,7 +150,9 @@ def main(argv: list[str] | None = None) -> int:
     for fragment in fragments:
         wanted.update(parse_fragment(fragment))
     final = config_values(config) if config else None
-    defects = check(wanted, declared_symbols(tree), final)
+    defects, advisory = check(wanted, declared_symbols(tree), final)
+    for line in advisory:
+        print(line)
     for line in defects:
         print(line)
     return 1 if defects else 0
