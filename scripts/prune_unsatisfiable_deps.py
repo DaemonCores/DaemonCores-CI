@@ -22,9 +22,11 @@ def main(path: str) -> None:
         deps = p.get("deps") or []
         kept = [d for d in deps if d in names]
         if kept != deps:
-            print("only filter: dropped unsatisfiable deps of %s: %s"
-                  % (p["name"], [d for d in deps if d not in names]),
-                  file=sys.stderr)
+            print(
+                "only filter: dropped unsatisfiable deps of %s: %s" %
+                (p["name"], [d for d in deps if d not in names]),
+                file=sys.stderr
+            )
             p["deps"] = kept
     with open(path, "w", encoding="utf-8") as fh:
         json.dump(m, fh)

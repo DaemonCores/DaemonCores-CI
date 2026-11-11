@@ -142,7 +142,9 @@ def check(
     advisory: list[str] = []
     for symbol, value in sorted(wanted.items()):
         if symbol not in declared:
-            advisory.append(f"WARN: {symbol}: not declared by this kernel (dropped)")
+            advisory.append(
+                f"WARN: {symbol}: not declared by this kernel (dropped)"
+            )
         elif final is not None:
             if symbol not in final:
                 advisory.append(

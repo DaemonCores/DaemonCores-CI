@@ -40,17 +40,19 @@ def test_multi_glob_records_every_pattern(tmp_path: Path) -> None:
             'Maintainer: ci <ci@example.invalid>\nDescription: test\n'
         )
         subprocess.run([
-            'dpkg-deb', '--build', str(pkg.parent),
+            'dpkg-deb', '--build',
+            str(pkg.parent),
             str(debs / name)
-        ], check=True, capture_output=True)
+        ],
+                       check=True,
+                       capture_output=True)
     out = tmp_path / 'out'
     out.touch()
     env = {
         'PATH': '/usr/bin:/bin',
         'PACKAGE': 'linux-image-vm-x64v3',
         'ARCH': 'amd64',
-        'DEB_GLOB':
-            'linux-image-common-vm-x64v3_* linux-headers-vm-*',
+        'DEB_GLOB': 'linux-image-common-vm-x64v3_* linux-headers-vm-*',
         'BUILD': 'true',
         'PAGES_URL': f'file://{pages}',
         'GITHUB_OUTPUT': str(out),
@@ -59,9 +61,12 @@ def test_multi_glob_records_every_pattern(tmp_path: Path) -> None:
         'SKIP_BUILD': 'false',
     }
     subprocess.run(['bash', str(SCRIPT)],
-                   env=env, capture_output=True, text=True)
-    meta = json.loads((debs / '.meta' /
-                       'linux-image-vm-x64v3-amd64.json').read_text())
+                   env=env,
+                   capture_output=True,
+                   text=True)
+    meta = json.loads(
+        (debs / '.meta' / 'linux-image-vm-x64v3-amd64.json').read_text()
+    )
     assert sorted(meta['debs']) == sorted([IMAGE, HEADERS]), meta
 
 
@@ -81,9 +86,13 @@ def test_single_glob_still_works(tmp_path: Path) -> None:
         'Package: onlyimage\nVersion: 1\nArchitecture: amd64\n'
         'Maintainer: ci <ci@example.invalid>\nDescription: test\n'
     )
-    subprocess.run(['dpkg-deb', '--build', str(pkg.parent),
-                    str(debs / 'onlyimage_1_amd64.deb')],
-                   check=True, capture_output=True)
+    subprocess.run([
+        'dpkg-deb', '--build',
+        str(pkg.parent),
+        str(debs / 'onlyimage_1_amd64.deb')
+    ],
+                   check=True,
+                   capture_output=True)
     (debs / 'unrelated_1_amd64.deb').touch()
     out = tmp_path / 'out'
     out.touch()
@@ -100,6 +109,8 @@ def test_single_glob_still_works(tmp_path: Path) -> None:
         'SKIP_BUILD': 'false',
     }
     subprocess.run(['bash', str(SCRIPT)],
-                   env=env, capture_output=True, text=True)
+                   env=env,
+                   capture_output=True,
+                   text=True)
     meta = json.loads((debs / '.meta' / 'onlyimage-amd64.json').read_text())
     assert meta['debs'] == ['onlyimage_1_amd64.deb'], meta

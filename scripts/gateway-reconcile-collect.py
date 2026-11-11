@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import json, pathlib, subprocess, sys
+
 conf_dir, node = sys.argv[1], sys.argv[2]
 if conf_dir:
     out = {}
@@ -10,14 +11,21 @@ if conf_dir:
                 out[f.stem] = line[len("description: "):].replace("\\n", "\n")
     print(json.dumps(out))
     sys.exit(0)
-ids = subprocess.run(
-    ["pvesh", "get", f"/nodes/{node}/lxc", "--output-format", "json"],
-    capture_output=True, text=True, check=True)
+ids = subprocess.run([
+    "pvesh", "get", f"/nodes/{node}/lxc", "--output-format", "json"
+],
+                     capture_output=True,
+                     text=True,
+                     check=True)
 out = {}
 for guest in json.loads(ids.stdout):
     vid = str(guest["vmid"])
-    cfg = subprocess.run(
-        ["pvesh", "get", f"/nodes/{node}/lxc/{vid}/config", "--output-format", "json"],
-        capture_output=True, text=True, check=True)
+    cfg = subprocess.run([
+        "pvesh", "get", f"/nodes/{node}/lxc/{vid}/config", "--output-format",
+        "json"
+    ],
+                         capture_output=True,
+                         text=True,
+                         check=True)
     out[vid] = json.loads(cfg.stdout).get("description", "")
 print(json.dumps(out))
