@@ -169,14 +169,17 @@ patch_urls() {
   if [[ "$1" == "native" ]]; then
     yq ".packages[] | select(.name == \"$2\") | (.patches // [])[].url" "${MAN}"
   elif [[ "$1" == "engine" ]]; then
-    local engine
-    engine="${CI_ENGINE_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
-    [[ -r "${engine}/build-deb/kernel-shared/patches-shared.yml" ]] || {
-      echo "engine patch manifest not found: ${engine}/build-deb/kernel-shared" >&2
+    # owner 11/11: the kernel data lives in the PRODUCT repo — resolve from
+    # the manifest being tracked (the track step runs in the product checkout).
+    local root patches
+    root="$(dirname "${SOURCE_MAN:-${MAN}}")"
+    patches="${root}/kernel-src/patches"
+    [[ -r "${patches}/kernel.yml" ]] || {
+      echo "kernel patch manifest not found: ${patches}/kernel.yml" >&2
       return 1
     }
     yq '.patches[] | . as $p | $p.url | sub("{topic}"; ($p.topic // ""))' \
-      "${engine}/build-deb/kernel-shared/patches-shared.yml"
+      "${patches}/kernel.yml"
   else
     local manifest
     manifest="$(dirname "${SOURCE_MAN:-${MAN}}")/$1"
@@ -296,16 +299,17 @@ kernel_digests() {
 #   $2 - package name
 #######################################
 election_manifests() {
-  local req="$1" pkg="$2" root
+  local req="$1" pkg="$2" patches
   if [[ "${req}" == "engine" ]]; then
-    root="${CI_ENGINE_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
-    local shared="${root}/build-deb/kernel-shared"
-    [[ -r "${shared}/patches-shared.yml" ]] || {
-      echo "engine patch manifest not found: ${shared}" >&2
+    # owner 11/11: the kernel data lives in the PRODUCT repo — resolve from
+    # the manifest being tracked.
+    patches="$(dirname "${SOURCE_MAN:-${MAN}}")/kernel-src/patches"
+    [[ -r "${patches}/kernel.yml" ]] || {
+      echo "kernel patch manifest not found: ${patches}/kernel.yml" >&2
       return 1
     }
     printf '%s\n' \
-      "${shared}/patches-shared.yml:${shared}/patches-pve.yml:${shared}/patches-gpu/amd.yml:${shared}/patches-gpu/intel.yml"
+      "${patches}/kernel.yml:${patches}/pve.yml:${patches}/gpu/amd.yml:${patches}/gpu/intel.yml"
   else
     patch_urls "${req}" "${pkg}" >/dev/null || return 1
     # native / path: the single manifest named by the entry.
