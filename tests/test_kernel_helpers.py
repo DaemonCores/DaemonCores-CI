@@ -5,21 +5,24 @@ kernel-pve (PVE packaging + XanMod) and debian-bootc linux-image (kernel.org
 rolling), both consumed by the bootc-debs builders. The manifest schema is
 CANONICAL: declarative patches data (a patches.yml file or the native
 PATCHES_JSON entry export), consumed through yq, never a bashified list.
+
+Reference data (owner 11/11 R-870b): the product-canonical manifests live in
+the debian-bootc checkout (kernel-src/patches); this test suite reads the
+pve.yml and kernel.yml from that checkout as the reference data the helper
+must resolve.
 """
 
 import os
 import subprocess
+import tempfile
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
 HELPER = REPO / "scripts" / "kernel_helpers.sh"
-# Reference mode (patch parity, owner arbitration 2026-11-03 12:30): the
-# canonical shared manifest lives in THIS repository, inside the build-deb
-# action; the engine exports it as CI_KERNEL_SHARED and both lanes consume
-# it from that checkout (no copy in any consumer repo).
-SHARED_DATA = Path(__file__
-                   ).resolve().parents[1] / "build-deb" / "kernel-shared"
-VE_MANIFEST = SHARED_DATA / "patches-shared.yml"
+PRODUCT = Path(__file__).resolve().parents[2] / "debian-bootc"
+KERNEL_SRC = PRODUCT / "workflows" / "bootc-debs-builder" / "kernel-src"
+KERNEL_MANIFEST = KERNEL_SRC / "patches" / "kernel.yml"
+VE_MANIFEST = KERNEL_SRC / "patches" / "pve.yml"
 
 ENV = {"KERNEL_CDN": "", "PATH": os.environ["PATH"], "HOME": os.environ["HOME"]}
 
@@ -38,98 +41,90 @@ def test_helper_shell_syntax():
     assert subprocess.run(["bash", "-n", str(HELPER)]).returncode == 0
 
 
+def _expected_class_count(doc, series: str, classes) -> int:
+    """How many entries the helper lists for the given series and stage
+    classes: an entry excluded on the series (exclude-series) or staged
+    outside the classes drops."""
+    return sum(
+        1 for p in doc["patches"] if series not in
+        (p.get("exclude-series") or []) and p.get("stage", "common") in classes
+    )
+
+
 def test_patch_list_from_native_manifest():
-    """The engine manifest drives the class filtering; the bootc packages.yml
-    carries NO native patch data (owner arbitration 2026-11-03: production
-    packages.yaml list no `patches:` — the canonical set lives in
-    build-deb/kernel-shared/patches-shared.yml, exported as CI_KERNEL_SHARED)."""
+    """The product packages.yml carries NO native patch data (owner R-870b:
+    the canonical set lives in kernel-src/patches); the helper resolves the
+    class filter over the reference pve.yml via PATCHES_JSON."""
     import json
 
     import yaml
 
-    manifest = (
-        Path(__file__).resolve().parents[2] / "debian-bootc" / "workflows" /
-        "bootc-debs-builder" / "packages.yml"
-    )
-    if not manifest.is_file():
-        return
+    manifest = PRODUCT / "workflows" / "bootc-debs-builder" / "packages.yml"
+    assert manifest.is_file()
     assert not [
         p for p in yaml.safe_load(manifest.read_text())["packages"]
         if p["name"] == "linux-image" and "patches" in p
     ]
-    patches = json.dumps(yaml.safe_load(VE_MANIFEST.read_text())["patches"])
-    r = run_helper(
-        'kernel_patch_list - amd64 6.12.107 kernel', PATCHES_JSON=patches
-    )
-    assert r.returncode == 0, r.stderr
-    # The amd64 kernel class of the shared set is EMPTY (the module carrier
-    # rides on the arm64 tree only).
-    assert r.stdout.strip() == ""
-    r = run_helper(
-        'kernel_patch_list - arm64 6.12.107 module', PATCHES_JSON=patches
-    )
-    assert r.returncode == 0, r.stderr
-    # arm64 module class: the RTL8733BU carrier when the manifest carries it
-    # (owner arbitration 2026-11-03 13:05 moved it lane-side).
-    carrier = any(
-        p.get("name") == "rocknix-btrtl-rtl8733bu"
-        for p in yaml.safe_load(VE_MANIFEST.read_text())["patches"]
-    )
-    if carrier:
-        assert r.stdout.strip().startswith("rocknix-btrtl-rtl8733bu ")
-    else:
-        assert r.stdout.strip() == ""
+    doc = yaml.safe_load(VE_MANIFEST.read_text())
+    patches = json.dumps(doc["patches"])
+    for series in ("7.0.14", "6.12.107", "6.14.11"):
+        r = run_helper(
+            f'kernel_patch_list - amd64 {series}',
+            PATCHES_JSON=patches,
+        )
+        assert r.returncode == 0, r.stderr
+        expected = _expected_class_count(doc, series, ("common", "amd64"))
+        assert len(r.stdout.splitlines()) == expected, series
 
 
-def test_patch_list_from_file_ve():
-    """The VE kernel manifest resolves {seriesdir} (7.0.x → eol/)."""
-    if not VE_MANIFEST.exists():
-        return
-    r = run_helper(f'kernel_patch_list "{VE_MANIFEST}" amd64 7.0.14')
+def _write_series_fixture(tmp: Path) -> Path:
+    """A manifest whose URL carries {seriesdir}/{topic}; the fixture creates
+    the resolved dirs for series 7.0 (eol layout) and 7.2."""
+    manifest = tmp / "series.yml"
+    manifest.write_text(
+        "patches:\n"
+        "  - name: x86-cflags\n"
+        f"    url: file://{tmp}/{{seriesdir}}/{{topic}}/0001-x86-cflags.patch\n"
+        "    topic: topic\n"
+        "    stage: common\n"
+        "    license: GPL-2.0-only\n"
+    )
+    for series, seriesdir in (
+        ("7.0", "eol/linux-7.0.y-xanmod"),
+        ("7.2", "linux-7.2.y-xanmod"),
+    ):
+        sdir = tmp / seriesdir / "topic"
+        sdir.mkdir(parents=True)
+        (
+            sdir / "0001-x86-cflags.patch"
+        ).write_text("--- a/README\n+++ b/README\n@@ -1 +1 @@\n-x\n+patched\n")
+    return manifest
+
+
+def test_series_templates_resolve(tmp_path: Path):
+    """The helper resolves {seriesdir} (7.0 → eol/ layout) and {topic}, and
+    passes the resolved absolute URLs to the patch application.
+
+    Args:
+        tmp_path: Scratch directory hosting the fixture dirs.
+    """
+    manifest = _write_series_fixture(tmp_path)
+    r = run_helper(f'kernel_patch_list "{manifest}" amd64 7.0.14')
     assert r.returncode == 0, r.stderr
-    assert "eol/linux-7.0.y-xanmod" in r.stdout
+    assert "eol/linux-7.0.y-xanmod/topic/0001-x86-cflags.patch" in r.stdout
     line = r.stdout.splitlines()[0]
-    assert line.startswith("0001-x86-cflags https://gitlab.com")
+    assert line.startswith("x86-cflags file://")
     assert "{seriesdir}" not in line and "{topic}" not in line
 
 
 def test_patch_list_from_native_patches_json():
-    """The native entry key: compact JSON export of the same patches set."""
-    import json
-
-    import yaml
-
-    if not VE_MANIFEST.exists():
-        return
-    patches = json.dumps(yaml.safe_load(VE_MANIFEST.read_text())["patches"])
-    r = run_helper(
-        "kernel_patch_list - amd64 7.0.14 | wc -l", PATCHES_JSON=patches
-    )
-    assert r.returncode == 0, r.stderr
-    # One line per patch entry the amd64 series actually carries: an entry
-    # whose exclude-series lists the resolved series (7.0 here) is dropped by
-    # the helper (e.g. bore, which CachyOS does not publish for 7.0), and an
-    # entry staged arm64 does not ride a common/amd64 filter (e.g. the
-    # RTL8733BU module carrier).
-    import json as _json
-
-    entries = _json.loads(patches)
-    expected = sum(
-        1 for p in entries if "7.0" not in (p.get("exclude-series") or [])
-        and p.get("stage", "common") in ("common", "amd64")
-    )
-    assert int(r.stdout.strip()) == expected
-
-
-def test_patch_list_json_matches_file():
     """PATCHES_JSON (the native export) yields the same lines as the file."""
     import json
 
     import yaml
 
-    if not VE_MANIFEST.exists():
-        return
-    patches = json.dumps(yaml.safe_load(VE_MANIFEST.read_text())["patches"])
+    doc = yaml.safe_load(VE_MANIFEST.read_text())
+    patches = json.dumps(doc["patches"])
     from_file = run_helper(f'kernel_patch_list "{VE_MANIFEST}" amd64 7.0.14')
     from_json = run_helper(
         "kernel_patch_list - amd64 7.0.14", PATCHES_JSON=patches

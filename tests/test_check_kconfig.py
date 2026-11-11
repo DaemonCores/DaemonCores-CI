@@ -60,7 +60,10 @@ def test_parse_fragment_reads_values_and_unset(tmp_path: Path) -> None:
 
 
 def test_unknown_symbol_is_reported(tree: Path, tmp_path: Path) -> None:
-    """A symbol the tree does not declare fails, a declared one passes.
+    """A symbol the tree does not declare is an ADVISORY (the FULL SERVER
+    union era: a distro config of a neighbouring kernel version drops
+    removed drivers — the build passes, the gate logs loud), a declared one
+    passes silent.
 
     Args:
         tree: Kernel tree fixture.
@@ -68,13 +71,23 @@ def test_unknown_symbol_is_reported(tree: Path, tmp_path: Path) -> None:
     """
     fragment = _fragment(tmp_path, "CONFIG_FOO=y\nCONFIG_GONE=m\n")
     code = check_kconfig.main(["--tree", str(tree), str(fragment)])
-    assert code == 1
-    assert check_kconfig.check({"CONFIG_FOO": "y"},
-                               check_kconfig.declared_symbols(tree), None) == []
+    assert code == 0
+    defects, advisory = check_kconfig.check(
+        {
+            "CONFIG_FOO": "y",
+            "CONFIG_GONE": "m"
+        },
+        check_kconfig.declared_symbols(tree),
+        None,
+        check_kconfig.prompted_symbols(tree),
+    )
+    assert defects == []
+    assert any("CONFIG_GONE" in line for line in advisory)
 
 
 def test_dropped_option_is_reported(tree: Path, tmp_path: Path) -> None:
-    """An option the generated .config lost to a dependency fails.
+    """An option the generated .config lost to a dependency fails as a real
+    defect (the prompt is owned, not promptless).
 
     Args:
         tree: Kernel tree fixture.
@@ -83,14 +96,18 @@ def test_dropped_option_is_reported(tree: Path, tmp_path: Path) -> None:
     fragment = _fragment(tmp_path, "CONFIG_FOO=y\nCONFIG_BAR=m\n")
     config = tmp_path / ".config"
     config.write_text("CONFIG_FOO=y\n# CONFIG_BAR is not set\n")
-    defects = check_kconfig.check(
+    declared, prompts = check_kconfig.declared_symbols(tree), \
+        check_kconfig.prompted_symbols(tree)
+    defects, advisory = check_kconfig.check(
         check_kconfig.parse_fragment(fragment),
-        check_kconfig.declared_symbols(tree),
-        check_kconfig.config_values(config)
+        declared,
+        check_kconfig.config_values(config),
+        prompts,
     )
     assert defects == [
         "CONFIG_BAR: wanted m, .config has n (unmet dependency?)"
     ]
+    assert advisory == []
 
 
 def test_honoured_options_pass(tree: Path, tmp_path: Path) -> None:

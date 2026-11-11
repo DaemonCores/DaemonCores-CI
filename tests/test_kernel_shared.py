@@ -1,55 +1,33 @@
-"""Contract tests of the shared kernel build data (build-deb/kernel-shared).
+"""Contract tests of the product-canonical kernel build data.
 
-Owner arbitration 2026-11-03 12:30: the canonical patches manifest and the
-shared kconfig fragments live HERE, in the build engine; build-deb.sh
-exports the directory as CI_KERNEL_SHARED (like the helper scripts) and both
-kernel lanes (debian-bootc linux-image, DaemonCores-VE kernel-pve) consume
-the set from that checkout — no copy in a consumer repo and no fetch between
-production repositories. The shared term is hashed by content-hash.sh for
-the builds that consume it.
+Owner arbitrations 2026-11-11 (R-869b..R-871b): the kernel build data lives
+in the PRODUCT repository (debian-bootc, workflows/bootc-debs-builder/
+kernel-src) — the build engine keeps NO kernel package data at all (the
+former build-deb/kernel-shared directory is deleted, the CI_KERNEL_SHARED
+export is gone from build-deb.sh and content-hash.sh answers "none"). The
+debian-bootc lane reads everything from its own checkout
+(packages.yml BASE_CONFIG / patches / kconfig paths); the VE and vanilla
+lanes carry their own data. Both kernel lanes still consume the helper
+primitives through scripts/kernel_helpers.sh, unchanged.
 """
 
 import subprocess
-import tempfile
 from pathlib import Path
 
+import yaml
+
 REPO = Path(__file__).resolve().parents[1]
-SHARED_DATA = REPO / "build-deb" / "kernel-shared"
+PRODUCT = REPO.parent / "debian-bootc"
+KERNEL_SRC = (PRODUCT / "workflows" / "bootc-debs-builder" / "kernel-src")
 BUILD_DEB_SH = REPO / "build-deb" / "build-deb.sh"
 CONTENT_HASH_SH = REPO / "build-deb" / "content-hash.sh"
 
 
-def _write_temp_runner():
-    """A runner sources build-deb.sh with a real BASH_SOURCE (sourcing it from
-    /dev/stdin would resolve its own dirname to /dev), then calls run_build
-    like the engine does and prints both exported shared directories. Returns
-    the CompletedProcess; the runner must live next to build-deb.sh because
-    build-deb.sh resolves its own helpers with `dirname ${BASH_SOURCE[0]}`."""
-    runner = BUILD_DEB_SH.read_text(encoding="utf-8").replace(
-        'main "$@"',
-        'run_build >/dev/null 2>&1 || true\n'
-        'printf "%s|%s" "${CI_KERNEL_SHARED}" "${CI_SCRIPTS}"',
-    )
-    tmp = Path(
-        tempfile.NamedTemporaryFile(
-            "w", suffix=".sh", delete=False, dir=str(BUILD_DEB_SH.parent)
-        ).name
-    )
-    tmp.write_text(runner, encoding="utf-8")
-    try:
-        r = subprocess.run(["bash", str(tmp)],
-                           capture_output=True,
-                           text=True,
-                           cwd=str(REPO))
-    finally:
-        tmp.unlink()
-    return r
-
-
-def test_shared_data_files_present() -> None:
-    """The canonical set is committed in the engine: one manifest + 7 kconfig
-    fragments (x86 base, three flavours, three GPU sets)."""
-    assert (SHARED_DATA / "patches-shared.yml").is_file()
+def test_kernel_src_canonical_files_present() -> None:
+    """The canonical set is committed in the product repo: the base config,
+    the flavour/cpu fragments, the pages overlays, the kernel and PVE patch
+    manifests and the per-profile GPU patch sets."""
+    assert (KERNEL_SRC / "config.cfg").is_file()
     for name in (
         "x86-common.cfg",
         "x64v1.cfg",
@@ -60,205 +38,129 @@ def test_shared_data_files_present() -> None:
         "armv8.2-lse.cfg",
         "armv9-sve2.cfg",
     ):
-        assert (SHARED_DATA / "kconfig-shared" / name).is_file()
-    for name in ("amd.cfg", "intel.cfg", "nvidia.cfg"):
-        assert (SHARED_DATA / "kconfig-shared" / "gpu" / name).is_file()
+        assert (KERNEL_SRC / "kconfig" / "cpus" / name).is_file(), name
+    for name in ("4k.cfg", "16k.cfg"):
+        assert (KERNEL_SRC / "kconfig" / "pages" / name).is_file(), name
+    for name in ("kernel.yml", "pve.yml"):
+        assert (KERNEL_SRC / "patches" / name).is_file(), name
+    for profile in ("ia", "gaming"):
+        for name in ("amd.yml", "intel.yml", "nvidia.yml"):
+            path = KERNEL_SRC / "patches" / "gpu" / profile / name
+            assert path.is_file(), f"{profile}/{name}"
 
 
-def test_arch_overlays_folded_into_the_base_config() -> None:
-    """The bare arch overlays are gone; their content lives in kernel/config.
-
-    The fold (owner 2026-11-03): modules/arm and modules/x86_64 do not exist
-    anymore, the base config carries the '# arm64 built-in' and
-    '# amd64 built-in' sections, and the former =m drivers are =y (a
-    modules-only build can never add a built-in to an existing kernel).
-
-    KERNEL FINAL v2 (owner 2026-11-03): the per-device fragments AND the
-    arch-overlay dir are gone from the engine — the device module lists are
-    debian-bootc lane data (workflows/bootc-debs-builder/kernel/modules),
-    built uniquely on that lane; the engine keeps only the common set
-    (patches-shared.yml, config, pages, kconfig-shared).
-    """
-    for gone in ('arm', 'x86_64'):
-        assert not (SHARED_DATA / 'modules' / gone).exists(), gone
-    assert not (SHARED_DATA / 'modules').exists()
-    cfg = (SHARED_DATA / 'config').read_text(encoding='utf-8')
-    for section in ('# arm64 built-in', '# amd64 built-in'):
-        assert section in cfg, section
-    for promoted in (
-        'CONFIG_E1000=y',
-        'CONFIG_R8169=y',
-        'CONFIG_DRM_VC4=y',
-        'CONFIG_DRM_ROCKCHIP=y',
-        'CONFIG_NR_CPUS=512',
-        '# CONFIG_HWPOISON_INJECT is not set',
-    ):
-        assert promoted in cfg, promoted
-
-    # The device fragments are NOT engine data anymore: they moved back to the
-    # debian-bootc lane (KERNEL FINAL v2). The page-size overlays stay here.
-    assert not (SHARED_DATA / 'modules').exists()
-    for pages in ('4k', '16k'):
-        assert (SHARED_DATA / 'pages' / pages).is_file(), pages
-    bootc_modules = (
-        REPO.parent / 'debian-bootc' / 'workflows' / 'bootc-debs-builder' /
-        'kernel' / 'modules'
-    )
-    if bootc_modules.is_dir():
-        for device in (
-            'rpi3',
-            'rpi4',
-            'rpi5',
-            'rk3588',
-            'rk3566',
-            'rk3399',
-            'h616',
-            'imx8m',
-            'mt8183',
-        ):
-            assert (bootc_modules / device).is_file(), device
-
-
-def test_gpu_fold_undone_drivers_are_modules() -> None:
-    """GPU FINAL (owner 2026-11-03): the folded =y GPU drivers are back to
-    =m in the base config, and CONFIG_DRM_AMD_DC left the base — the
-    display-core build is a PROFILE choice of the four GPU module sets
-    (gpu-ia, gpu-gaming and their NVIDIA variants), not a base value.
-
-    The device/arch folds are untouched: the arm64 SoC built-ins, the
-    network/USB built-ins and the disables section keep their values.
-    """
-    cfg = (SHARED_DATA / 'config').read_text(encoding='utf-8')
-    for modular in (
-        'CONFIG_DRM_I915=m',
-        'CONFIG_DRM_XE=m',
-        'CONFIG_DRM_AMDGPU=m',
-        'CONFIG_DRM_AMDGPU_SI=m',
-        'CONFIG_DRM_AMDGPU_CIK=m',
-        'CONFIG_DRM_RADEON=m',
-        'CONFIG_DRM_NOUVEAU=m',
-        'CONFIG_DRM_GMA500=m',
-        'CONFIG_DRM_MGAG200=m',
-        'CONFIG_DRM_AST=m',
-        'CONFIG_DRM_UDL=m',
-        'CONFIG_DRM_VBOXVIDEO=m',
-    ):
-        assert modular in cfg, modular
-        assert modular.replace('=m', '=y') not in cfg, modular
-    for folded in (
-        'CONFIG_DRM_I915=y',
-        'CONFIG_DRM_AMDGPU=y',
-        'CONFIG_DRM_AMD_DC=y',
-    ):
-        assert folded not in cfg, folded
-    # The arm64 device fold of the same file keeps its built-ins.
-    for kept in ('CONFIG_DRM_VC4=y', 'CONFIG_DRM_ROCKCHIP=y'):
-        assert kept in cfg, kept
-
-
-def test_no_local_copy_in_consumer_repos() -> None:
-    """The sibling consumer repos carry NO copy of the shared data: their
-    former locations are gone (the engine checkout is the single source)."""
-    for repo, stale in (
-        (
-            REPO.parent / "debian-bootc",
-            "workflows/bootc-debs-builder/kernel/patches-shared.yml",
-        ),
-        (
-            REPO.parent / "debian-bootc",
-            "workflows/bootc-debs-builder/kernel/kconfig-shared/x86-common.cfg",
-        ),
-    ):
-        if repo.is_dir():
-            assert not (repo / stale).exists()
-
-
-def test_engine_exports_ci_kernel_shared() -> None:
-    """build-deb.sh exports CI_KERNEL_SHARED next to CI_SCRIPTS in
-    run_build, so every build shell sees the shared directory."""
+def test_engine_carries_no_kernel_package_data() -> None:
+    """The engine's former shared kernel data is GONE: no build-deb/
+    kernel-shared directory, no CI_KERNEL_SHARED export in build-deb.sh,
+    and shared_data_hash answers none (no engine-side term in any cache
+    key any more — the product checkout's checkout hash covers the data)."""
+    assert not (REPO / "build-deb" / "kernel-shared").exists()
     text = BUILD_DEB_SH.read_text(encoding="utf-8")
-    assert 'export CI_KERNEL_SHARED' in text
-    assert "kernel-shared" in text
+    assert "CI_KERNEL_SHARED" not in text
+    r = subprocess.run(
+        [
+            "bash", "-c",
+            f'. "{CONTENT_HASH_SH}"\nBUILD="echo x"\nshared_data_hash'
+        ],
+        capture_output=True,
+        text=True,
+    )
+    assert r.returncode == 0, r.stderr
+    assert r.stdout.strip() == "none"
 
 
-def test_bore_excluded_on_all_current_series() -> None:
-    """The bore sibling is series-gated: CachyOS carries no 7.0 dir, and the
-    2026-11-04 upstream bore (renamed 0001-bore-cachy.patch) no longer applies
-    to any vanilla tree (fair.c LOG->NONE drift; dry-run FAIL on 7.2.15 and
-    7.3) — the entry is DORMANT, excluded on every active series; the helper
-    filter honours it. Re-arm by removing the excludes when upstream matches
-    vanilla again.
+def test_base_config_values() -> None:
+    """The base config keeps the surviving arbitration values: the network/
+    display built-ins fold, the GPU drivers stay =m, SQUASHFS=m (the ISO
+    livefs needs it — R-855b) and NR_CPUS=512 (MAXSMP dropped, R-872b)."""
+    cfg = (KERNEL_SRC / "config.cfg").read_text(encoding="utf-8")
+    for present in (
+        "CONFIG_E1000=y",
+        "CONFIG_R8169=y",
+        "CONFIG_DRM_VC4=y",
+        "CONFIG_DRM_ROCKCHIP=y",
+        "CONFIG_NR_CPUS=512",
+        "CONFIG_SQUASHFS=m",
+        "CONFIG_DRM_I915=m",
+        "CONFIG_DRM_AMDGPU=m",
+        "CONFIG_FUSE_FS=m",
+    ):
+        assert present in cfg, present
+    for gone in ("CONFIG_MAXSMP=y", ):
+        assert gone not in cfg, gone
+    # CONFIG_DRM_AMD_DC=y is BACK in the base (the FULL union R-869b kept
+    # the distro value; the profile still flips the DC bits it owns).
 
-    Re-probed 2026-11-09 (ARM OPTI mandate): the CachyOS siblings
-    {6.12, 7.2, 7.3} STILL fail the fuzz-0 dry-run on vanilla 7.2.15
-    (7.2: 9/22 hunks failed, the same fair.c drift; the 6.12 sibling fails
-    outright) — the exclusion stays, no pin, K-PORT documented in the
-    entry comment.
-    """
-    import yaml  # noqa: PLC0415 — local import keeps the module import light
 
-    doc = yaml.safe_load((SHARED_DATA / "patches-shared.yml").read_text())
-    bore = next(p for p in doc["patches"] if p["name"] == "bore")
+def test_patch_manifest_schema_and_gates() -> None:
+    """The canonical manifests carry the declarative schema and the known
+    gates: the bore sibling stays series-excluded (re-armed 2026-11-09, the
+    CachyOS dry-run still fails fuzz-0 on vanilla 7.2.15) and the ARM OPTI
+    completions stay sha-pinned stage-common entries."""
+    doc = yaml.safe_load(
+        (KERNEL_SRC / "patches" / "kernel.yml").read_text(encoding="utf-8")
+    )
+    names = {p["name"]: p for p in doc["patches"]}
+    bore = names["bore"]
     assert bore["exclude-series"] == ["7.0", "7.1", "7.2", "7.3"]
     helper = (REPO / "scripts" / "kernel_helpers.sh").read_text()
     assert "exclude-series" in helper
+    completion = names["0166-sched-fair-remove-upper-limit"]
+    assert completion["stage"] == "common"
+    assert completion["license"] == "GPL-2.0-only"
+    assert completion["sha256"] == (
+        "e6a7bfa9844f5f6bde6ef0a149dd58a7ad7dcfceae45cb08a9a4fd638d6ff0e9"
+    )
+    # K-PORTed by run 42713342754 (mainline MEMCG_CHARGE_BATCH BUILD_BUG_ON):
+    assert "0174-memcg-charge-batch-128" not in names
+    # the msm devfreq siblings are K-PORT (run 42715501467):
+    assert "msm-adreno-devfreq-ifpc-relax" not in names
+    pve = yaml.safe_load(
+        (KERNEL_SRC / "patches" / "pve.yml").read_text(encoding="utf-8")
+    )
+    assert isinstance(pve.get("patches"), list) and pve["patches"]
 
 
-def test_arm_opti_entries_pinned_and_staged() -> None:
-    """ARM OPTI (owner mandate 2026-11-09): the two clearlinux generic
-    completions enter as stage-common entries with sha256 pins. The msm
-    adreno devfreq IFPC siblings are BOTH K-PORT (run 42715501467,
-    linux-image-ia-armv8.0): [17/17] uses ADRENO_QUIRK_IFPC which only its
-    dropped [16/17] sibling introduces, so the arm64 kernel build dies at
-    msm_gpu_devfreq.c:162. The bore entry stays dormant and carries no pin
-    while excluded."""
+def test_device_module_fragments_live_in_the_product_repo() -> None:
+    """The per-device module fragments are lane data of the debian-bootc
+    checkout (the engine keeps nothing); every declared device carries its
+    fragment file."""
+    embedded = KERNEL_SRC / "modules" / "embeded"
+    for device in (
+        "rpi3",
+        "rpi4",
+        "rpi5",
+        "rk3588",
+        "rk3566",
+        "rk3399",
+        "h616",
+        "imx8m",
+        "mt8183",
+    ):
+        assert (embedded / f"{device}.cfg").is_file(), device
+    for profile in ("ia", "gaming"):
+        assert (KERNEL_SRC / "modules" / "gpu" / profile).is_dir(), profile
+
+
+def test_packages_yml_reads_the_product_checkout() -> None:
+    """The debian-bootc packages.yml resolves its kernel data from its own
+    checkout: the BASE_CONFIG and the patch/kconfig paths point inside
+    kernel-src, and the track entry still requires the engine election
+    (require-patches: engine — resolved by track.sh from THIS repo)."""
+    packages = (PRODUCT / "workflows" / "bootc-debs-builder" / "packages.yml")
+    text = packages.read_text(encoding="utf-8")
+    assert "kernel-src/config.cfg" in text
+    assert "kernel-src/patches/kernel.yml" in text
+    assert "CI_KERNEL_SHARED" not in text
+    assert "require-patches: engine" in text
     import yaml  # noqa: PLC0415 — local import keeps the module import light
 
-    doc = yaml.safe_load((SHARED_DATA / "patches-shared.yml").read_text())
-    entries = {p["name"]: p for p in doc["patches"]}
-    assert entries["0166-sched-fair-remove-upper-limit"]["stage"] == "common"
-    # 0174-memcg-charge-batch-128 K-PORTED (run 42713342754): applies fuzz-0
-    # but mainline BUILD_BUG_ON(MEMCG_CHARGE_BATCH > S8_MAX) kills the build.
-    assert "0174-memcg-charge-batch-128" not in entries
-    assert "0166-sched-fair-remove-upper-limit" in entries
-    assert entries["0166-sched-fair-remove-upper-limit"]["license"] == \
-        "GPL-2.0-only"
-    assert "msm-adreno-devfreq-ifpc-relax" not in entries
-    pins = {p["name"]: p["sha256"] for p in doc["patches"] if p.get("sha256")}
-    # the pin recorded by the 2026-11-09 dry-run proof
-    assert pins["0166-sched-fair-remove-upper-limit"] == \
-        "e6a7bfa9844f5f6bde6ef0a149dd58a7ad7dcfceae45cb08a9a4fd638d6ff0e9"
-
-
-def test_engine_exports_resolve() -> None:
-    """The export resolves to the committed directory in a plain bash.
-
-    The wrapper file lives in a temp dir so that `bash <wrapper>` gives
-    build-deb.sh a real ${BASH_SOURCE[0]} (sourcing it from /dev/stdin
-    would resolve its own `dirname` to /dev and break . content-hash.sh).
-    """
-    r = _write_temp_runner()
-    shared, scripts = r.stdout.strip().split("|")
-    assert r.returncode == 0, r.stderr
-    assert Path(shared).resolve() == SHARED_DATA.resolve()
-    assert Path(scripts).resolve() == (REPO / "scripts").resolve()
-
-
-def test_shared_term_feeds_the_hash() -> None:
-    """content_hash appends the shared term only for builds that consume
-    CI_KERNEL_SHARED; a non-consumer build keeps the published formula."""
-    script = (
-        f'. "{CONTENT_HASH_SH}"\n'
-        'PACKAGE=x ARCH=amd64 SOURCES= UPSTREAM= EXTRA_ENV=\n'
-        'BUILD="echo \\${CI_KERNEL_SHARED}"\n'
-        'shared=$(shared_data_hash)\n'
-        '[[ "$shared" != none ]] || fail=1\n'
-        'BUILD="echo plain-build"\n'
-        'plain=$(shared_data_hash)\n'
-        'printf "%s|%s" "${shared:-}" "$plain"\n'
+    doc = yaml.safe_load(text)
+    offenders = [
+        p["name"] for p in doc["packages"]
+        if isinstance(p, dict) and "patches" in p
+    ]
+    assert not offenders, (
+        "production entries carry no native patch data (the canonical set "
+        f"is kernel-src/patches): {offenders}"
     )
-    r = subprocess.run(["bash", "-c", script], capture_output=True, text=True)
-    assert r.returncode == 0, r.stderr
-    shared, plain = r.stdout.split("|")
-    assert len(shared) == 64
-    assert plain == "none"

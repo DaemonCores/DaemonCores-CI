@@ -564,15 +564,14 @@ def test_resolve_walks_an_old_point_release_of_a_failing_series(
     assert 'dry-run FAIL on 7.3.3' in result.stderr
 
 
-def _kernel_with_engine(api: Path, engine: Path, available: set[str]) -> None:
-    """Point ``require-patches: engine`` at a fake engine.
+def _kernel_with_engine(api: Path, available: set[str]) -> None:
+    """Point ``require-patches: engine`` at a fake product checkout.
 
     The series dirs use the xanmod layout ({seriesdir}/{topic}); some
     series are unavailable (e.g. 7.3 without a bore sibling).
 
     Args:
-        api: API tree root.
-        engine: Fake engine root receiving the shared manifests.
+        api: API tree root (receiving the kernel-src patch set).
         available: Series whose bore sibling exists.
     """
     (api / 'packages.yml').write_text(
@@ -586,8 +585,10 @@ def _kernel_with_engine(api: Path, engine: Path, available: set[str]) -> None:
     (cdn / 'sha256sums.asc').write_text(
         f'{DIGEST}  linux-7.3.1.tar.xz\n{DIGEST}  linux-7.2.11.tar.xz\n'
     )
-    shared = engine / 'build-deb' / 'kernel-shared'
-    shared.mkdir(parents=True)
+    # Owner 11/11 (R-871b): the election set resolves from the PRODUCT
+    # checkout being tracked — kernel-src/patches next to the manifest.
+    patches = api / 'kernel-src' / 'patches'
+    patches.mkdir(parents=True)
     for series in ('7.3', '7.2'):
         sdir = api / f'linux-{series}.y-xanmod'
         sdir.mkdir(exist_ok=True)
@@ -599,7 +600,14 @@ def _kernel_with_engine(api: Path, engine: Path, available: set[str]) -> None:
         f'  - url: file://{api}/{{seriesdir}}/topic/0001-xanmod-bore.patch\n'
         '    topic: topic\n'
     )
-    (shared / 'patches-shared.yml').write_text(manifest)
+    # The election set names kernel.yml + pve.yml + the kernel-tree gpu
+    # sets: empty sets are a no-op of the dry-run judge (the empty-manifest
+    # contract).
+    (patches / 'kernel.yml').write_text(manifest)
+    for name in ('pve.yml', 'gpu/amd.yml', 'gpu/intel.yml'):
+        dest = patches / name
+        dest.parent.mkdir(exist_ok=True)
+        dest.write_text('patches: []\n')
     releases = [{
         'moniker': 'stable',
         'version': '7.3.1',
@@ -615,23 +623,22 @@ def _kernel_with_engine(api: Path, engine: Path, available: set[str]) -> None:
 def test_resolve_engine_mode_falls_back_to_the_covered_series(
     api: Path, tmp_path: Path
 ) -> None:
-    """``require-patches: engine`` probes the engine's shared set.
+    """``require-patches: engine`` probes the product's kernel-src set.
 
     The newest series whose every patch is upstream wins (7.3 without
     bore → 7.2).
 
     Args:
         api: API tree fixture.
-        tmp_path: Scratch directory holding the fake engine root.
+        tmp_path: Scratch directory for the election cache.
     """
-    _kernel_with_engine(api, tmp_path / 'engine', {'7.2'})
+    _kernel_with_engine(api, {'7.2'})
     result = _run(
         api,
         'resolve',
         PKG='kernel',
         BASE_ENV='A=1',
         KERNEL_ORG_URL=f'file://{api}',
-        CI_ENGINE_ROOT=str(tmp_path / 'engine')
     )
     assert result.returncode == 0, result.stderr
     assert _env_output(api) == [
