@@ -16,7 +16,7 @@ WAVE_COUNT = 4
 def main(path: str) -> None:
     """Read the manifest JSON at ``path`` and append the wave outputs."""
     with open(path, encoding="utf-8") as handle:
-        pkgs = json.load(handle)["packages"]
+        pkgs = json.load(handle)["packages"] or []
     deps = {p["name"]: (p.get("deps") or []) for p in pkgs}
     memo: dict[str, int] = {}
 

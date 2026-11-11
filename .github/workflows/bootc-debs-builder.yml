@@ -110,8 +110,17 @@ jobs:
             | select(.name == env(ONLY) or (.name | test("^" + env(ONLY) + "-")))]' \
             "$man" > "$man.tmp"
           kept=$(yq '.packages | length' "$man.tmp")
-          test "${kept:-0}" -gt 0 \
-            || { echo "ERROR: only=${ONLY} matched 0 packages in the expanded manifest" >&2; exit 1; }
+          # An amd64-only package family (zfs-module-pve, gpu sets, ...) is a
+          # clean no-op on arm64: empty manifest -> waves == '[]' -> every
+          # matrix below skips. 0 matches on amd64 still means a typo in
+          # `only` (it owns every family's canonical spelling) = hard error.
+          if test "${kept:-0}" -eq 0; then
+            if test "${{ inputs.arch }}" = "amd64"; then
+              { echo "ERROR: only=${ONLY} matched 0 packages in the expanded manifest (amd64)" >&2; exit 1; }
+            fi
+            echo "WARN: only=${ONLY} matched 0 packages on arch=${{ inputs.arch }} — skipping this arch (amd64-only family)" >&2
+            yq -o=json '.packages = []' "$man" > "$man.tmp2" && mv "$man.tmp2" "$man.tmp"
+          fi
           yq -P '.' "$man.tmp" > "$man" && rm -f "$man.tmp"
           echo "only=${ONLY}: kept ${kept} package(s):" \
             "$(yq '.packages[].name' "$man" | tr '\n' ' ')"
