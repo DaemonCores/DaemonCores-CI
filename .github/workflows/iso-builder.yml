@@ -326,6 +326,69 @@ jobs:
           echo "ISO_FINAL=${DEST}" >> "$GITHUB_ENV"
           echo "Built: $(du -sh ${DEST})"
 
+      # ─── BOOT SMOKE TEST ──────────────────────────────────────────────────
+      # The ISO must actually boot. Regression this gate exists for
+      # (owner, 2026-11-11): every kernel lane stayed green (disk images
+      # never boot through squashfs) while every published live ISO died in
+      # dracut emergency at initrd-switch-root (the live root /LiveOS/
+      # squashfs.img needs the kernel SQUASHFS module). A failed test blocks
+      # the upload: no dead ISO ever reaches the release again.
+      - name: Boot smoke test the ISO (QEMU)
+        run: |
+          set -euo pipefail
+          ARCH="${{ matrix.arch }}"
+          ISO="${ISO_FINAL}"
+          LOG="out/boot-test-serial.log"
+
+          if [ "${ARCH}" = "amd64" ]; then
+            sudo apt-get update -qq
+            sudo apt-get install -y --no-install-recommends qemu-system-x86 ovmf
+            QEMU="qemu-system-x86_64 -machine q35 -cpu max"
+            FW_ARGS=(-bios /usr/share/ovmf/OVMF.fd)
+          else
+            sudo apt-get update -qq
+            sudo apt-get install -y --no-install-recommends qemu-system-arm qemu-efi-aarch64
+            QEMU="qemu-system-aarch64 -machine virt -cpu max"
+            FW_ARGS=(-pflash /usr/share/qemu-efi-aarch64/QEMU_EFI.fd)
+          fi
+
+          KVM_ARGS=()
+          if [ -e /dev/kvm ]; then
+            KVM_ARGS=(-enable-kvm)
+            echo "KVM available"
+          else
+            echo "no /dev/kvm — TCG (slow but one-boot smoke)" >&2
+          fi
+
+          # 600 s: firmware + dracut live init + squashfs mount + switch root.
+          # Pass signal: systemd reached the live OS past the initramfs
+          # (dracut/switch-root finished, systemd targets [OK]). Hard fail:
+          # any dracut emergency shell.
+          set +e
+          timeout 600 ${QEMU} ${KVM_ARGS[@]+${KVM_ARGS[@]}} \
+            "${FW_ARGS[@]}" \
+            -m 4096 -smp 2 -display none \
+            -cdrom "${ISO}" \
+            -serial file:"${LOG}" 2>&1 | tail -5
+          RC=$?
+          set -e
+
+          echo "== boot serial log (head) =="
+          head -40 "${LOG}" 2>/dev/null || echo "EMPTY SERIAL LOG"
+          if [ "${RC}" -ne 124 ]; then
+            echo "QEMU exited with ${RC} before the timeout — firmware/boot failure" >&2
+            exit 1
+          fi
+          if grep -qE "emergency mode|dracut-emergency|initrd-switch-root.service.*[Ff]ailed" "${LOG}"; then
+            echo "::error::live ISO boot FAILED — dracut emergency (see head of ${LOG})"
+            exit 1
+          fi
+          if ! grep -qE "Switching root|switch root|Reached target Basic System|Started" "${LOG}"; then
+            echo "::error::live ISO boot did not reach the live OS within 600 s (no switch-root/systemd progress in serial log)" >&2
+            exit 1
+          fi
+          echo "ISO boot smoke test PASSED"
+
       # ─── UPLOAD ───────────────────────────────────────────────────────────
 
       - name: Upload ISO to release
