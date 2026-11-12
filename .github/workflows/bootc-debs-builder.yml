@@ -106,6 +106,9 @@ jobs:
         run: |
           set -euo pipefail
           man="${{ steps.expand.outputs.manifest }}"
+          # The FULL expanded map, captured BEFORE the keep filter: the
+          # closure reads the dependency edges of the dropped packages.
+          yq -o=json '.' "$man" > "$man.full.json"
           yq -o=json '.packages = [.packages[]
             | select(.name == env(ONLY) or (.name | test("^" + env(ONLY) + "-")))]' \
             "$man" > "$man.tmp"
@@ -132,10 +135,9 @@ jobs:
           # without its profile kernel (Module.symvers) — the kernel debs ride
           # the content cache, so the cycle stays a minutes affair (the plain
           # filter died on the empty /tmp/prior pool, run 43224452266).
-          yq -o=json '.' "$man" > "$man.json"
-          python3 .ci-tooling/scripts/only-deps-closure.py "$man.json" "$ONLY"
-          python3 .ci-tooling/scripts/prune_unsatisfiable_deps.py "$man.json"
-          yq -P '.' "$man.json" > "$man" && rm -f "$man.json"
+          python3 .ci-tooling/scripts/only-deps-closure.py "$man.full.json" "$ONLY"
+          python3 .ci-tooling/scripts/prune_unsatisfiable_deps.py "$man.full.json"
+          yq -P '.' "$man.full.json" > "$man" && rm -f "$man.full.json"
 
       - name: Compute dependency waves
         id: waves
