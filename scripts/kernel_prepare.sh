@@ -60,7 +60,7 @@ kernel_prepare() {
   apt-get update
   apt-get install -y --no-install-recommends \
     build-essential libncurses-dev bison flex libssl-dev libelf-dev bc \
-    rsync libudev-dev elfutils dpkg-dev curl xz-utils
+    rsync libudev-dev elfutils dpkg-dev libdw-dev curl xz-utils
 
   # Download the kernel.org tarball of the version the common deb was built
   # from (the upstream part of BUILT_VER, before the package revision), so the
