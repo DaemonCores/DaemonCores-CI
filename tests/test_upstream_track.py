@@ -35,6 +35,20 @@ MANIFEST = """packages:
 """
 
 
+def _tarball_digest(api: Path, version: str) -> str:
+    """The sha256 of the fixture tarball ``api/cdn/linux-<version>.tar.xz``.
+
+    Args:
+        api: API tree root.
+        version: The fixture kernel version the tarball was written for.
+    """
+    import hashlib
+
+    return hashlib.sha256(
+        (api / 'cdn' / f'linux-{version}.tar.xz').read_bytes()
+    ).hexdigest()
+
+
 def _release(root: Path, repo: str, tag: str, assets: dict[str, str]) -> None:
     """Write the ``releases/latest`` document of ``repo``.
 
@@ -354,37 +368,21 @@ def test_check_matches_kernel_deb_revision(api: Path) -> None:
 def _kernel_with_patches(api: Path, available: set[str]) -> None:
     """Write two stable series and a patch manifest served for some of them.
 
+    Delegated to the end-to-end election helper: REAL tarballs + a REAL
+    fuzz-0 patch, so the dry-run judge is hermetic (it must never depend
+    on trees leaked in /tmp/dc-kernel-elect by other runs).
+
     Args:
         api: API tree root.
         available: Series (e.g. ``7.2``) whose patch file exists.
     """
-    (api / 'packages.yml').write_text(
-        KERNEL_MANIFEST.replace(
-            'kernel-org: stable',
-            'kernel-org: stable\n        require-patches: patches.yml'
-        )
+    _kernel_election(
+        api,
+        [
+            ('7.2.11', '7.2' in available),
+            ('7.1.20', '7.1' in available),
+        ],
     )
-    cdn = api / 'cdn'
-    cdn.mkdir(exist_ok=True)
-    (cdn / 'sha256sums.asc').write_text(
-        f'{DIGEST}  linux-7.2.11.tar.xz\n{DIGEST}  linux-7.1.20.tar.xz\n'
-    )
-    for series in ('7.2', '7.1'):
-        (api / series).mkdir(exist_ok=True)
-        if series in available:
-            (api / series / 'bore.patch').write_text('x')
-    (api / 'patches.yml'
-     ).write_text(f'patches:\n  - url: file://{api}/{{series}}/bore.patch\n')
-    releases = [{
-        'moniker': 'stable',
-        'version': '7.2.11',
-        'source': f'file://{cdn}/linux-7.2.11.tar.xz'
-    }, {
-        'moniker': 'stable',
-        'version': '7.1.20',
-        'source': f'file://{cdn}/linux-7.1.20.tar.xz'
-    }]
-    (api / 'releases.json').write_text(json.dumps({'releases': releases}))
 
 
 def test_resolve_skips_a_kernel_the_patches_do_not_cover(api: Path) -> None:
@@ -403,7 +401,8 @@ def test_resolve_skips_a_kernel_the_patches_do_not_cover(api: Path) -> None:
     )
     assert result.returncode == 0, result.stderr
     assert _env_output(api) == [
-        'A=1', 'KERNEL_VER=7.1.20', f'KERNEL_SHA256={DIGEST}'
+        'A=1', 'KERNEL_VER=7.1.20',
+        f'KERNEL_SHA256={_tarball_digest(api, "7.1.20")}'
     ]
 
 
@@ -589,21 +588,39 @@ def _kernel_with_engine(api: Path, available: set[str]) -> None:
     # checkout being tracked — kernel-src/patches next to the manifest.
     patches = api / 'kernel-src' / 'patches'
     patches.mkdir(parents=True)
-    for series in ('7.3', '7.2'):
+    cdn = api / 'cdn'
+    cdn.mkdir(exist_ok=True)
+    (cdn / 'sha256sums.asc').write_text('')
+    for series, version in (('7.3', '7.3.1'), ('7.2', '7.2.11')):
+        # REAL tarball: the dry-run judge extracts it (hermetic fixtures,
+        # no cache leak from other runs).
+        staging = api / f'linux-{version}'
+        staging.mkdir(exist_ok=True)
+        (staging / 'k').write_text('feature\n')
+        tarball = cdn / f'linux-{version}.tar.xz'
+        subprocess.run([
+            'tar', '-cJf', str(tarball), '-C', str(api), f'linux-{version}'
+        ], check=True)
+        digest = hashlib.sha256(tarball.read_bytes()).hexdigest()
+        with (cdn / 'sha256sums.asc').open('a') as sums:
+            sums.write(f'{digest}  linux-{version}.tar.xz\n')
         sdir = api / f'linux-{series}.y-xanmod'
-        sdir.mkdir(exist_ok=True)
-        (sdir / 'topic').mkdir(exist_ok=True)
-        if series in available:
-            (sdir / 'topic' / '0001-xanmod-bore.patch').write_text('x')
+        (sdir / 'topic').mkdir(parents=True, exist_ok=True)
+        (sdir / 'topic' / '0001-xanmod-bore.patch').write_text(
+            '--- a/k\n+++ b/k\n@@ -1 +1,2 @@\n' +
+            (' feature\n+elected\n' if series in available
+             else ' absent\n+elected\n')
+        )
     manifest = (
         'patches:\n'
-        f'  - url: file://{api}/{{seriesdir}}/topic/0001-xanmod-bore.patch\n'
+        '  - name: bore\n'
+        '    stage: common\n'
+        f'    url: file://{api}/{{seriesdir}}/topic/0001-xanmod-bore.patch\n'
         '    topic: topic\n'
     )
-    # The election set names kernel.yml + pve.yml + the kernel-tree gpu
-    # sets: empty sets are a no-op of the dry-run judge (the empty-manifest
-    # contract).
     (patches / 'kernel.yml').write_text(manifest)
+    # The election set also names pve.yml + the kernel-tree gpu sets: empty
+    # sets are a no-op of the dry-run judge (the empty-manifest contract).
     for name in ('pve.yml', 'gpu/amd.yml', 'gpu/intel.yml'):
         dest = patches / name
         dest.parent.mkdir(exist_ok=True)
@@ -642,7 +659,8 @@ def test_resolve_engine_mode_falls_back_to_the_covered_series(
     )
     assert result.returncode == 0, result.stderr
     assert _env_output(api) == [
-        'A=1', 'KERNEL_VER=7.2.11', f'KERNEL_SHA256={DIGEST}'
+        'A=1', 'KERNEL_VER=7.2.11',
+        f'KERNEL_SHA256={_tarball_digest(api, "7.2.11")}'
     ]
 
 
