@@ -24,9 +24,9 @@ def main(path: str, only: str) -> None:
     info = {
         p["name"]: p for p in pkgs if isinstance(p, dict) and "name" in p
     }
+    prefix = only if only.endswith("-") else only + "-"
     keep = {
-        name for name in info
-        if name == only or name.startswith(only + "-")
+        name for name in info if name == only or name.startswith(prefix)
     }
     frontier = collections.deque(keep)
     while frontier:

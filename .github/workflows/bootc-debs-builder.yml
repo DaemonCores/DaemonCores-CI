@@ -103,14 +103,20 @@ jobs:
         shell: bash
         env:
           ONLY: ${{ inputs.only }}
+          # A family prefix may end with a dash (only=gpu- matches every
+          # gpu-* variant); a bare name keeps its exact-name plus -variants
+          # semantics.
+          PREFIX: ${{ inputs.only }}
         run: |
           set -euo pipefail
+          [[ "${PREFIX}" == *- ]] || { PREFIX="${PREFIX}-"; }
+          export PREFIX
           man="${{ steps.expand.outputs.manifest }}"
           # The FULL expanded map, captured BEFORE the keep filter: the
           # closure reads the dependency edges of the dropped packages.
           yq -o=json '.' "$man" > "$man.full.json"
           yq -o=json '.packages = [.packages[]
-            | select(.name == env(ONLY) or (.name | test("^" + env(ONLY) + "-")))]' \
+            | select(.name == env(ONLY) or (.name | test("^" + env(PREFIX))))]' \
             "$man" > "$man.tmp"
           kept=$(yq '.packages | length' "$man.tmp")
           # An amd64-only package family (zfs-module-pve, gpu sets, ...) is a
