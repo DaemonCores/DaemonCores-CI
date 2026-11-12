@@ -128,7 +128,12 @@ jobs:
           # wave, no /tmp/prior deb): strip them so the package builds with
           # its OWN fallback source (zfs-module-pve: the published APT
           # index of a previous green run). Unfiltered path untouched.
+          # Dependency closure FIRST: a consumer (gpu/modules) cannot build
+          # without its profile kernel (Module.symvers) — the kernel debs ride
+          # the content cache, so the cycle stays a minutes affair (the plain
+          # filter died on the empty /tmp/prior pool, run 43224452266).
           yq -o=json '.' "$man" > "$man.json"
+          python3 .ci-tooling/scripts/only-deps-closure.py "$man.json" "$ONLY"
           python3 .ci-tooling/scripts/prune_unsatisfiable_deps.py "$man.json"
           yq -P '.' "$man.json" > "$man" && rm -f "$man.json"
 
