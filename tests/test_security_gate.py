@@ -219,6 +219,43 @@ def test_ghsa_published_advisory_holds_the_source(
     assert 'GHSA-aaaa-bbbb-cccc' in p.stderr
 
 
+def test_ghsa_hold_is_version_aware(tmp_path: Path, election: Path) -> None:
+    """An advisory PATChed below the candidate no longer holds.
+
+    The 2026-11-13 ostree case: five published advisories, every one
+    patched in <= 2026.5, the elected release 2026.6 — the gate held on
+    the mere existence of advisories and blocked the build. The hold must
+    apply only while the candidate stays below a declared patched version.
+
+    Args:
+        tmp_path: Pytest scratch directory.
+        election: Election log directory.
+    """
+    api = tmp_path / 'api'
+    adv = api / 'repos' / 'acme' / 'tool'
+    adv.mkdir(parents=True)
+    (adv / 'security-advisories').write_text(
+        json.dumps([{
+            'ghsa_id': 'GHSA-aaaa-bbbb-cccc',
+            'state': 'published',
+            'vulnerabilities': [{
+                'patched_versions': '2026.5',
+                'vulnerable_version_range': '<= 2026.4'
+            }]
+        }])
+    )
+    fetch = "fetch_api() { curl -fsSL 'file://" + str(adv) + \
+        "/security-advisories'; }; "
+    # Patched candidate: pass.
+    p = _gate(fetch + "gate_flux '' acme/tool 2026.6", election, PKG='r')
+    assert p.returncode == 0, p.stderr
+    assert 'GHSA HOLD' not in p.stderr
+    # Vulnerable candidate: hold.
+    p = _gate(fetch + "gate_flux '' acme/tool 2026.4", election, PKG='r')
+    assert p.returncode == 3, p.stderr
+    assert 'GHSA-aaaa-bbbb-cccc' in p.stderr
+
+
 def _kev_fixture(tmp_path: Path, linux: bool) -> Path:
     """A CISA KEV feed fixture with (or without) a Linux kernel entry.
 

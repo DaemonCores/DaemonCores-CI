@@ -479,7 +479,7 @@ gate_judge() {
       "HOLD ${PKG} ${key}: ${GATE_JUDGE_REASON} (id ${id})"
     return 3
   fi
-  if gate_flux "${osv}" "${ghr}"; then
+  if gate_flux "${osv}" "${ghr}" "${id}"; then
     flux_verdict="pass"
   else
     rc=$?

@@ -139,14 +139,44 @@ gate_osv() {
 #   $1 - owner/name
 #######################################
 gate_ghsa() {
-  local repo="$1" resp ids
+  local repo="$1" cand="${2:-}" resp hits=()
+  local id state patched
   resp=$(fetch_api "repos/${repo}/security-advisories?per_page=30" 2>/dev/null) \
     || return 1
-  ids=$(yq -p=json -r '.[] | select(.state == "published") | .ghsa_id' \
-    <<<"${resp}" 2>/dev/null | grep -v '^$' | sort -u)
-  if [[ -n "${ids}" ]]; then
-    gate_log hold ghsa "$(tr '\n' ' ' <<<"${ids}" | xargs)" \
-      "GHSA HOLD: ${ids} published advisory(ies) on source ${repo}"
+  # A published advisory HOLDS only when the CANDIDATE version is still
+  # inside its vulnerable range, i.e. below every patched version it
+  # declares. Without a candidate version (commit pin, no release id) any
+  # published advisory holds, as before.
+  local line
+  while IFS= read -r line; do
+    [[ -n "${line}" ]] || continue
+    read -r id state patched range <<<"${line}"
+    [[ "${state}" == "published" ]] || continue
+    if [[ -z "${cand}" ]]; then
+      hits+=("${id}")
+      continue
+    fi
+    # Satisfied when the candidate is >= the highest patched version of
+    # every advisory that carries one; an advisory without any patched
+    # version holds unconditionally.
+    local v satisfied=0
+    for v in ${patched}; do
+      [[ -n "${v}" ]] || continue
+      if dpkg --compare-versions "${cand}" ge "${v}" 2>/dev/null; then
+        satisfied=1
+      else
+        satisfied=0
+        break
+      fi
+    done
+    [[ "${satisfied}" -eq 1 ]] || hits+=("${id}")
+  done < <(yq -p=json -r '.[] | select(.state == "published") |
+      [.ghsa_id, .state,
+       ((.vulnerabilities // []) | map(.patched_versions // "") | join(" "))]
+      | @tsv' <<<"${resp}" 2>/dev/null)
+  if ((${#hits[@]})); then
+    gate_log hold ghsa "$(printf '%s ' "${hits[@]}" | xargs)" \
+      "GHSA HOLD: $(printf '%s ' "${hits[@]}" | xargs) published advisory(ies) on source ${repo} (candidate ${cand:-unknown})"
     return 3
   fi
   return 0
@@ -166,7 +196,7 @@ gate_flux() {
   rc=$?
   [[ "${rc}" -eq 0 ]] || return "${rc}"
   if [[ -n "$2" ]]; then
-    gate_ghsa "$2"
+    gate_ghsa "$2" "${3:-}"
     rc=$?
     if [[ "${rc}" -eq 1 ]]; then
       gate_log warn flux unreachable \
