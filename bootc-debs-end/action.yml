@@ -109,7 +109,18 @@ runs:
         find debs -maxdepth 1 -name '*.deb' -exec cp {} "${cache}/" \; 2>/dev/null \
           || true
         out="${cache}/hashes.json"
-        echo '{}' >"${out}"
+        # SEED from the published map (monotonic cache): a run that only
+        # rebuilds a subset must NOT drop the other packages' entries, or
+        # the next run loses its prior hashes and rebuilds everything
+        # (the union-era 2h-loop: every run rebuilt all kernels because
+        # the map was reset to {} then pruned).
+        owner="${GITHUB_REPOSITORY%%/*}"
+        prior_url="https://${owner,,}.github.io/${GITHUB_REPOSITORY#*/}/debs-cache/hashes.json"
+        [[ -n "${PAGES_URL:-}" ]] && prior_url="${PAGES_URL%/}/debs-cache/hashes.json"
+        curl -fsSL "${prior_url}" -o "${out}" 2>/dev/null \
+          || echo '{}' >"${out}"
+        jq -e 'type == "object"' "${out}" >/dev/null 2>&1 \
+          || echo '{}' >"${out}"
         # /debs/.meta/<pkg>.json is written by the build-deb action per package.
         shopt -s nullglob
         for meta in debs/.meta/*.json; do
