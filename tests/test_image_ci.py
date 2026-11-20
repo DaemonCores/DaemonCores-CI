@@ -95,6 +95,9 @@ echo '{"mesa-amd64":"1","linux-image-amd64":"2","mesa-arm64":"3"}'
 
 TRIVY = """#!/bin/bash
 echo "trivy $*" >>"${STUB_LOG}"
+case " $* " in
+  *" --exit-code 5 "*) exit "${TRIVY_ENFORCED_RC:-0}" ;;
+esac
 [ -z "${FAIL_TRIVY:-}" ]
 """
 
@@ -885,6 +888,34 @@ def test_scan_is_report_only_and_removes_its_archive(sb: Sandbox) -> None:
     assert len(sb.calls('trivy image --input')) == 1
     assert 'warning::vulnerability scan of latest failed' in done.stdout
     assert not (sb.runner_temp / 'image-ci' / 'scan-image.tar').exists()
+
+
+@needs_jq
+def test_enforced_scan_fails_the_image_on_a_fixable_finding(
+    sb: Sandbox
+) -> None:
+    """TRIVY_ENFORCE=1: a finding fails the image; the default never does."""
+    done = sb.run([entry('latest', twin='-nosign')], TRIVY_ENFORCE='1',
+                  TRIVY_ENFORCED_RC='5', TRIVY_IGNOREFILE='/x/.trivyignore')
+    assert done.returncode != 0
+    assert 'image latest: scan-failed' in done.stdout
+    enforced = sb.calls('trivy image --input')[1]
+    assert '--severity CRITICAL' in enforced
+    assert '--ignorefile /x/.trivyignore' in enforced
+    done = sb.run([entry('latest', twin='-nosign')], TRIVY_ENFORCED_RC='5')
+    assert done.returncode == 0, done.stderr
+    assert 'scan-failed' not in done.stdout
+
+
+@needs_jq
+def test_enforced_scan_treats_a_scanner_error_as_a_warning(
+    sb: Sandbox
+) -> None:
+    """Exit 1 (database unreachable) is not a vulnerability."""
+    done = sb.run([entry('latest', twin='-nosign')], TRIVY_ENFORCE='1',
+                  TRIVY_ENFORCED_RC='1')
+    assert done.returncode == 0, done.stderr
+    assert 'enforced vulnerability scan of latest could not run' in done.stdout
 
 
 # ----------------------------------------------------------- push, sign ----

@@ -13,7 +13,7 @@
 # Every image has a state in a TSV file; a failure is recorded and the loop
 # goes on with the next image. States:
 #   pending  skipped-unchanged  built  linted  ok  pushed   (progress)
-#   build-failed lint-failed test-failed blocked push-failed (failures)
+#   build-failed lint-failed test-failed scan-failed blocked push-failed (failures)
 # The report (results table, serial logs of failed images) is written by an
 # EXIT trap; the exit status is 1 when any image failed or the signature did.
 #
@@ -38,6 +38,11 @@
 #                      empty: every tag is measured and reported (the figure
 #                      only blocks with RAM_IDLE_ENFORCE=1); 0 elsewhere
 #   TRIVY_SEVERITY     severities reported by the scan (default CRITICAL,HIGH)
+#   TRIVY_ENFORCE      1 makes a fixable finding of TRIVY_ENFORCE_SEVERITY
+#                      (default CRITICAL) fail the image (state scan-failed,
+#                      never pushed); anything else keeps the scan report-only
+#   TRIVY_IGNOREFILE   trivy ignore file of the accepted exceptions (a
+#                      .trivyignore; default: none)
 #   SUDO               command prefix for privileged tools (default sudo)
 #   RUNNER_TEMP, GITHUB_STEP_SUMMARY   Actions scratch dir and summary file
 set -euo pipefail
@@ -47,7 +52,7 @@ CI_ROOT=$(cd "${HERE}/../.." && pwd)
 # shellcheck source=scripts/image-ci/hash.sh
 . "${HERE}/hash.sh"
 
-FAILURE_STATES="build-failed lint-failed test-failed blocked push-failed"
+FAILURE_STATES="build-failed lint-failed test-failed scan-failed blocked push-failed"
 SIGN_FAILED=no
 PREPARED=no
 PREPARE_FAILED=no
@@ -711,9 +716,14 @@ teardown_tests() {
 }
 
 # ------------------------------------------------------------------ scan ---
-# Report only: a finding or a scanner failure never fails the build.
+# Report only by default: a finding or a scanner failure never fails the build.
+# With TRIVY_ENFORCE=1 a second pass fails the image on a fixable finding of
+# TRIVY_ENFORCE_SEVERITY (minus TRIVY_IGNOREFILE). Trivy is told to exit 5 on a
+# finding, so a finding (5) is told apart from a scanner error (1), which stays
+# a warning: an unreachable vulnerability database is not a vulnerability.
+SCAN_FINDING_RC=5
 phase_scan() {
-  local tag archive
+  local tag archive rc
   archive="${STATE_DIR}/scan-image.tar"
   while IFS= read -r tag; do
     [[ "$(row_get "${tag}" "${col_kind}")" == "primary" ]] || continue
@@ -724,6 +734,18 @@ phase_scan() {
         --severity "${TRIVY_SEVERITY:-CRITICAL,HIGH}" --ignore-unfixed \
         --exit-code 0; then
         echo "::warning::vulnerability scan of ${tag} failed (report only)"
+      fi
+      if [[ "${TRIVY_ENFORCE:-}" == "1" ]]; then
+        rc=0
+        trivy image --input "${archive}" --format table \
+          --severity "${TRIVY_ENFORCE_SEVERITY:-CRITICAL}" --ignore-unfixed \
+          ${TRIVY_IGNOREFILE:+--ignorefile "${TRIVY_IGNOREFILE}"} \
+          --exit-code "${SCAN_FINDING_RC}" || rc=$?
+        if [[ "${rc}" -eq "${SCAN_FINDING_RC}" ]]; then
+          set_state "${tag}" scan-failed "fixable ${TRIVY_ENFORCE_SEVERITY:-CRITICAL} vulnerabilities"
+        elif [[ "${rc}" -ne 0 ]]; then
+          echo "::warning::enforced vulnerability scan of ${tag} could not run (exit ${rc})"
+        fi
       fi
     else
       echo "::warning::could not save ${tag} for the vulnerability scan"
