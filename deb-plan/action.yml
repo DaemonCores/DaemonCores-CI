@@ -1,0 +1,54 @@
+name: 'Deb skip plan'
+description: >-
+  Decide before any build job which packages have nothing to build (content hash
+  equal to the published one, or upstream election holding the candidate with a
+  published build) and output the wave matrices without them.
+
+inputs:
+  manifest:
+    description: 'Expanded manifest.'
+    required: true
+  arch:
+    description: 'Target architecture.'
+    required: true
+  waves:
+    description: 'JSON object {"wave0": [...], ...} of the planned waves.'
+    required: true
+  signing-active:
+    description: 'Module signing flag, as forwarded to the build jobs.'
+    required: false
+    default: 'no'
+  token:
+    description: 'Token for the GitHub API (rate limit only).'
+    required: false
+    default: ''
+
+outputs:
+  wave0:
+    description: 'Packages of wave 0 to build.'
+    value: ${{ steps.plan.outputs.wave0 }}
+  wave1:
+    description: 'Packages of wave 1 to build.'
+    value: ${{ steps.plan.outputs.wave1 }}
+  wave2:
+    description: 'Packages of wave 2 to build.'
+    value: ${{ steps.plan.outputs.wave2 }}
+  wave3:
+    description: 'Packages of wave 3 to build.'
+    value: ${{ steps.plan.outputs.wave3 }}
+  skipped:
+    description: 'Packages with nothing to build (carried over by publish).'
+    value: ${{ steps.plan.outputs.skipped }}
+
+runs:
+  using: composite
+  steps:
+    - id: plan
+      shell: bash
+      env:
+        MAN: ${{ inputs.manifest }}
+        ARCH: ${{ inputs.arch }}
+        WAVES: ${{ inputs.waves }}
+        SIGNING_ACTIVE: ${{ inputs.signing-active }}
+        GH_TOKEN: ${{ inputs.token }}
+      run: bash "${GITHUB_ACTION_PATH}/plan.sh"

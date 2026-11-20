@@ -142,9 +142,15 @@ main() {
   # coexist in hashes.json without overwriting each other.
   cache_key="${PACKAGE}-${ARCH:-amd64}"
 
-  prior=$(curl -fsSL "${base}/debs-cache/hashes.json" 2>/dev/null || echo '{}')
-  prior_hash=$(printf '%s' "${prior}" \
-    | jq -r --arg p "${cache_key}" '.[$p].hash // empty')
+  # The published hashes.json is the memory of what was built. Unreadable
+  # (Pages down) is an error, never "nothing was built": that would rebuild
+  # the package, a kernel included, for hours. Absent (first publication) is
+  # the empty object: the package then does its first build.
+  prior=$(fetch_prior_hashes) || {
+    set_output build_failed true
+    return 1
+  }
+  prior_hash=$(prior_field "${prior}" "${cache_key}" '.hash // empty')
 
   # Diagnostics: shows why a package did (not) skip on the next run.
   echo "cache[${cache_key}]: hash=${hash} prior=${prior_hash:-<none>}" \
@@ -152,8 +158,7 @@ main() {
 
   if [[ -n "${prior_hash}" && "${prior_hash}" == "${hash}" ]]; then
     local cached_debs
-    cached_debs=$(printf '%s' "${prior}" \
-      | jq -c --arg p "${cache_key}" '.[$p].debs // []')
+    cached_debs=$(prior_field "${prior}" "${cache_key}" '.debs // []')
     if restore_cached "${base}" "${cached_debs}"; then
       echo "::notice::${PACKAGE} (${ARCH:-amd64}) unchanged; reused cached deb(s)"
       write_meta "${hash}" true "${cached_debs}"
@@ -168,8 +173,7 @@ main() {
   # and the prior hash, without flagging a failure.
   if [[ "${SKIP_BUILD:-false}" == true && -n "${prior_hash}" ]]; then
     local kept
-    kept=$(printf '%s' "${prior}" \
-      | jq -c --arg p "${cache_key}" '.[$p].debs // []')
+    kept=$(prior_field "${prior}" "${cache_key}" '.debs // []')
     if restore_cached "${base}" "${kept}"; then
       echo "::notice::${PACKAGE} (${ARCH:-amd64}) no eligible upstream release;" \
         "kept the last-good published deb(s)" >&2
@@ -211,8 +215,7 @@ main() {
   fi
 
   local last_debs
-  last_debs=$(printf '%s' "${prior}" \
-    | jq -c --arg p "${cache_key}" '.[$p].debs // []')
+  last_debs=$(prior_field "${prior}" "${cache_key}" '.debs // []')
   if [[ -n "${prior_hash}" ]] && restore_cached "${base}" "${last_debs}"; then
     echo "::warning::${PACKAGE} (${ARCH:-amd64}) build failed; kept the last-good" \
       "published deb(s) and left the cache hash unchanged so the fix is retried" >&2

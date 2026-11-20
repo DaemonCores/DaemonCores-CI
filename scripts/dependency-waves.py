@@ -30,6 +30,13 @@ def main(path: str) -> None:
     waves: dict[int, list[str]] = {}
     for name in deps:
         waves.setdefault(wave(name), []).append(name)
+    # The workflow has one matrix job per wave: a deeper package would be
+    # neither built nor skipped, and the carry-over would keep it stale.
+    too_deep = sorted(n for i, names in waves.items() if i >= WAVE_COUNT
+                      for n in names)
+    if too_deep:
+        sys.exit("dependency chain deeper than %d waves, add a wave job for: %s"
+                 % (WAVE_COUNT, ", ".join(too_deep)))
     with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as out:
         for i in range(WAVE_COUNT):
             out.write("wave%d=%s\n" % (i, json.dumps(sorted(waves.get(i, [])))))

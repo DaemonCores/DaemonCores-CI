@@ -57,6 +57,58 @@ pages_base() {
 }
 
 #######################################
+# Print the published hashes.json (the only memory of what was built).
+# A repository that has not published one yet (HTTP 404) is a FIRST build: the
+# empty object is printed and every package initialises itself. Any other
+# failure (host unavailable, 5xx after the retries) is an error: an unreadable
+# memory must never be read as "nothing was built", that would rebuild every
+# package, kernels included.
+# Globals:
+#   PAGES_URL, GITHUB_REPOSITORY
+# Outputs:
+#   The JSON document on stdout.
+# Returns:
+#   0 on success or 404, 1 when the document cannot be read.
+#######################################
+fetch_prior_hashes() {
+  local url out code rc=0
+  url="$(pages_base)/debs-cache/hashes.json"
+  out=$(mktemp)
+  code=$(curl -sSL --retry 5 --retry-delay 5 --retry-all-errors \
+    -o "${out}" -w '%{http_code}' "${url}") || rc=$?
+  if [[ "${rc}" -eq 37 || "${code}" == 404 ]]; then
+    rm -f "${out}"
+    echo '{}'
+    return 0
+  fi
+  if [[ "${rc}" -ne 0 || ! ( "${code}" == 200 || "${code}" == 000 ) ]]; then
+    rm -f "${out}"
+    echo "::error::cannot read ${url} (curl rc=${rc}, http ${code})" >&2
+    return 1
+  fi
+  jq -e 'type == "object"' "${out}" >/dev/null || {
+    rm -f "${out}"
+    echo "::error::${url} is not a JSON object" >&2
+    return 1
+  }
+  cat "${out}"
+  rm -f "${out}"
+}
+
+#######################################
+# Print one field of a package entry of hashes.json. Package names are matched
+# case-insensitively (Debian names are lower case, a manifest may not be).
+# Arguments:
+#   $1 - hashes.json content
+#   $2 - cache key (<package>-<arch>)
+#   $3 - jq path of the field, e.g. .hash or '.debs // []'
+#######################################
+prior_field() {
+  printf '%s' "$1" | jq -cr --arg k "$2" \
+    "(to_entries | map(select((.key | ascii_downcase) == (\$k | ascii_downcase))) | .[0].value // {}) | $3"
+}
+
+#######################################
 # Hash the contents (not mtimes) of the overlay sources, order-independent.
 # Globals:
 #   SOURCES
@@ -189,6 +241,18 @@ content_hash() {
 }
 
 #######################################
+# Print the DEPS_HASH line value of EXTRA_ENV (digest of the dependency debs the
+# build consumed), empty when the package has no dependency. It is published
+# next to the content hash so the skip plan can recompute the hash of a package
+# whose dependencies were themselves skipped, without downloading them.
+# Globals:
+#   EXTRA_ENV
+#######################################
+deps_hash_of_env() {
+  printf '%s\n' "${EXTRA_ENV:-}" | sed -n 's/^DEPS_HASH=//p' | head -n1
+}
+
+#######################################
 # Write /debs/.meta/<pkg>-<arch>.json describing this package's result.
 # The file is arch-qualified so amd64 and arm64 artifacts don't overwrite
 # each other when merge-multiple merges them in the publish job.
@@ -205,12 +269,17 @@ write_meta() {
   # input (it changes only when the election resolves a new candidate).
   if [[ -n "${ELECTION_RECORD:-}" && -s "${ELECTION_RECORD}" ]]; then
     jq -n --arg h "$1" --argjson s "$2" --argjson d "$3" \
+      --arg dh "$(deps_hash_of_env)" \
       --slurpfile e "${ELECTION_RECORD}" \
-      '{hash: $h, skipped: $s, debs: $d, election: $e[0]}' \
+      '{hash: $h, skipped: $s, debs: $d, election: $e[0]}
+        + (if $dh == "" then {} else {deps_hash: $dh} end)' \
       >"${META_DIR}/${PACKAGE}-${arch}.json"
   else
     jq -n --arg h "$1" --argjson s "$2" --argjson d "$3" \
-      '{hash: $h, skipped: $s, debs: $d}' >"${META_DIR}/${PACKAGE}-${arch}.json"
+      --arg dh "$(deps_hash_of_env)" \
+      '{hash: $h, skipped: $s, debs: $d}
+        + (if $dh == "" then {} else {deps_hash: $dh} end)' \
+      >"${META_DIR}/${PACKAGE}-${arch}.json"
   fi
 }
 

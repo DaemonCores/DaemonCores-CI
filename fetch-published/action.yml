@@ -1,0 +1,31 @@
+name: 'Fetch published dependency debs'
+description: >-
+  Download from the APT repo the debs of the dependencies a package needs that
+  no job of this run rebuilt (their plan verdict was skip), into the directory
+  the artifact download uses. Files already present are kept.
+
+inputs:
+  manifest:
+    description: 'Expanded manifest.'
+    required: true
+  deps:
+    description: 'Space-separated direct dependencies of the package.'
+    required: true
+  arch:
+    description: 'Target architecture.'
+    required: true
+  dest:
+    description: 'Directory receiving the debs.'
+    required: false
+    default: /tmp/prior
+
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        MAN: ${{ inputs.manifest }}
+        DEPS: ${{ inputs.deps }}
+        ARCH: ${{ inputs.arch }}
+        DEST: ${{ inputs.dest }}
+      run: bash "${GITHUB_ACTION_PATH}/fetch.sh"

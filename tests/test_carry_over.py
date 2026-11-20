@@ -44,6 +44,9 @@ def _site(root: Path) -> Path:
 def test_missing_packages_are_kept(tmp_path: Path) -> None:
     """A package absent from the artifact is restored, a present one is not.
 
+    A package whose published deb cannot be fetched fails the script: it is
+    never silently dropped from the repo.
+
     Args:
         tmp_path: Scratch directory.
     """
@@ -58,7 +61,7 @@ def test_missing_packages_are_kept(tmp_path: Path) -> None:
                           capture_output=True,
                           text=True,
                           check=False)
-    assert done.returncode == 0, done.stderr
+    assert done.returncode != 0
     assert (debs / 'b_1_amd64.deb').read_bytes() == b'b'
     meta = json.loads(
         (debs / '.meta' / 'b-amd64.json').read_text(encoding='utf-8')
@@ -70,7 +73,7 @@ def test_missing_packages_are_kept(tmp_path: Path) -> None:
         'fresh': True
     }
     assert not (debs / '.meta' / 'c-amd64.json').exists()
-    assert 'could not restore' in done.stdout
+    assert 'c-amd64: its published deb(s) cannot be restored' in done.stderr
 
 
 def test_no_published_site_is_not_an_error(tmp_path: Path) -> None:
@@ -90,3 +93,43 @@ def test_no_published_site_is_not_an_error(tmp_path: Path) -> None:
                           text=True,
                           check=False)
     assert done.returncode == 0, done.stderr
+
+
+def test_deps_hash_survives_the_carry_over(tmp_path: Path) -> None:
+    """The plan needs the published deps_hash of a package it skipped.
+
+    Args:
+        tmp_path: Scratch directory.
+    """
+    site = tmp_path / 'site'
+    (site / 'debs-cache').mkdir(parents=True)
+    (site / 'debs-cache' / 'a_1_amd64.deb').write_bytes(b'a')
+    (site / 'debs-cache' / 'hashes.json').write_text(json.dumps({
+        'a-amd64': {'hash': 'ha', 'deps_hash': 'dd', 'debs': ['a_1_amd64.deb']}
+    }))
+    debs = tmp_path / 'debs'
+    env = dict(os.environ, DEBS_DIR=str(debs), PAGES_URL=f'file://{site}')
+    done = subprocess.run(['bash', str(SCRIPT)], env=env,
+                          capture_output=True, text=True, check=False)
+    assert done.returncode == 0, done.stderr
+    meta = json.loads((debs / '.meta' / 'a-amd64.json').read_text())
+    assert meta['deps_hash'] == 'dd'
+
+
+def test_an_unreadable_published_state_stops_the_publication(
+    tmp_path: Path
+) -> None:
+    """A garbled hashes.json is an error, not "nothing to keep".
+
+    Args:
+        tmp_path: Scratch directory.
+    """
+    site = tmp_path / 'site'
+    (site / 'debs-cache').mkdir(parents=True)
+    (site / 'debs-cache' / 'hashes.json').write_text('<html>503</html>')
+    env = dict(os.environ, DEBS_DIR=str(tmp_path / 'debs'),
+               PAGES_URL=f'file://{site}')
+    done = subprocess.run(['bash', str(SCRIPT)], env=env,
+                          capture_output=True, text=True, check=False)
+    assert done.returncode != 0
+    assert 'not a JSON object' in done.stderr

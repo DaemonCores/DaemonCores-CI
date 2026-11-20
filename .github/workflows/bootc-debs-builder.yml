@@ -169,9 +169,64 @@ jobs:
             echo "WAVES: ${ln}"
           done
 
-  wave0:
+  # SKIP PLAN (owner order 20/11): an unchanged package costs no job. The plan
+  # recomputes every package's content hash with the formula of build-deb.sh and
+  # compares it with the published debs-cache/hashes.json (the only memory, no
+  # bot commit); the wave matrices below only list what must be built. A
+  # package never published is built (its first build initialises it).
+  plan:
     needs: setup
-    if: ${{ needs.setup.outputs.wave0 != '[]' }}
+    if: ${{ needs.setup.outputs.wave0 != '[]' || needs.setup.outputs.wave1 != '[]' || needs.setup.outputs.wave2 != '[]' || needs.setup.outputs.wave3 != '[]' }}
+    runs-on: ${{ inputs.arch == 'arm64' && 'ubuntu-24.04-arm' || 'ubuntu-latest' }}
+    container:
+      image: ${{ needs.setup.outputs.env_image }}
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ github.token }}
+    permissions:
+      contents: read
+      packages: read
+      issues: write
+    env:
+      SECRETVAL_GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      SECRETVAL_SB_SIGNING_KEY: ${{ secrets.SB_SIGNING_KEY }}
+      SECRETVAL_SB_SIGNING_CERT: ${{ secrets.SB_SIGNING_CERT }}
+      MODULE_SIGNING_KEY: ${{ secrets.MODULE_SIGNING_KEY }}
+      MODULE_SIGNING_CERT: ${{ secrets.MODULE_SIGNING_CERT }}
+      BUILD_ARCH: ${{ inputs.arch }}
+    outputs:
+      wave0: ${{ steps.plan.outputs.wave0 }}
+      wave1: ${{ steps.plan.outputs.wave1 }}
+      wave2: ${{ steps.plan.outputs.wave2 }}
+      wave3: ${{ steps.plan.outputs.wave3 }}
+    steps:
+      - uses: DaemonCores/DaemonCores-CI/bootc-debs-start@main
+
+      - name: Expand manifest variants
+        id: expand
+        uses: DaemonCores/DaemonCores-CI/manifest-expand@main
+        with:
+          arch: ${{ inputs.arch }}
+          unsigned-kernel: 'no'
+          gpu-driver: ${{ inputs.gpu_driver == 'yes' && 'yes' || 'no' }}
+
+      - name: Plan what must be built
+        id: plan
+        uses: DaemonCores/DaemonCores-CI/deb-plan@main
+        with:
+          manifest: ${{ steps.expand.outputs.manifest }}
+          arch: ${{ inputs.arch }}
+          signing-active: ${{ inputs.signing_active }}
+          token: ${{ github.token }}
+          waves: >-
+            {"wave0": ${{ needs.setup.outputs.wave0 }},
+            "wave1": ${{ needs.setup.outputs.wave1 }},
+            "wave2": ${{ needs.setup.outputs.wave2 }},
+            "wave3": ${{ needs.setup.outputs.wave3 }}}
+
+  wave0:
+    needs: [setup, plan]
+    if: ${{ needs.plan.result == 'success' && needs.plan.outputs.wave0 != '[]' }}
     permissions:
       actions: write
       issues: write
@@ -180,7 +235,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        package: ${{ fromJSON(needs.setup.outputs.wave0) }}
+        package: ${{ fromJSON(needs.plan.outputs.wave0) }}
     uses: DaemonCores/DaemonCores-CI/.github/workflows/build-one-deb.yml@main
     with:
       package: ${{ matrix.package }}
@@ -190,8 +245,8 @@ jobs:
     secrets: inherit
 
   wave1:
-    needs: [setup, wave0]
-    if: ${{ always() && !cancelled() && needs.setup.outputs.wave1 != '[]' }}
+    needs: [setup, plan, wave0]
+    if: ${{ always() && !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.wave1 != '[]' }}
     permissions:
       actions: write
       issues: write
@@ -200,7 +255,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        package: ${{ fromJSON(needs.setup.outputs.wave1) }}
+        package: ${{ fromJSON(needs.plan.outputs.wave1) }}
     uses: DaemonCores/DaemonCores-CI/.github/workflows/build-one-deb.yml@main
     with:
       package: ${{ matrix.package }}
@@ -210,10 +265,10 @@ jobs:
     secrets: inherit
 
   wave2:
-    needs: [setup, wave1]
+    needs: [setup, plan, wave1]
     # always() lets wave2 run even when wave1 has partial failures (some
     # packages may still build successfully if their specific deps succeeded).
-    if: ${{ always() && !cancelled() && needs.setup.outputs.wave2 != '[]' }}
+    if: ${{ always() && !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.wave2 != '[]' }}
     permissions:
       actions: write
       issues: write
@@ -222,7 +277,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        package: ${{ fromJSON(needs.setup.outputs.wave2) }}
+        package: ${{ fromJSON(needs.plan.outputs.wave2) }}
     uses: DaemonCores/DaemonCores-CI/.github/workflows/build-one-deb.yml@main
     with:
       package: ${{ matrix.package }}
@@ -232,8 +287,8 @@ jobs:
     secrets: inherit
 
   wave3:
-    needs: [setup, wave2]
-    if: ${{ always() && !cancelled() && needs.setup.outputs.wave3 != '[]' }}
+    needs: [setup, plan, wave2]
+    if: ${{ always() && !cancelled() && needs.plan.result == 'success' && needs.plan.outputs.wave3 != '[]' }}
     permissions:
       actions: write
       issues: write
@@ -242,7 +297,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        package: ${{ fromJSON(needs.setup.outputs.wave3) }}
+        package: ${{ fromJSON(needs.plan.outputs.wave3) }}
     uses: DaemonCores/DaemonCores-CI/.github/workflows/build-one-deb.yml@main
     with:
       package: ${{ matrix.package }}
@@ -252,13 +307,15 @@ jobs:
     secrets: inherit
 
   publish:
-    needs: [setup, wave0, wave1, wave2, wave3]
+    needs: [setup, plan, wave0, wave1, wave2, wave3]
     # always() && !cancelled(): run even when some wave jobs fail so that
     # hashes.json is updated for packages that succeeded. Without this,
     # any single failure blocks ALL packages from caching, causing every
     # package to rebuild on every run. Packages that failed without a prior
     # deb have no .meta file and are simply retried next run.
-    if: ${{ always() && !cancelled() }}
+    # The plan must have succeeded: without it nothing says which packages the
+    # carry-over keeps, and an unreadable published state must never publish.
+    if: ${{ always() && !cancelled() && (needs.plan.result == 'success' || needs.plan.result == 'skipped') }}
     runs-on: ubuntu-latest
     permissions:
       pages: write

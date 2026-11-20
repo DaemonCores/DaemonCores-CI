@@ -135,7 +135,18 @@ Source: `firstboot-user-setup` (282 lines). Installer steps today (`src/buildiso
 
 Once every row is covered and tested, `firstboot-user-setup` leaves `Containerfile:122`, `packages.yml:28-55` and its boot-test seeding. The `packages.yml` line shift must respect the `docs-check` citations.
 
-## L4 + L8 design: plan job and per-package waiting (DESIGNED, not yet coded)
+## L4 skip plan (implemented 2026-11-20, awaiting CI evidence) and L8 design (DESIGNED, not yet coded)
+
+Owner requirement: a package with no change here and none upstream costs zero CI seconds, by construction, for every package including future ones. Implemented in DaemonCores-CI:
+- `deb-plan/plan.sh` (job `plan` of `bootc-debs-builder.yml`, in the build container on the arch runner) computes each package's content hash with the formula of `build-deb/content-hash.sh` and compares it, case-insensitively, with the published `debs-cache/hashes.json`. The published file is the only state: no bot commit. The wave matrices are filtered by the plan, so a skipped package starts no job.
+- Verdict `build`: hash differs, never published (the first build initialises the package, it does not fail), a dependency is rebuilt, the published entry has no `deps_hash` yet, the upstream resolution fails (the build job reports why), or a published deb of the entry is not served (a skip must keep a deb that exists). Verdict `skip`: hash equal, or upstream election holds the candidate (care delay) with a served published build.
+- Default inclusion: the plan loops over every name of the waves computed from the manifest, so a new package is planned with no per-package entry; `tests/test_deb_plan.py::test_every_planned_package_gets_a_verdict` pins it, and `scripts/dependency-waves.py` now fails on a chain deeper than the 4 wave jobs instead of dropping the package silently.
+- Skipped packages carry no `.meta`: `bootc-debs-end/carry-over.sh` restores them from the published site at publish, keeping `deps_hash`. It now fails when `hashes.json` is unreadable or a published deb cannot be restored (it used to publish the partial artifact and drop them with a warning). `publish` requires the plan to have succeeded.
+- A rebuilt dependent of a skipped dependency gets that dependency's published debs from `fetch-published/` (never next to a rebuilt version of the same dependency).
+- `build-deb.sh` no longer reads an unreachable `hashes.json` as "nothing built" (that rebuilt everything, kernels for hours, when Pages was down); 404 is the only "absent".
+- Not done here: the dynamic matrix with `wait_for` (L8), and the content-addressed build cache (separate requirement: build-time speed when a package changed, never a build/skip criterion).
+
+Original design notes (L4 + L8):
 
 Source: architect-opus report, files read in `build-deb/build-deb.sh`, `build-one-deb.yml`,
 `bootc-debs-builder.yml`, `bootc-debs-end/action.yml`. Status of each step is tracked here.

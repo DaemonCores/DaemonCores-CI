@@ -132,6 +132,16 @@ jobs:
           merge-multiple: true
           path: /tmp/prior
 
+      # A dependency whose plan verdict was skip has no artifact: its published
+      # debs come from the APT repo. Artifact files already in /tmp/prior win.
+      - name: Fetch published dependency debs
+        if: steps.def.outputs.deps != ''
+        uses: DaemonCores/DaemonCores-CI/fetch-published@main
+        with:
+          manifest: ${{ steps.expand.outputs.manifest }}
+          deps: ${{ steps.def.outputs.deps }}
+          arch: ${{ inputs.arch }}
+
       - name: Install dependency debs
         id: depdebs
         if: steps.def.outputs.deps != ''
