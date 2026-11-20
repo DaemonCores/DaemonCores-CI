@@ -53,7 +53,14 @@ kernel_prepare() {
     }
   # Extract version + kernel version from the deb without installing it.
   BUILT_VER=$(dpkg-deb -f "${COMMON_DEB}" Version)
-  KVER=$(dpkg-deb -f "${COMMON_DEB}" Package | sed 's/^daemoncores-kernel-//')
+  # The release string is the versioned virtual the kernel deb Provides
+  # (linux-image-<KVER> (= <version>)); the package name itself carries the
+  # profile and flavour, never the release. A deb of the retired naming has no
+  # such Provides and still names the release in its Package field.
+  KVER=$(dpkg-deb -f "${COMMON_DEB}" Provides \
+    | sed -n 's/.*\(^\|, \)linux-image-\([0-9][^ ,]*\) (=.*/\2/p')
+  [[ -n "${KVER}" ]] \
+    || KVER=$(dpkg-deb -f "${COMMON_DEB}" Package | sed 's/^daemoncores-kernel-//')
 
   # Install kernel build deps (build-essential + the kernel's own
   # build-deps). libncurses-dev/bc are required by the kconfig merge.

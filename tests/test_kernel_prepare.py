@@ -9,8 +9,8 @@ _DRIVER = r'''
 set -euo pipefail
 source "$1"
 apt-get() { :; }
-dpkg-deb() { case "$2" in Version) echo 7.2.14-1;; Package) echo daemoncores-kernel-7.2.14;; esac; }
-kernel_fetch_source() { echo "$COMMON_DEB"; exit 0; }
+dpkg-deb() { case "$3" in Version) echo 7.2.14-1;; Package) echo "${STUB_PACKAGE:-daemoncores-kernel-7.2.14}";; Provides) echo "${STUB_PROVIDES:-}";; esac; }
+kernel_fetch_source() { echo "$COMMON_DEB"; echo "KVER=$KVER" >&2; exit 0; }
 DEB_ARCH=amd64
 kernel_prepare
 '''
@@ -50,7 +50,25 @@ def test_deb_found_in_debs_dir(tmp_path: Path) -> None:
     deb.write_bytes(b'')
     done = _run(tmp_path, DEBS_DIR=str(debs))
     assert done.returncode == 0, done.stderr
-    assert done.stdout.strip() == str(deb)
+    assert done.stdout.splitlines()[0] == str(deb)
+    assert 'KVER=7.2.14' in done.stderr
+
+
+def test_kver_comes_from_the_versioned_provides(tmp_path: Path) -> None:
+    """A versionless kernel deb names its release through Provides.
+
+    Args:
+        tmp_path: Scratch directory.
+    """
+    debs = tmp_path / 'debs'
+    debs.mkdir()
+    (debs / 'linux-image-common_7.2.14-1_amd64.deb').write_bytes(b'')
+    done = _run(tmp_path, DEBS_DIR=str(debs),
+                STUB_PACKAGE='linux-image-ia-x64v2',
+                STUB_PROVIDES='linux-image-minimal-ia-x64v2, '
+                'linux-image-7.2.14-ia (= 7.2.14-1), daemoncores-kernel')
+    assert done.returncode == 0, done.stderr
+    assert 'KVER=7.2.14-ia' in done.stderr
 
 
 def test_missing_deb_is_an_error(tmp_path: Path) -> None:
