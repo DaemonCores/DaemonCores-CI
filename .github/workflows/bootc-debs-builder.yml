@@ -205,16 +205,17 @@ jobs:
       - name: Expand manifest variants
         id: expand
         uses: DaemonCores/DaemonCores-CI/manifest-expand@main
+        # Same call as the build jobs (build-one-deb.yml): the plan must read
+        # the very package definitions they hash.
         with:
-          arch: ${{ inputs.arch }}
-          unsigned-kernel: 'no'
-          gpu-driver: ${{ inputs.gpu_driver == 'yes' && 'yes' || 'no' }}
+          manifest: workflows/bootc-debs-builder/packages.yml
 
       - name: Plan what must be built
         id: plan
         uses: DaemonCores/DaemonCores-CI/deb-plan@main
         with:
           manifest: ${{ steps.expand.outputs.manifest }}
+          source-manifest: workflows/bootc-debs-builder/packages.yml
           arch: ${{ inputs.arch }}
           signing-active: ${{ inputs.signing_active }}
           token: ${{ github.token }}

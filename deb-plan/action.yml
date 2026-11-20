@@ -8,6 +8,9 @@ inputs:
   manifest:
     description: 'Expanded manifest.'
     required: true
+  source-manifest:
+    description: 'Manifest the expanded one comes from: its directory holds kernel-src/patches (same value as the build job).'
+    required: true
   arch:
     description: 'Target architecture.'
     required: true
@@ -47,6 +50,7 @@ runs:
       shell: bash
       env:
         MAN: ${{ inputs.manifest }}
+        SOURCE_MAN: ${{ inputs.source-manifest }}
         ARCH: ${{ inputs.arch }}
         WAVES: ${{ inputs.waves }}
         SIGNING_ACTIVE: ${{ inputs.signing-active }}
