@@ -105,3 +105,40 @@ def test_without_skip_a_failing_build_is_still_a_failure(
     done, out, _ = _run(tmp_path, 'false', 'exit 1')
     assert done.returncode == 0, done.stderr
     assert 'build_failed=true' in out
+
+
+def test_skip_without_prior_deb_fails_before_building(
+    tmp_path: Path
+) -> None:
+    """No eligible release and nothing published: fail, never run the build.
+
+    Args:
+        tmp_path: Scratch directory.
+    """
+    marker = tmp_path / 'ran'
+    pages = tmp_path / 'pages'
+    (pages / 'debs-cache').mkdir(parents=True)
+    (pages / 'debs-cache' / 'hashes.json').write_text('{}')
+    out = tmp_path / 'out'
+    out.touch()
+    debs = tmp_path / 'debs'
+    debs.mkdir()
+    env = {
+        'PATH': '/usr/bin:/bin',
+        'PACKAGE': 'kernel',
+        'ARCH': 'amd64',
+        'BUILD': f'touch {marker}',
+        'PAGES_URL': f'file://{pages}',
+        'GITHUB_OUTPUT': str(out),
+        'GITHUB_WORKSPACE': str(tmp_path),
+        'DEBS_DIR': str(debs),
+        'SKIP_BUILD': 'true',
+    }
+    done = subprocess.run(['bash', str(SCRIPT)],
+                          env=env,
+                          capture_output=True,
+                          text=True)
+    assert done.returncode != 0
+    assert 'no eligible upstream release' in done.stderr
+    assert 'build_failed=true' in out.read_text().splitlines()
+    assert not marker.exists()

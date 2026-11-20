@@ -179,6 +179,16 @@ main() {
     fi
   fi
 
+  # Nothing to build AND no published deb to keep: running the build would only
+  # die on the unset tracked version (KERNEL_VER: unbound variable) and hide the
+  # real cause. Fail here, naming it.
+  if [[ "${SKIP_BUILD:-false}" == true ]]; then
+    echo "::error::${PACKAGE} (${ARCH:-amd64}) has no eligible upstream release" \
+      "and no published deb to keep; see the upstream-track election log" >&2
+    set_output build_failed true
+    return 1
+  fi
+
   # Build. On failure (compile error, or a content check the build runs after
   # patching a file) do NOT ship a broken package: fall back to the last-good
   # deb(s) published on Pages, leave hashes.json at its prior hash so the fix is
