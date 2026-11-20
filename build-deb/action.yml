@@ -61,7 +61,23 @@ inputs:
     type: string
     default: 'amd64'
 
+  hash-only:
+    description: >-
+      'true' to only compute the content hash (output `hash`) and stop: the
+      workflow uses it as the key of the build cache restored before the build.
+    required: false
+    default: 'false'
+  cache-dir:
+    description: >-
+      Directory the workflow restores/saves (actions/cache keyed by the content
+      hash). A successful build is stored there and reused for the same hash.
+    required: false
+    default: ''
+
 outputs:
+  from_build_cache:
+    description: 'true when the debs came from the hash-addressed build cache.'
+    value: ${{ steps.run.outputs.from_build_cache }}
   skipped:
     description: 'true when the cached deb was reused, false when it was built.'
     value: ${{ steps.run.outputs.skipped }}
@@ -91,6 +107,8 @@ runs:
         ARCH: ${{ inputs.arch }}
         SKIP_BUILD: ${{ inputs.skip }}
         ELECTION_RECORD: ${{ inputs.election-record }}
+        HASH_ONLY: ${{ inputs.hash-only }}
+        DEB_CACHE_DIR: ${{ inputs.cache-dir }}
       run: bash "${GITHUB_ACTION_PATH}/build-deb.sh"
 
     # P-44/P-45 drain: the build may have signed kernel modules with the

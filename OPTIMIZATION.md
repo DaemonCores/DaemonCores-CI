@@ -144,7 +144,13 @@ Owner requirement: a package with no change here and none upstream costs zero CI
 - Skipped packages carry no `.meta`: `bootc-debs-end/carry-over.sh` restores them from the published site at publish, keeping `deps_hash`. It now fails when `hashes.json` is unreadable or a published deb cannot be restored (it used to publish the partial artifact and drop them with a warning). `publish` requires the plan to have succeeded.
 - A rebuilt dependent of a skipped dependency gets that dependency's published debs from `fetch-published/` (never next to a rebuilt version of the same dependency).
 - `build-deb.sh` no longer reads an unreachable `hashes.json` as "nothing built" (that rebuilt everything, kernels for hours, when Pages was down); 404 is the only "absent".
-- Not done here: the dynamic matrix with `wait_for` (L8), and the content-addressed build cache (separate requirement: build-time speed when a package changed, never a build/skip criterion).
+- Not done here: the dynamic matrix with `wait_for` (L8).
+
+### Build cache (performance only, implemented 2026-11-20, awaiting CI evidence)
+- Separate requirement from the skip: when a package DID change, a build already done is never repeated. Never a build/skip criterion (the plan decides that).
+- `build-one-deb.yml`: step `chash` (`build-deb` with `hash-only`) outputs the content hash; `actions/cache/restore` restores `/tmp/deb-cache` under the key `deb-<arch>-<package>-<hash>`; `build-deb.sh` reuses the debs there (`restore_build_cache`, each deb must unpack) before running the build; after a real build `save_build_cache` fills the directory and `actions/cache/save` stores it. A kept last-good or a reuse is never saved.
+- Why it exists: a run whose publication failed left `hashes.json` stale, so the next run rebuilt unchanged kernels for about 2 h each. The cache is written by the build job itself, independent of the publish success.
+- Limit: the repository cache quota (LRU eviction) can drop an entry; a miss only costs a build. Compiler objects stay in the ccache step.
 
 Original design notes (L4 + L8):
 

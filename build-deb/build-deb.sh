@@ -25,6 +25,13 @@
 #   CI_SCRIPTS  - (exported) directory of the shared DaemonCores-CI scripts.
 #   SKIP_BUILD  - "true" when there is nothing to build (no eligible upstream
 #                 release yet): the last-good published deb(s) are kept.
+#   HASH_ONLY   - "true" to only compute and output the content hash (the build
+#                 cache key), then stop.
+#   DEB_CACHE_DIR - directory restored/saved by the workflow around the build
+#                 (actions/cache, key = package + arch + content hash). A build
+#                 that succeeded is stored there, so the same hash is never
+#                 built twice even when its publication failed. Performance
+#                 only: never a build/skip criterion (the plan decides that).
 #   PAGES_URL   - APT repo base URL; derived from GITHUB_REPOSITORY if empty.
 #   GITHUB_REPOSITORY, GITHUB_WORKSPACE, GITHUB_OUTPUT - provided by Actions.
 set -euo pipefail
@@ -116,6 +123,46 @@ run_build() {
 }
 
 #######################################
+# Reuse the debs a previous build of this very content hash left in
+# DEB_CACHE_DIR. The key of that directory already embeds the hash.
+# Outputs:
+#   JSON array of the restored deb names on stdout.
+# Returns:
+#   0 when every listed deb was restored and unpacks, 1 otherwise.
+#######################################
+restore_build_cache() {
+  local list f
+  [[ -n "${DEB_CACHE_DIR:-}" && -s "${DEB_CACHE_DIR}/debs.json" ]] || return 1
+  list=$(cat "${DEB_CACHE_DIR}/debs.json")
+  [[ "$(jq 'length' <<<"${list}")" -gt 0 ]] || return 1
+  mkdir -p "${DEBS_DIR}"
+  while IFS= read -r f; do
+    if ! cp -- "${DEB_CACHE_DIR}/${f}" "${DEBS_DIR}/${f}" \
+      || ! dpkg-deb --contents "${DEBS_DIR}/${f}" >/dev/null 2>&1; then
+      echo "::warning::build cache: ${f} is missing or does not unpack" >&2
+      rm -f -- "${DEBS_DIR}/${f}"
+      return 1
+    fi
+  done < <(jq -r '.[]' <<<"${list}")
+  printf '%s' "${list}"
+}
+
+#######################################
+# Store the debs of a successful build in DEB_CACHE_DIR for the workflow to save.
+# Arguments:
+#   $1 - JSON array of the deb names
+#######################################
+save_build_cache() {
+  local f
+  [[ -n "${DEB_CACHE_DIR:-}" ]] || return 0
+  mkdir -p "${DEB_CACHE_DIR}"
+  while IFS= read -r f; do
+    cp -- "${DEBS_DIR}/${f}" "${DEB_CACHE_DIR}/${f}"
+  done < <(jq -r '.[]' <<<"$1")
+  printf '%s' "$1" >"${DEB_CACHE_DIR}/debs.json"
+}
+
+#######################################
 # Build one package, or reuse its cached deb when its inputs are unchanged.
 # Globals:
 #   PACKAGE
@@ -138,6 +185,9 @@ main() {
   base=$(pages_base)
   hash=$(content_hash)
   set_output hash "${hash}"
+  if [[ "${HASH_ONLY:-false}" == true ]]; then
+    return 0
+  fi
   # Arch-qualified cache key: both amd64 and arm64 builds of the same package
   # coexist in hashes.json without overwriting each other.
   cache_key="${PACKAGE}-${ARCH:-amd64}"
@@ -193,6 +243,18 @@ main() {
     return 1
   fi
 
+  # Built before with this very hash (the workflow restored DEB_CACHE_DIR under
+  # the hash-addressed key), whether or not that run got to publish it.
+  local cached
+  if cached=$(restore_build_cache); then
+    echo "::notice::${PACKAGE} (${ARCH:-amd64}) reused its build of this content" \
+      "hash from the build cache"
+    write_meta "${hash}" false "${cached}"
+    set_output skipped false
+    set_output from_build_cache true
+    return 0
+  fi
+
   # Build. On failure (compile error, or a content check the build runs after
   # patching a file) do NOT ship a broken package: fall back to the last-good
   # deb(s) published on Pages, leave hashes.json at its prior hash so the fix is
@@ -209,6 +271,7 @@ main() {
   fi
   if [[ "${ok}" -eq 1 ]]; then
     write_meta "${hash}" false "${debs}"
+    save_build_cache "${debs}"
     set_output skipped false
     echo "::notice::${PACKAGE} (${ARCH:-amd64}) built (${debs})"
     return 0

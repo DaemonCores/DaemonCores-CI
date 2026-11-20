@@ -242,6 +242,30 @@ jobs:
             echo "HASHENV_EOF"
           } >>"$GITHUB_OUTPUT"
 
+      # BUILD CACHE (performance only). The content hash is the key: a package
+      # built once with this very content is never built again, even when the
+      # run that built it failed before publishing. It never decides whether a
+      # package is built or skipped (the plan job does).
+      - name: Content hash of ${{ inputs.package }}
+        id: chash
+        uses: DaemonCores/DaemonCores-CI/build-deb@main
+        with:
+          hash-only: 'true'
+          package: ${{ inputs.package }}
+          upstream: ${{ steps.def.outputs.upstream }}
+          sources: ${{ steps.def.outputs.sources }}
+          env: ${{ steps.track.outputs.env }}
+          build: ${{ steps.def.outputs.build }}
+          arch: ${{ inputs.arch }}
+          extra-env: ${{ steps.hashenv.outputs.lines }}
+
+      - name: Restore the build of this content hash
+        id: bcache
+        uses: actions/cache/restore@v4
+        with:
+          path: /tmp/deb-cache
+          key: deb-${{ inputs.arch }}-${{ inputs.package }}-${{ steps.chash.outputs.hash }}
+
       - name: Build ${{ inputs.package }}
         id: build
         uses: DaemonCores/DaemonCores-CI/build-deb@main
@@ -256,6 +280,15 @@ jobs:
           extra-env: ${{ steps.hashenv.outputs.lines }}
           skip: ${{ steps.track.outputs.skip }}
           election-record: ${{ steps.track.outputs.election }}
+          cache-dir: /tmp/deb-cache
+
+      # Only a real build is stored: not a reuse, not a kept last-good.
+      - name: Save the build of this content hash
+        if: steps.bcache.outputs.cache-hit != 'true' && steps.build.outputs.skipped == 'false' && steps.build.outputs.from_build_cache != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: /tmp/deb-cache
+          key: deb-${{ inputs.arch }}-${{ inputs.package }}-${{ steps.chash.outputs.hash }}
 
       - name: ccache statistics
         if: always() && steps.def.outputs.signs == 'yes'
