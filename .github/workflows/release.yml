@@ -3,7 +3,8 @@ name: Release
 # Reusable release workflow driven by Conventional Commits.
 #
 # channel=edge    publishes a GitHub pre-release `<prefix><next>-edge.<n>` for
-#                 the evaluated commit; safe to call on every push to main.
+#                 the evaluated commit (`ref`).  The caller decides when: an
+#                 edge tag must only mark a commit whose full pipeline is green.
 # channel=stable  publishes `<prefix><next>` with generated notes.  It only runs
 #                 for a manual trigger (workflow_dispatch) so a stable release
 #                 is always a human decision, never a timer.
@@ -22,6 +23,12 @@ on:
         description: 'Tag prefix'
         type: string
         default: v
+      ref:
+        description: >-
+          Commit to release (the head of the pipeline run being released).
+          Empty means the commit that triggered the caller.
+        type: string
+        default: ''
 
 permissions:
   contents: write
@@ -34,6 +41,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          ref: ${{ inputs.ref || github.sha }}
       - name: Fetch tooling
         uses: actions/checkout@v4
         with:
@@ -45,7 +53,7 @@ jobs:
         id: ver
         env:
           PREFIX: ${{ inputs.prefix }}
-          REF: ${{ github.sha }}
+          REF: ${{ inputs.ref || github.sha }}
         run: bash .ci-tooling/next-version/next-version.sh
       - name: Publish
         env:
@@ -56,6 +64,7 @@ jobs:
           NEXT: ${{ steps.ver.outputs.next }}
           EDGE: ${{ steps.ver.outputs.edge }}
           EVENT: ${{ github.event_name }}
+          TARGET: ${{ inputs.ref || github.sha }}
         run: |
           if [ "$BUMP" = none ]; then
             echo "::notice::No releasable change since the last stable tag."
@@ -64,7 +73,7 @@ jobs:
           case "$CHANNEL" in
             edge)
               tag="${PREFIX}${EDGE}"
-              flags=(--prerelease --notes "Automatic edge build of ${GITHUB_SHA}.")
+              flags=(--prerelease --notes "Automatic edge build of ${TARGET}.")
               ;;
             stable)
               if [ "$EVENT" != workflow_dispatch ]; then
@@ -83,4 +92,4 @@ jobs:
             echo "::notice::${tag} already exists."
             exit 0
           fi
-          gh release create "$tag" --target "$GITHUB_SHA" --title "$tag" "${flags[@]}"
+          gh release create "$tag" --target "$TARGET" --title "$tag" "${flags[@]}"
