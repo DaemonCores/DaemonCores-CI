@@ -94,7 +94,10 @@ command -v sshd >/dev/null 2>&1 || {
 # here when absent so the harness gets the same bootloader path as a full image.
 # bootupd pulls grub-efi-*-signed + shim-signed as dependencies, which provide
 # the shim*.efi files bootupd copies into the ESP.
-command -v bootupd >/dev/null 2>&1 || {
+# The check is on `bootupctl`, the CLI bootc runs: the `bootupd` daemon itself
+# lives in /usr/libexec and is never on PATH, so `command -v bootupd` was always
+# empty and re-installed (upgraded) a package the image already ships.
+command -v bootupctl >/dev/null 2>&1 || {
   apt-get update -qq >/dev/null
   apt-get install -y --no-install-recommends bootupd >/dev/null
 }
