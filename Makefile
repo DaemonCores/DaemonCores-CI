@@ -13,10 +13,10 @@ SHELL_SRCS := $(filter-out scripts/build-img.sh,$(wildcard scripts/*.sh))
 
 .PHONY: admission check test
 
-$(VBIN)/python:
+$(VBIN)/pip:
 	python3 -m venv $(VENV)
 
-admission: $(VBIN)/python
+admission: $(VBIN)/pip
 	@$(VBIN)/pip install --quiet --upgrade ruff yapf docformatter mypy \
 		basedpyright pydoclint bandit pytest pyyaml types-PyYAML
 
