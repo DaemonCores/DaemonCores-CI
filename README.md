@@ -41,7 +41,7 @@ The reusable `full-pipeline.yml` workflow coordinates the following stages:
 | `build-env.yml` | Builds the caller's manifest-defined package build environment for amd64 and arm64. |
 | `bootc-debs-builder.yml` | Reads `packages.yml`, computes dependency waves, and publishes the resulting APT repository. |
 | `build-one-deb.yml` | Builds or reuses one content-addressed Debian package. |
-| `bootc-build.yml` | Discovers image variants, builds them natively, runs QEMU tests, scans images with Trivy (report only), signs images, and publishes manifest lists. |
+| `bootc-build.yml` | Discovers image variants, builds them natively, runs QEMU tests, scans images with Trivy (report only; opt-in `trivy_enforce` fails an image on a fixable CRITICAL finding, exceptions in a `.trivyignore` given by `trivy_ignorefile`), signs images, and publishes manifest lists. |
 | `iso-builder.yml` | Produces online and offline installer ISOs from a Fedora Anaconda environment. |
 | `img-builder.yml` | Produces opt-in raw disk images for supported targets. |
 | `docs-wiki-sync.yml` | Copies `docs/*.md` into a repository wiki (obsolete for DaemonCores repos whose `docs/` is a wiki symlink). |

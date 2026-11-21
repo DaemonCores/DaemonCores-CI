@@ -8,6 +8,20 @@ on:
         type: boolean
         required: false
         default: false
+      trivy_enforce:
+        description: >-
+          Fail an image on a fixable CRITICAL vulnerability (Trivy) instead of
+          only reporting it. Opt-in; the default stays report-only.
+        type: boolean
+        required: false
+        default: false
+      trivy_ignorefile:
+        description: >-
+          Path, relative to the caller repository, of a .trivyignore listing
+          the accepted exceptions of the enforcing scan. Empty: none.
+        type: string
+        required: false
+        default: ''
       bootc_gpg_sha256:
         description: >-
           SHA-256 of the published APT public key, derived by the pipeline from
@@ -262,11 +276,11 @@ jobs:
       - name: Install cosign
         if: github.ref == 'refs/heads/main'
         uses: sigstore/cosign-installer@d58896d6a1865668819e1d91763c7751a165e159 # v3.9.2
-        # LE TAG @v3 = figé sur l'objet tag de la commit pré-arm64 ("default
-        # cosign to v2.5.2"): sur runner arm64 son downloader tombe dans la
-        # branche "linux-arm64 build not available at v0.6.0" et tue le build
-        # image arm64 (vanilla run 42801218509, et la log montrait actions/
-        # checkout+cosign à 398d4b0e = la commit du tag). v3.9.2 = arm64-capable.
+        # The @v3 tag is frozen on the pre-arm64 tag object ("default cosign to
+        # v2.5.2"): on an arm64 runner its downloader falls into the "linux-arm64
+        # build not available at v0.6.0" branch and kills the arm64 image build
+        # (vanilla run 42801218509; the log showed actions/checkout+cosign at
+        # 398d4b0e = the tag commit). v3.9.2 is arm64-capable.
         with:
           cosign-release: v2.6.5
           install-dir: /usr/local/bin
@@ -300,6 +314,8 @@ jobs:
           GLOBAL_HASH: ${{ needs.discover.outputs.global_hash }}
           FORCE_NO_CACHE: ${{ inputs.force_no_cache }}
           BOOTC_GPG_SHA256: ${{ inputs.bootc_gpg_sha256 }}
+          TRIVY_ENFORCE: ${{ inputs.trivy_enforce && '1' || '' }}
+          TRIVY_IGNOREFILE: ${{ inputs.trivy_ignorefile }}
           APT_URL: ${{ inputs.apt_url }}
           COSIGN_PUBLIC_KEY: ${{ secrets.COSIGN_PUBLIC_KEY }}
           COSIGN_PRIVATE_KEY: ${{ secrets.COSIGN_PRIVATE_KEY }}

@@ -17,6 +17,16 @@ on:
         description: 'Product builds on the base_repo upstream and may rebuild it (proxmox-ve-bootc: DaemonCores/debian-bootc; DaemonCores-VE: DaemonCores/proxmox-ve-bootc).'
         type: boolean
         default: false
+      # Trivy enforcement of the image scan, forwarded to bootc-build.yml.
+      # Opt-in: fixable CRITICAL findings fail the image; report-only otherwise.
+      trivy_enforce:
+        description: 'Fail an image on a fixable CRITICAL vulnerability (default: report only).'
+        type: boolean
+        default: false
+      trivy_ignorefile:
+        description: 'Caller-relative .trivyignore of the accepted exceptions of the enforcing scan.'
+        type: string
+        default: ''
       # The upstream repository the product derives FROM (the base rebuild
       # trigger targets it). Default: the debian-bootc base (debian-bootc and
       # proxmox-ve-bootc sit on it). The DaemonCores-VE fork sits on the
@@ -611,6 +621,8 @@ jobs:
       # committed to the Containerfiles).
       bootc_gpg_sha256: ${{ needs.apt_key.outputs.sha256 }}
       apt_url: ${{ needs.apt_key.outputs.url }}
+      trivy_enforce: ${{ inputs.trivy_enforce }}
+      trivy_ignorefile: ${{ inputs.trivy_ignorefile }}
     secrets: inherit
 
   iso:
