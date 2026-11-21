@@ -336,13 +336,13 @@ jobs:
           repo_name: ${{ steps.repo.outputs.name }}
           apt_gpg_key: ${{ secrets.APT_GPG_KEY }}
           skip_pages: ${{ !inputs.deploy_pages }}
-          # ALWAYS carry the prior debs over. Before 14/11 this was armed
-          # only on failure/cancelled, so a SUCCESSFUL scoped run published
-          # its own debs alone and erased the rest of the pool — that is
-          # how the site lost its amd64 half and later the whole index.
-          # carry_over only restores packages the current run did NOT
-          # rebuild (they carry no .meta), so a full run is unaffected.
-          carry_over: true
+          # Carry the prior debs over WHEN THIS JOB DEPLOYS. Before 14/11 it
+          # was armed only on failure/cancelled, so a SUCCESSFUL scoped run
+          # published its own debs alone and erased the rest of the pool.
+          # A per-arch publish with deploy_pages=false deploys nothing (the
+          # final debs_publish job does), so restoring there is useless and
+          # walked into the other arch's unfinished keys (run 44829740030).
+          carry_over: ${{ inputs.deploy_pages }}
 
       # P-44/P-45 drain: the APT repository GPG secret was passed to the
       # publish action above; the final step unsets the env copy of the job.

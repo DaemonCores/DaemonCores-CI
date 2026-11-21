@@ -28,7 +28,7 @@ META_DIR="${DEBS_DIR}/.meta"
 # this run.
 #######################################
 main() {
-  local base prior key hash debs deps_hash f ok carried=0 failed=0
+  local base prior key hash debs deps_hash f ok carried=0 dropped=0
   base=$(pages_base)
   # An unreadable published state must stop the publication: publishing the
   # partial artifact would drop every package this run skipped.
@@ -49,8 +49,13 @@ main() {
         || curl -fsSL "${base}/debs-cache/${f}" -o "${DEBS_DIR}/${f}" || ok=false
     done < <(jq -r '.[]' <<<"${debs}")
     if [[ "${ok}" != true ]]; then
-      echo "::error::${key}: its published deb(s) cannot be restored" >&2
-      failed=$((failed + 1))
+      # Not an error: a deb the site no longer serves cannot be kept, so the
+      # key leaves hashes.json and the next plan builds the package again
+      # ("never published"). Failing here would only block the publication of
+      # everything else (run 44829740030).
+      echo "::warning::${key}: its published deb(s) cannot be restored;" \
+        "dropped, the next plan rebuilds it" >&2
+      dropped=$((dropped + 1))
       continue
     fi
     deps_hash=$(jq -r --arg k "${key}" '.[$k].deps_hash // ""' <<<"${prior}")
@@ -60,8 +65,8 @@ main() {
       >"${META_DIR}/${key}.json"
     carried=$((carried + 1))
   done < <(jq -r 'keys[]' <<<"${prior}")
-  echo "carry-over: ${carried} package(s) kept from the published site"
-  [[ "${failed}" -eq 0 ]] || return 1
+  echo "carry-over: ${carried} package(s) kept from the published site," \
+    "${dropped} dropped"
 }
 
 main "$@"

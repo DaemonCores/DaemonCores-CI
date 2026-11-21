@@ -44,8 +44,9 @@ def _site(root: Path) -> Path:
 def test_missing_packages_are_kept(tmp_path: Path) -> None:
     """A package absent from the artifact is restored, a present one is not.
 
-    A package whose published deb cannot be fetched fails the script: it is
-    never silently dropped from the repo.
+    A package whose published deb is not served is dropped with a warning
+    (its key leaves hashes.json, the next plan rebuilds it); it must not
+    block the publication of the others.
 
     Args:
         tmp_path: Scratch directory.
@@ -61,7 +62,7 @@ def test_missing_packages_are_kept(tmp_path: Path) -> None:
                           capture_output=True,
                           text=True,
                           check=False)
-    assert done.returncode != 0
+    assert done.returncode == 0, done.stderr
     assert (debs / 'b_1_amd64.deb').read_bytes() == b'b'
     meta = json.loads(
         (debs / '.meta' / 'b-amd64.json').read_text(encoding='utf-8')
@@ -73,7 +74,7 @@ def test_missing_packages_are_kept(tmp_path: Path) -> None:
         'fresh': True
     }
     assert not (debs / '.meta' / 'c-amd64.json').exists()
-    assert 'c-amd64: its published deb(s) cannot be restored' in done.stderr
+    assert '::warning::c-amd64: its published deb(s) cannot be restored' in done.stderr
 
 
 def test_no_published_site_is_not_an_error(tmp_path: Path) -> None:
