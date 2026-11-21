@@ -120,7 +120,14 @@ decide() {
     fi
     return 0
   fi
-  local hash ci_env=""
+  local hash ci_env="" build_raw
+  # BUILD must reach the hash byte for byte as the build job receives it: a step
+  # output heredoc loses exactly the one newline before its delimiter, while a
+  # command substitution would strip every trailing newline and change the hash
+  # of every package whose build script ends with one (all of them).
+  build_raw=$(out_value "${def}" build; printf x)
+  build_raw="${build_raw%x}"
+  build_raw="${build_raw%$'\n'}"
   if [[ "$(out_value "${def}" signs)" == yes ]]; then
     ci_env="MODULE_SIGNING_ACTIVE=${SIGNING_ACTIVE:-}"
   fi
@@ -131,7 +138,7 @@ decide() {
     PACKAGE="${pkg}" \
       SOURCES="$(out_value "${def}" sources)" \
       UPSTREAM="$(out_value "${def}" upstream)" \
-      BUILD="$(out_value "${def}" build)" \
+      BUILD="${build_raw}" \
       EXTRA_ENV="$(out_value "${trk}" env)" EXTRA_ENV_CI="${ci_env}"
     export PACKAGE ARCH SOURCES UPSTREAM BUILD EXTRA_ENV EXTRA_ENV_CI
     merge_extra_env

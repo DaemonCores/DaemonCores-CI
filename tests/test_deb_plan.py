@@ -146,6 +146,46 @@ def test_unchanged_packages_are_skipped_whatever_the_case(
     assert json.loads(outs['wave1']) == ['beta'], err
 
 
+def test_a_block_scalar_build_keeps_its_trailing_newline(
+    tmp_path: Path
+) -> None:
+    """A ``build: |`` script hashes with its final newline, as in the build job.
+
+    The build job receives BUILD through a step output heredoc, which keeps
+    that newline; a command substitution in the plan would strip it and make
+    every real package look changed (the manifest always uses block scalars).
+
+    Args:
+        tmp_path: Scratch directory.
+    """
+    ws = _workspace(tmp_path)
+    manifest = ws / 'workflows/bootc-debs-builder/packages.yml'
+    manifest.write_text(
+        'packages:\n  - name: gamma\n    sources: [gamma]\n'
+        '    build: |\n      echo gamma\n      echo more\n')
+    src = 'workflows/bootc-debs-builder/'
+    pages = tmp_path / 'pages'
+    _publish(pages, {
+        'gamma-amd64': {
+            'hash': _hash_of(ws, 'gamma', 'echo gamma\necho more\n',
+                             src + 'gamma'),
+            'debs': []
+        },
+    })
+    env_waves = {'wave0': ['gamma']}
+    out = ws / 'out'
+    out.write_text('')
+    env = {
+        **os.environ, 'MAN': str(manifest), 'ARCH': 'amd64',
+        'WAVES': json.dumps(env_waves), 'GITHUB_OUTPUT': str(out),
+        'PAGES_URL': f'file://{pages}',
+    }
+    done = subprocess.run(['bash', str(PLAN)], cwd=ws, env=env,
+                          capture_output=True, text=True, check=False)
+    assert done.returncode == 0, done.stderr
+    assert 'plan gamma/amd64: skip' in done.stderr, done.stderr
+
+
 def test_a_rebuilt_dependency_rebuilds_its_dependents(tmp_path: Path) -> None:
     """beta is built when Alpha changed, even if beta's own inputs did not.
 
