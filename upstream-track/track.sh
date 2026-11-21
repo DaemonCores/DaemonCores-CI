@@ -117,6 +117,18 @@ fetch_release() {
 }
 
 #######################################
+# Print the published releases of a repository, newest first, one compact JSON
+# document per line (drafts and prereleases dropped). The window is
+# RELEASE_WALK releases (default 10).
+# Arguments:
+#   $1 - owner/name
+#######################################
+release_candidates() {
+  fetch_api "repos/$1/releases?per_page=${RELEASE_WALK:-10}" \
+    | jq -c '.[] | select((.draft | not) and (.prerelease | not))'
+}
+
+#######################################
 # Print the releases.json entry of a kernel.org moniker as JSON.
 # Arguments:
 #   $1 - moniker (mainline, stable or longterm)
@@ -424,6 +436,8 @@ election_require() {
 # Arguments:
 #   $1 - env variable key
 #   $2 - the resolved KEY=VALUE lines (first line KEY=<version|commit>)
+#   $3 - optional: the release JSON the lines were resolved from (its
+#        published_at is the candidate age; default: the latest release)
 # Returns:
 #   0 = adopted (record updated); 3 = hold (nothing adopted)
 #######################################
@@ -455,7 +469,8 @@ gate_judge() {
     kind="release"
     repo=$(PKG="${PKG}" TRACK_KEY="${key}" yq -r \
       '.packages[] | select(.name == strenv(PKG)) | .track[strenv(TRACK_KEY)].repo // ""' "${MAN}")
-    date=$(fetch_release "${repo}" 2>/dev/null \
+    date=$(if [[ -n "${3:-}" ]]; then printf '%s' "$3"; else
+      fetch_release "${repo}" 2>/dev/null; fi \
       | yq -p=json -r '.published_at // ""') || date=""
 
     url=""
@@ -767,6 +782,7 @@ latest_tag() {
 resolve_entry() {
   local pkg="$1" key="$2" sel repo strip release tag version value out
   local pair denv name digest moniker
+  release="${3:-}"
   moniker=$(kernel_moniker "${pkg}" "${key}")
   if [[ -n "${moniker}" ]]; then
     resolve_kernel "${pkg}" "${key}" "${moniker}"
@@ -780,7 +796,7 @@ resolve_entry() {
     resolve_head "${key}" "${repo}"
     return
   fi
-  release=$(fetch_release "${repo}") || return 1
+  [[ -n "${release}" ]] || release=$(fetch_release "${repo}") || return 1
   tag=$(yq -p=json '.tag_name // ""' <<<"${release}")
   [[ -n "${tag}" ]] || return 1
   version="${tag#v}"
@@ -826,6 +842,37 @@ merge_env() {
 }
 
 #######################################
+# The newest release (within RELEASE_WALK) that passes the security gates, for
+# a release-tracked entry whose latest release is held (care delay, open
+# advisory). The held release is adopted by a later run once it passes, so a
+# hold never blocks the package nor leaves it on a stale version.
+# Globals:
+#   PKG
+# Arguments:
+#   $1 - env variable key
+# Outputs:
+#   The resolved KEY=VALUE lines of the adopted release.
+# Returns:
+#   0 = adopted; 3 = no release passes (or not a release-tracked entry)
+#######################################
+adopt_older_release() {
+  local key="$1" repo rel lines
+  [[ -z "$(kernel_moniker "${PKG}" "${key}")" ]] || return 3
+  ! is_head "${PKG}" "${key}" || return 3
+  repo=$(PKG="${PKG}" TRACK_KEY="${key}" yq -r \
+    '.packages[] | select(.name == strenv(PKG)) | .track[strenv(TRACK_KEY)].repo // ""' "${MAN}")
+  [[ -n "${repo}" ]] || return 3
+  while IFS= read -r rel; do
+    [[ -n "${rel}" ]] || continue
+    lines=$(resolve_entry "${PKG}" "${key}" "${rel}") || continue
+    gate_judge "${key}" "${lines}" "${rel}" || continue
+    printf '%s\n' "${lines}"
+    return 0
+  done < <(release_candidates "${repo}")
+  return 3
+}
+
+#######################################
 # Resolve the tracked upstream versions of one package.
 # Globals:
 #   PKG
@@ -838,14 +885,20 @@ merge_env() {
 #   Exits 1 when an entry is unresolved and STRICT is true.
 #######################################
 resolve() {
-  local key lines overrides="" failed=0 skip=false rc
+  local key lines overrides="" failed=0 skip=false rc older
   while IFS= read -r key; do
     [[ -n "${key}" ]] || continue
     rc=0
     lines=$(resolve_entry "${PKG}" "${key}") || rc=$?
     if [[ "${rc}" -eq 0 ]]; then
       gate_judge "${key}" "${lines}" || rc=$?
-      [[ "${rc}" -eq 3 ]] && rc=3
+    fi
+    if [[ "${rc}" -eq 3 ]] && older=$(adopt_older_release "${key}"); then
+      echo "::notice::${PKG}: the newest ${key} is held by the security gates" \
+        "(${GATE_JUDGE_REASON:-gates}); the newest release that passes them is" \
+        "built instead and the held one is adopted once it passes" >&2
+      lines="${older}"
+      rc=0
     fi
     if [[ "${rc}" -eq 0 ]]; then
       overrides+="${lines}"$'\n'

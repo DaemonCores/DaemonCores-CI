@@ -6,9 +6,11 @@ fixture file (``GATE_OSV_FIXTURE``, ``GATE_KEV_FIXTURE``,
 never touch the network.
 """
 
+import http.server
 import json
 import os
 import subprocess
+import threading
 import time
 from pathlib import Path
 
@@ -728,3 +730,121 @@ def test_sbom_first_publish_lists_every_record(tmp_path: Path) -> None:
     assert 'First published SBOM' in changelog
     assert '7.2.15' in changelog
     assert 'bypass' in changelog
+
+
+def _release_api(tmp_path: Path, young: str, old: str) -> Path:
+    """Build an API tree for a release-tracked package with two releases.
+
+    Args:
+        tmp_path: Scratch directory.
+        young: Publication date of the newest release.
+        old: Publication date of the previous release.
+
+    Returns:
+        The API tree root.
+    """
+    api = tmp_path / 'api'
+    api.mkdir()
+    (api / 'packages.yml').write_text(
+        'packages:\n  - name: tool\n    track:\n'
+        '      TOOL_VER:\n        repo: acme/tool\n        strip-v: true\n'
+    )
+    base = api / 'repos' / 'acme' / 'tool'
+    base.mkdir(parents=True)
+    new = {'tag_name': 'v2.0.0', 'published_at': young,
+           'draft': False, 'prerelease': False, 'assets': []}
+    prev = {'tag_name': 'v1.9.0', 'published_at': old,
+            'draft': False, 'prerelease': False, 'assets': []}
+    (base / 'releases').mkdir()
+    (base / 'releases' / 'latest').write_text(json.dumps(new))
+    (base / 'releases.list').write_text(json.dumps([new, prev]))
+    (base / 'security-advisories').write_text('[]')
+    return api
+
+
+@pytest.fixture(name='serve')
+def fixture_serve():
+    """Serve an API tree over HTTP, query string ignored (curl's file:// cannot).
+
+    ``<path>.list`` answers the directory-like ``<path>`` (the releases list).
+
+    Yields:
+        A function mapping an API tree to its base URL.
+    """
+    servers = []
+
+    def start(root: Path) -> str:
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def do_GET(self) -> None:  # noqa: N802
+                path = root / self.path.split('?')[0].lstrip('/')
+                if path.is_dir():
+                    path = path.with_name(path.name + '.list')
+                if not path.is_file():
+                    self.send_error(404)
+                    return
+                body = path.read_bytes()
+                self.send_response(200)
+                self.send_header('Content-Length', str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+            def log_message(self, *args: object) -> None:
+                pass
+
+        server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), Handler)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        servers.append(server)
+        return f'http://127.0.0.1:{server.server_address[1]}'
+
+    yield start
+    for server in servers:
+        server.shutdown()
+
+
+def test_a_held_release_falls_back_to_the_newest_passing_one(
+    tmp_path: Path, serve
+) -> None:
+    """A release younger than CARE_DELAY does not block: the previous one builds.
+
+    Args:
+        tmp_path: Scratch directory.
+        serve: HTTP server factory for the API tree.
+    """
+    api = _release_api(tmp_path, '2026-11-20T00:00:00Z', '2020-01-01T00:00:00Z')
+    env = {
+        'PATH': os.environ['PATH'], 'MAN': str(api / 'packages.yml'),
+        'GITHUB_API_URL': serve(api), 'GITHUB_OUTPUT': str(api / 'out'),
+        'PKG': 'tool', 'ELECTION_DIR': str(api / 'election'),
+        'CARE_DELAY': '2592000',
+    }
+    result = subprocess.run(['bash', str(TRACK), 'resolve'], check=False,
+                            capture_output=True, text=True, env=env,
+                            timeout=60)
+    assert result.returncode == 0, result.stderr
+    out = (api / 'out').read_text()
+    assert 'skip=false' in out
+    assert 'TOOL_VER=1.9.0' in out
+    assert 'security HOLD' not in result.stderr
+    assert 'built instead' in result.stderr
+
+
+def test_every_release_held_stays_a_hold(tmp_path: Path, serve) -> None:
+    """When no release passes the gates the hold is reported, nothing built.
+
+    Args:
+        tmp_path: Scratch directory.
+        serve: HTTP server factory for the API tree.
+    """
+    api = _release_api(tmp_path, '2026-11-20T00:00:00Z', '2026-11-19T00:00:00Z')
+    env = {
+        'PATH': os.environ['PATH'], 'MAN': str(api / 'packages.yml'),
+        'GITHUB_API_URL': serve(api), 'GITHUB_OUTPUT': str(api / 'out'),
+        'PKG': 'tool', 'ELECTION_DIR': str(api / 'election'),
+        'CARE_DELAY': '2592000000',
+    }
+    result = subprocess.run(['bash', str(TRACK), 'resolve'], check=False,
+                            capture_output=True, text=True, env=env,
+                            timeout=60)
+    assert result.returncode == 0, result.stderr
+    assert 'skip=true' in (api / 'out').read_text()
+    assert 'security HOLD' in result.stderr
