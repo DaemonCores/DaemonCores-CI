@@ -373,12 +373,14 @@ PART
       exit 1
     fi
 
+    # (sed -n 1p, not head -1: head exits after one line, sort then dies of
+    # SIGPIPE and pipefail aborts the build once the list outgrows the pipe.)
     # DTB: the phone board DTB. Use the first .dtb under the linux-image
     # tree that is NOT a broadcom one (broadcom = RPi). On a phone target the
     # relevant vendor is qcom/sdm845 or similar.
     DTB=$( (find /target/usr/lib /target/ostree/deploy -type f -name '*.dtb' \
         2>/dev/null || true) \
-      | grep -v '/broadcom/' | sort -V | head -1)
+      | grep -v '/broadcom/' | sort -V | sed -n 1p)
     if [ -z "$DTB" ]; then
       echo "::warning::No phone DTB found; packing boot.img without a DTB." >&2
     fi
