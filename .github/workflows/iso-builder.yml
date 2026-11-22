@@ -372,30 +372,37 @@ jobs:
           # Hosted runners expose /dev/kvm but deny access to the runner user
           # ("Could not access KVM kernel module: Permission denied", the
           # first ISO smoke run): always run TCG. 900 s budget.
-          timeout 900 "${QEMU_ARGS[@]}" \
+          # Success = the login prompt of the live root on the serial console:
+          # it only exists once the initramfs mounted the squashfs root and
+          # switched into it (initrd targets also print "Reached target", which
+          # is why those are not a marker). QEMU is stopped as soon as it shows.
+          "${QEMU_ARGS[@]}" \
             -kernel isoex/vmlinuz -initrd isoex/initrd.img -append "${KARGS}" \
             -m 4096 -smp 2 -display none -accel tcg \
             -cdrom "${ISO}" \
-            -serial "file:${LOG}" || RC=$?
-          echo "qemu RC=${RC:-0}"
-          RC="${RC:-0}"
+            -serial "file:${LOG}" &
+          QPID=$!
+          STATE=timeout
+          for _ in $(seq 900); do
+            if ! kill -0 "${QPID}" 2>/dev/null; then STATE=exited; break; fi
+            if grep -qE "emergency mode|dracut-emergency|Failed to start initrd-switch-root" "${LOG}" 2>/dev/null; then STATE=emergency; break; fi
+            if grep -qE "^[^ ]+ login:|Debian GNU/Linux .*\(ttyS0\)" "${LOG}" 2>/dev/null; then STATE=up; break; fi
+            sleep 1
+          done
+          kill "${QPID}" 2>/dev/null || true
+          wait "${QPID}" 2>/dev/null || true
+          echo "smoke state: ${STATE}"
 
           echo "== boot serial log (head) =="
           head -60 "${LOG}" 2>/dev/null || echo "EMPTY SERIAL LOG"
           echo "== boot serial log (tail) =="
           tail -60 "${LOG}" 2>/dev/null || true
-          if [ "${RC}" -ne 124 ]; then
-            echo "QEMU exited with ${RC} before the timeout — firmware/boot failure" >&2
-            exit 1
-          fi
-          if grep -qE "emergency mode|dracut-emergency|Failed to start initrd-switch-root" "${LOG}"; then
-            echo "::error::live ISO boot FAILED — dracut emergency (see serial log above)"
-            exit 1
-          fi
-          if ! grep -qE "Switching root|Freeing unused kernel memory|Reached target|Started" "${LOG}"; then
-            echo "::error::live ISO boot never got past the initramfs (no live-init progress in the serial log)"
-            exit 1
-          fi
+          case "${STATE}" in
+            up) ;;
+            emergency) echo "::error::live ISO boot FAILED: dracut emergency (see serial log above)"; exit 1 ;;
+            exited) echo "::error::QEMU exited before the live root came up: firmware/boot failure" >&2; exit 1 ;;
+            *) echo "::error::live ISO never reached the login prompt of the live root in 900 s (stuck in the initramfs?)"; exit 1 ;;
+          esac
           echo "ISO boot smoke test PASSED"
 
       # ─── UPLOAD ───────────────────────────────────────────────────────────
