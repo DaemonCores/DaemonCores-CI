@@ -356,7 +356,10 @@ jobs:
             KLABEL="${LABEL}-x86_64"
           else
             QEMU_ARGS=(qemu-system-aarch64 -machine virt -cpu max
-                       -pflash /usr/share/qemu-efi-aarch64/QEMU_EFI.fd)
+                       -bios /usr/share/qemu-efi-aarch64/QEMU_EFI.fd)
+            # -bios, not -pflash: -pflash opens the file read-write and
+            # the root-owned 0644 firmware gives EACCES to the runner user
+            # (run 45069589334: "Could not open ...QEMU_EFI.fd: Permission denied").
             KLABEL="${LABEL}-aarch64"
           fi
 
