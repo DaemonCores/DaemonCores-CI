@@ -136,8 +136,19 @@ jobs:
         with:
           # Need the pre-push commit present locally to diff the pushed range.
           fetch-depth: 0
+      - name: Fetch the shared tooling
+        uses: actions/checkout@v7
+        with:
+          repository: DaemonCores/DaemonCores-CI
+          ref: main
+          path: .ci-tooling
+          persist-credentials: false
       - id: plan
         env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          BRANCH: ${{ github.ref_name }}
+          CALLER_WORKFLOW: ${{ github.workflow_ref }}
           EVENT: ${{ github.event_name }}
           BEFORE: ${{ github.event.before }}
           SHA: ${{ github.sha }}
@@ -157,6 +168,20 @@ jobs:
           # now — see the iso job comment. The arch availability here only
           # governs the img formats.)
           img_rpi=false; img_gallium=false
+          # Failure memory: a stage whose latest run that really ran it was
+          # red/cancelled stays owed. A push forces it again whatever the diff
+          # says, so a green run can never hide a failure proven by an earlier
+          # one. The only state is the run history (no cache, no stored file).
+          # A history that cannot be read fails the plan: unknown != clean.
+          owed_file=$(mktemp)
+          wf="${CALLER_WORKFLOW#*/.github/workflows/}"; wf="${wf%%@*}"
+          python3 .ci-tooling/scripts/owed_stages.py \
+            --repo "$REPO" --workflow "$wf" --branch "$BRANCH" >"$owed_file"
+          while IFS=$'\t' read -r stage url job step; do
+            [ -n "$stage" ] || continue
+            echo "::warning title=owed stage ${stage}::${job} (step: ${step:-?}) failed in ${url} and was never proven green since; forced again"
+          done <"$owed_file"
+          owes() { cut -f1 "$owed_file" | grep -qx "$1"; }
           case "$EVENT" in
             schedule)
               # Monthly full rebuild. img stays opt-in: schedule does NOT build
@@ -177,6 +202,12 @@ jobs:
               # that format (Containerfile, kernel configs, packages.yml).
               # img is NOT rebuilt on a bare pipeline.yml push (the all-rebuild
               # fallback below covers env/debs/image/iso only).
+              if owes env; then env=true; fi
+              if owes debs; then debs=true; fi
+              if owes image; then image=true; fi
+              if owes iso; then iso=true; fi
+              if owes img_rpi; then img_rpi=true; fi
+              if owes img_gallium; then img_gallium=true; fi
               if [ -z "$BEFORE" ] \
                  || [ "$BEFORE" = "0000000000000000000000000000000000000000" ] \
                  || ! git cat-file -e "${BEFORE}^{commit}" 2>/dev/null; then
