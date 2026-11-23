@@ -448,7 +448,7 @@ jobs:
 
           # Hosted runners expose /dev/kvm but deny access to the runner user
           # ("Could not access KVM kernel module: Permission denied", the
-          # first ISO smoke run): always run TCG. 900 s budget.
+          # first ISO smoke run): always run TCG.
           # The NIC is explicit with an empty romfile: the implicit default NIC
           # of the arm64 virt machine asks for efi-virtio.rom, absent on the
           # runner, and QEMU exits (run 45084795463: failed to find romfile
@@ -465,8 +465,16 @@ jobs:
             -cdrom "${ISO}" \
             -serial "file:${LOG}" &
           QPID=$!
+          # TCG speed differs per arch: arm64 under QEMU 8.2.2 reaches the login
+          # prompt in ~380 s locally (DEBUG.md 31) and ~2x slower on the shared
+          # runner, hence a larger budget there. Overridable per run; the login
+          # marker stays mandatory, only the time to reach it grows.
+          case "${{ matrix.arch }}" in
+            arm64) BUDGET="${SMOKE_BUDGET_S:-2400}" ;;
+            *) BUDGET="${SMOKE_BUDGET_S:-900}" ;;
+          esac
           STATE=timeout
-          for _ in $(seq 900); do
+          for _ in $(seq "${BUDGET}"); do
             if ! kill -0 "${QPID}" 2>/dev/null; then STATE=exited; break; fi
             # emergency / bootloop / up / booting: unit-tested on real logs
             # (tests/test_classify_boot_log.py in DaemonCores-CI).
@@ -494,9 +502,9 @@ jobs:
               # prints "userspace" as soon as the kernel ran /init.
               STALL="$(python3 -I .ci-tooling/scripts/classify_boot_log.py --stage "${LOG}")"
               if [ "${STALL}" = "kernel" ]; then
-                echo "::error::live ISO never reached the login prompt of the live root in 900 s: stalled in the KERNEL, before handing over to /init (the initramfs never finished unpacking or starting)"
+                echo "::error::live ISO never reached the login prompt of the live root in ${BUDGET} s: stalled in the KERNEL, before handing over to /init (the initramfs never finished unpacking or starting)"
               else
-                echo "::error::live ISO never reached the login prompt of the live root in 900 s: stalled in USERSPACE, after /init started (see the initrd unit failures above)"
+                echo "::error::live ISO never reached the login prompt of the live root in ${BUDGET} s: stalled in USERSPACE, after /init started (see the initrd unit failures above)"
               fi
               exit 1
               ;;
