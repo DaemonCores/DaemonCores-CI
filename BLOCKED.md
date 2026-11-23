@@ -1,5 +1,6 @@
 
 ## L6 apply of BIOS black-screen fix (debian-bootc)
+RESOLVED 2026-11-23: the tk backend of debian-bootc works again; fix committed in debian-bootc 5886980 (kept below as history).
 Cause proven (see tk note L6). Fix ready: export WLR_RENDERER=pixman in debian-bootc src/buildisopreinstall/var/home/live/.bash_profile + tests/unit/test_live_installer_renderer.py.
 Blocker: writes in debian-bootc denied by tk gate, no active ticket; backend cannot create one.
 Command: cd debian-bootc && tk start L6
