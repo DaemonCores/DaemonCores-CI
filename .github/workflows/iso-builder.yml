@@ -367,7 +367,15 @@ jobs:
                        -bios /usr/share/ovmf/OVMF.fd)
             KLABEL="${LABEL}-x86_64"
           else
-            QEMU_ARGS=(qemu-system-aarch64 -machine virt -cpu max
+            # Not -cpu max: the runner's QEMU 8.2.2 TCG mis-executes the
+            # FEAT_MOPS memset/memcpy the kernel picks when the CPU
+            # advertises MOPS, so free_initmem poisons memory past
+            # __init_end (sched_clock's `cd` included) and the guest dies
+            # silently after "PM: genpd: Disabling unused power domains".
+            # Proved by flipping arm64.nomops (debian-bootc DEBUG.md 29).
+            # neoverse-n2 is a real CPU without MOPS. Drop this once the
+            # runner ships a QEMU that passes with -cpu max.
+            QEMU_ARGS=(qemu-system-aarch64 -machine virt -cpu neoverse-n2
                        -bios /usr/share/qemu-efi-aarch64/QEMU_EFI.fd)
             # -bios, not -pflash: -pflash opens the file read-write and
             # the root-owned 0644 firmware gives EACCES to the runner user
