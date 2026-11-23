@@ -238,8 +238,10 @@ def test_ghsa_hold_is_version_aware(tmp_path: Path, election: Path) -> None:
     adv.mkdir(parents=True)
     (adv / 'security-advisories').write_text(
         json.dumps([{
-            'ghsa_id': 'GHSA-aaaa-bbbb-cccc',
-            'state': 'published',
+            'ghsa_id':
+            'GHSA-aaaa-bbbb-cccc',
+            'state':
+            'published',
             'vulnerabilities': [{
                 'patched_versions': '2026.5',
                 'vulnerable_version_range': '<= 2026.4'
@@ -751,10 +753,20 @@ def _release_api(tmp_path: Path, young: str, old: str) -> Path:
     )
     base = api / 'repos' / 'acme' / 'tool'
     base.mkdir(parents=True)
-    new = {'tag_name': 'v2.0.0', 'published_at': young,
-           'draft': False, 'prerelease': False, 'assets': []}
-    prev = {'tag_name': 'v1.9.0', 'published_at': old,
-            'draft': False, 'prerelease': False, 'assets': []}
+    new = {
+        'tag_name': 'v2.0.0',
+        'published_at': young,
+        'draft': False,
+        'prerelease': False,
+        'assets': []
+    }
+    prev = {
+        'tag_name': 'v1.9.0',
+        'published_at': old,
+        'draft': False,
+        'prerelease': False,
+        'assets': []
+    }
     (base / 'releases').mkdir()
     (base / 'releases' / 'latest').write_text(json.dumps(new))
     (base / 'releases.list').write_text(json.dumps([new, prev]))
@@ -774,7 +786,9 @@ def fixture_serve():
     servers = []
 
     def start(root: Path) -> str:
+
         class Handler(http.server.BaseHTTPRequestHandler):
+
             def do_GET(self) -> None:  # noqa: N802
                 path = root / self.path.split('?')[0].lstrip('/')
                 if path.is_dir():
@@ -812,13 +826,19 @@ def test_a_held_release_falls_back_to_the_newest_passing_one(
     """
     api = _release_api(tmp_path, '2026-11-20T00:00:00Z', '2020-01-01T00:00:00Z')
     env = {
-        'PATH': os.environ['PATH'], 'MAN': str(api / 'packages.yml'),
-        'GITHUB_API_URL': serve(api), 'GITHUB_OUTPUT': str(api / 'out'),
-        'PKG': 'tool', 'ELECTION_DIR': str(api / 'election'),
+        'PATH': os.environ['PATH'],
+        'MAN': str(api / 'packages.yml'),
+        'GITHUB_API_URL': serve(api),
+        'GITHUB_OUTPUT': str(api / 'out'),
+        'PKG': 'tool',
+        'ELECTION_DIR': str(api / 'election'),
         'CARE_DELAY': '2592000',
     }
-    result = subprocess.run(['bash', str(TRACK), 'resolve'], check=False,
-                            capture_output=True, text=True, env=env,
+    result = subprocess.run(['bash', str(TRACK), 'resolve'],
+                            check=False,
+                            capture_output=True,
+                            text=True,
+                            env=env,
                             timeout=60)
     assert result.returncode == 0, result.stderr
     out = (api / 'out').read_text()
@@ -837,13 +857,19 @@ def test_every_release_held_stays_a_hold(tmp_path: Path, serve) -> None:
     """
     api = _release_api(tmp_path, '2026-11-20T00:00:00Z', '2026-11-19T00:00:00Z')
     env = {
-        'PATH': os.environ['PATH'], 'MAN': str(api / 'packages.yml'),
-        'GITHUB_API_URL': serve(api), 'GITHUB_OUTPUT': str(api / 'out'),
-        'PKG': 'tool', 'ELECTION_DIR': str(api / 'election'),
+        'PATH': os.environ['PATH'],
+        'MAN': str(api / 'packages.yml'),
+        'GITHUB_API_URL': serve(api),
+        'GITHUB_OUTPUT': str(api / 'out'),
+        'PKG': 'tool',
+        'ELECTION_DIR': str(api / 'election'),
         'CARE_DELAY': '2592000000',
     }
-    result = subprocess.run(['bash', str(TRACK), 'resolve'], check=False,
-                            capture_output=True, text=True, env=env,
+    result = subprocess.run(['bash', str(TRACK), 'resolve'],
+                            check=False,
+                            capture_output=True,
+                            text=True,
+                            env=env,
                             timeout=60)
     assert result.returncode == 0, result.stderr
     assert 'skip=true' in (api / 'out').read_text()

@@ -14,9 +14,9 @@ BUILD = (
 )
 
 
-def _run(tmp_path: Path, run: str, build: str, **extra: str) -> tuple[
-    subprocess.CompletedProcess[str], list[str], Path
-]:
+def _run(
+    tmp_path: Path, run: str, build: str, **extra: str
+) -> tuple[subprocess.CompletedProcess[str], list[str], Path]:
     """Run build-deb.sh on an empty published site.
 
     Args:
@@ -36,19 +36,25 @@ def _run(tmp_path: Path, run: str, build: str, **extra: str) -> tuple[
     out = tmp_path / f'out-{run}'
     out.touch()
     env = {
-        'PATH': '/usr/bin:/bin', 'PACKAGE': 'tool', 'ARCH': 'amd64',
-        'BUILD': build, 'PAGES_URL': f'file://{pages}',
-        'GITHUB_OUTPUT': str(out), 'GITHUB_WORKSPACE': str(tmp_path),
-        'DEBS_DIR': str(debs), **extra,
+        'PATH': '/usr/bin:/bin',
+        'PACKAGE': 'tool',
+        'ARCH': 'amd64',
+        'BUILD': build,
+        'PAGES_URL': f'file://{pages}',
+        'GITHUB_OUTPUT': str(out),
+        'GITHUB_WORKSPACE': str(tmp_path),
+        'DEBS_DIR': str(debs),
+        **extra,
     }
-    done = subprocess.run(['bash', str(SCRIPT)], env=env,
-                          capture_output=True, text=True, check=False)
+    done = subprocess.run(['bash', str(SCRIPT)],
+                          env=env,
+                          capture_output=True,
+                          text=True,
+                          check=False)
     return done, out.read_text().splitlines(), debs
 
 
-def test_a_second_run_reuses_the_build_of_the_same_hash(
-    tmp_path: Path
-) -> None:
+def test_a_second_run_reuses_the_build_of_the_same_hash(tmp_path: Path) -> None:
     """The deb built once is restored for the same content, not rebuilt.
 
     Args:
@@ -79,8 +85,9 @@ def test_an_empty_cache_directory_builds(tmp_path: Path) -> None:
     Args:
         tmp_path: Scratch directory.
     """
-    done, out, debs = _run(tmp_path, '1', BUILD,
-                           DEB_CACHE_DIR=str(tmp_path / 'empty'))
+    done, out, debs = _run(
+        tmp_path, '1', BUILD, DEB_CACHE_DIR=str(tmp_path / 'empty')
+    )
     assert done.returncode == 0, done.stderr
     assert 'from_build_cache=true' not in out
     assert 'skipped=false' in out

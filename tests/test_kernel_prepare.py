@@ -63,10 +63,13 @@ def test_kver_comes_from_the_versioned_provides(tmp_path: Path) -> None:
     debs = tmp_path / 'debs'
     debs.mkdir()
     (debs / 'linux-image-common_7.2.14-1_amd64.deb').write_bytes(b'')
-    done = _run(tmp_path, DEBS_DIR=str(debs),
-                STUB_PACKAGE='linux-image-ia-x64v2',
-                STUB_PROVIDES='linux-image-minimal-ia-x64v2, '
-                'linux-image-7.2.14-ia (= 7.2.14-1), daemoncores-kernel')
+    done = _run(
+        tmp_path,
+        DEBS_DIR=str(debs),
+        STUB_PACKAGE='linux-image-ia-x64v2',
+        STUB_PROVIDES='linux-image-minimal-ia-x64v2, '
+        'linux-image-7.2.14-ia (= 7.2.14-1), daemoncores-kernel'
+    )
     assert done.returncode == 0, done.stderr
     assert 'KVER=7.2.14-ia' in done.stderr
 

@@ -15,9 +15,8 @@ from typing import Any, cast
 
 import yaml
 
-WORKFLOW = Path(
-    __file__
-).resolve().parents[1] / '.github' / 'workflows' / 'iso-builder.yml'
+WORKFLOW = Path(__file__).resolve(
+).parents[1] / '.github' / 'workflows' / 'iso-builder.yml'
 
 
 def _smoke_script() -> str:
@@ -40,3 +39,18 @@ def test_arm64_smoke_does_not_use_cpu_max() -> None:
     match = re.search(r'qemu-system-aarch64[^\n]*?-cpu\s+(\S+)', script)
     assert match, 'aarch64 QEMU command without an explicit -cpu'
     assert match.group(1) != 'max'
+
+
+def test_arm64_smoke_budget_exceeds_slow_tcg_boot() -> None:
+    """arm64 gets a larger login budget than the 900 s of the other arches.
+
+    The live root reaches the login prompt in ~380 s on a fast host and ~2x
+    that on the shared runner (DEBUG.md 31): a flat 900 s reports a slow boot
+    as a stall. The login marker stays mandatory, only the time grows.
+    """
+    script = _smoke_script()
+    match = re.search(r'arm64\)\s+BUDGET="\$\{SMOKE_BUDGET_S:-(\d+)\}"', script)
+    assert match, 'no per-arch smoke budget for arm64'
+    assert int(match.group(1)) >= 1800
+    assert 'seq "${BUDGET}"' in script
+    assert 'seq 900' not in script

@@ -107,9 +107,7 @@ def test_without_skip_a_failing_build_is_still_a_failure(
     assert 'build_failed=true' in out
 
 
-def test_skip_without_prior_deb_fails_before_building(
-    tmp_path: Path
-) -> None:
+def test_skip_without_prior_deb_fails_before_building(tmp_path: Path) -> None:
     """No eligible release and nothing published: fail, never run the build.
 
     Args:

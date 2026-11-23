@@ -54,12 +54,20 @@ def _hash_of(ws: Path, name: str, build: str, sources: str) -> str:
     """
     script = f'. {HASH}; content_hash 2>/dev/null'
     env = {
-        **os.environ, 'PACKAGE': name, 'ARCH': 'amd64',
-        'SOURCES': sources, 'UPSTREAM': '', 'BUILD': build,
-        'EXTRA_ENV': '', 'EXTRA_ENV_CI': ''
+        **os.environ, 'PACKAGE': name,
+        'ARCH': 'amd64',
+        'SOURCES': sources,
+        'UPSTREAM': '',
+        'BUILD': build,
+        'EXTRA_ENV': '',
+        'EXTRA_ENV_CI': ''
     }
-    done = subprocess.run(['bash', '-c', script], cwd=ws, env=env,
-                          capture_output=True, text=True, check=True)
+    done = subprocess.run(['bash', '-c', script],
+                          cwd=ws,
+                          env=env,
+                          capture_output=True,
+                          text=True,
+                          check=True)
     return done.stdout.strip()
 
 
@@ -80,15 +88,22 @@ def _plan(ws: Path, pages: Path) -> tuple[dict[str, str], str]:
         'MAN': str(ws / 'workflows/bootc-debs-builder/packages.yml'),
         'ARCH': 'amd64',
         'WAVES': json.dumps({
-            'wave0': ['Alpha', 'gamma'], 'wave1': ['beta']
+            'wave0': ['Alpha', 'gamma'],
+            'wave1': ['beta']
         }),
         'GITHUB_OUTPUT': str(out),
         'PAGES_URL': f'file://{pages}',
     }
-    done = subprocess.run(['bash', str(PLAN)], cwd=ws, env=env,
-                          capture_output=True, text=True, check=False)
+    done = subprocess.run(['bash', str(PLAN)],
+                          cwd=ws,
+                          env=env,
+                          capture_output=True,
+                          text=True,
+                          check=False)
     assert done.returncode == 0, done.stderr
-    return dict(line.split('=', 1) for line in out.read_text().splitlines()), done.stderr
+    return dict(
+        line.split('=', 1) for line in out.read_text().splitlines()
+    ), done.stderr
 
 
 def _publish(pages: Path, entries: dict) -> None:
@@ -127,19 +142,23 @@ def test_unchanged_packages_are_skipped_whatever_the_case(
     ws = _workspace(tmp_path)
     src = 'workflows/bootc-debs-builder/'
     pages = tmp_path / 'pages'
-    _publish(pages, {
-        'alpha-amd64': {
-            'hash': _hash_of(ws, 'Alpha', 'echo alpha', src + 'alpha'),
-            'debs': []
-        },
-        'beta-amd64': {
-            'hash': 'stale', 'deps_hash': 'd' * 64, 'debs': []
-        },
-        'gamma-amd64': {
-            'hash': _hash_of(ws, 'gamma', 'echo gamma', src + 'gamma'),
-            'debs': []
-        },
-    })
+    _publish(
+        pages, {
+            'alpha-amd64': {
+                'hash': _hash_of(ws, 'Alpha', 'echo alpha', src + 'alpha'),
+                'debs': []
+            },
+            'beta-amd64': {
+                'hash': 'stale',
+                'deps_hash': 'd' * 64,
+                'debs': []
+            },
+            'gamma-amd64': {
+                'hash': _hash_of(ws, 'gamma', 'echo gamma', src + 'gamma'),
+                'debs': []
+            },
+        }
+    )
     outs, err = _plan(ws, pages)
     assert json.loads(outs['skipped']) == ['Alpha', 'gamma']
     assert json.loads(outs['wave0']) == []
@@ -162,26 +181,36 @@ def test_a_block_scalar_build_keeps_its_trailing_newline(
     manifest = ws / 'workflows/bootc-debs-builder/packages.yml'
     manifest.write_text(
         'packages:\n  - name: gamma\n    sources: [gamma]\n'
-        '    build: |\n      echo gamma\n      echo more\n')
+        '    build: |\n      echo gamma\n      echo more\n'
+    )
     src = 'workflows/bootc-debs-builder/'
     pages = tmp_path / 'pages'
-    _publish(pages, {
-        'gamma-amd64': {
-            'hash': _hash_of(ws, 'gamma', 'echo gamma\necho more\n',
-                             src + 'gamma'),
-            'debs': []
-        },
-    })
+    _publish(
+        pages, {
+            'gamma-amd64': {
+                'hash':
+                _hash_of(ws, 'gamma', 'echo gamma\necho more\n', src + 'gamma'),
+                'debs': []
+            },
+        }
+    )
     env_waves = {'wave0': ['gamma']}
     out = ws / 'out'
     out.write_text('')
     env = {
-        **os.environ, 'MAN': str(manifest), 'ARCH': 'amd64',
-        'WAVES': json.dumps(env_waves), 'GITHUB_OUTPUT': str(out),
+        **os.environ,
+        'MAN': str(manifest),
+        'ARCH': 'amd64',
+        'WAVES': json.dumps(env_waves),
+        'GITHUB_OUTPUT': str(out),
         'PAGES_URL': f'file://{pages}',
     }
-    done = subprocess.run(['bash', str(PLAN)], cwd=ws, env=env,
-                          capture_output=True, text=True, check=False)
+    done = subprocess.run(['bash', str(PLAN)],
+                          cwd=ws,
+                          env=env,
+                          capture_output=True,
+                          text=True,
+                          check=False)
     assert done.returncode == 0, done.stderr
     assert 'plan gamma/amd64: skip' in done.stderr, done.stderr
 
@@ -194,10 +223,19 @@ def test_a_rebuilt_dependency_rebuilds_its_dependents(tmp_path: Path) -> None:
     """
     ws = _workspace(tmp_path)
     pages = tmp_path / 'pages'
-    _publish(pages, {
-        'alpha-amd64': {'hash': 'old', 'debs': []},
-        'beta-amd64': {'hash': 'x', 'deps_hash': 'd' * 64, 'debs': []},
-    })
+    _publish(
+        pages, {
+            'alpha-amd64': {
+                'hash': 'old',
+                'debs': []
+            },
+            'beta-amd64': {
+                'hash': 'x',
+                'deps_hash': 'd' * 64,
+                'debs': []
+            },
+        }
+    )
     outs, err = _plan(ws, pages)
     assert 'Alpha' in json.loads(outs['wave0'])
     assert json.loads(outs['wave1']) == ['beta']
@@ -218,11 +256,17 @@ def test_unreadable_published_state_is_an_error(tmp_path: Path) -> None:
     env = {
         **os.environ,
         'MAN': str(ws / 'workflows/bootc-debs-builder/packages.yml'),
-        'ARCH': 'amd64', 'WAVES': '{"wave0": ["gamma"]}',
-        'GITHUB_OUTPUT': str(ws / 'out'), 'PAGES_URL': f'file://{broken}',
+        'ARCH': 'amd64',
+        'WAVES': '{"wave0": ["gamma"]}',
+        'GITHUB_OUTPUT': str(ws / 'out'),
+        'PAGES_URL': f'file://{broken}',
     }
-    done = subprocess.run(['bash', str(PLAN)], cwd=ws, env=env,
-                          capture_output=True, text=True, check=False)
+    done = subprocess.run(['bash', str(PLAN)],
+                          cwd=ws,
+                          env=env,
+                          capture_output=True,
+                          text=True,
+                          check=False)
     assert done.returncode != 0
     assert 'not a JSON object' in done.stderr
 
@@ -241,28 +285,43 @@ def test_every_planned_package_gets_a_verdict(tmp_path: Path) -> None:
     (base / 'delta').mkdir()
     (base / 'delta' / 'f').write_text('delta')
     with (base / 'packages.yml').open('a') as handle:
-        handle.write('  - name: Delta\n    sources: [delta]\n'
-                     '    build: echo delta\n')
+        handle.write(
+            '  - name: Delta\n    sources: [delta]\n'
+            '    build: echo delta\n'
+        )
     pages = tmp_path / 'pages'
     src = 'workflows/bootc-debs-builder/'
-    _publish(pages, {'gamma-amd64': {
-        'hash': _hash_of(ws, 'gamma', 'echo gamma', src + 'gamma'),
-        'debs': []}})
+    _publish(
+        pages, {
+            'gamma-amd64': {
+                'hash': _hash_of(ws, 'gamma', 'echo gamma', src + 'gamma'),
+                'debs': []
+            }
+        }
+    )
     out = ws / 'out'
     out.write_text('')
     wanted = {'wave0': ['Alpha', 'gamma', 'Delta'], 'wave1': ['beta']}
     env = {
         **os.environ,
-        'MAN': str(base / 'packages.yml'), 'ARCH': 'amd64',
-        'WAVES': json.dumps(wanted), 'GITHUB_OUTPUT': str(out),
+        'MAN': str(base / 'packages.yml'),
+        'ARCH': 'amd64',
+        'WAVES': json.dumps(wanted),
+        'GITHUB_OUTPUT': str(out),
         'PAGES_URL': f'file://{pages}',
     }
-    done = subprocess.run(['bash', str(PLAN)], cwd=ws, env=env,
-                          capture_output=True, text=True, check=False)
+    done = subprocess.run(['bash', str(PLAN)],
+                          cwd=ws,
+                          env=env,
+                          capture_output=True,
+                          text=True,
+                          check=False)
     assert done.returncode == 0, done.stderr
     got = dict(line.split('=', 1) for line in out.read_text().splitlines())
-    placed = [n for key in ('wave0', 'wave1', 'skipped')
-              for n in json.loads(got[key])]
+    placed = [
+        n for key in ('wave0', 'wave1', 'skipped')
+        for n in json.loads(got[key])
+    ]
     assert sorted(placed) == sorted(n for ns in wanted.values() for n in ns)
     assert 'Delta' in json.loads(got['wave0'])
     assert json.loads(got['skipped']) == ['gamma']
@@ -279,9 +338,14 @@ def test_a_published_build_that_is_not_served_is_rebuilt(
     ws = _workspace(tmp_path)
     src = 'workflows/bootc-debs-builder/'
     pages = tmp_path / 'pages'
-    _publish(pages, {'gamma-amd64': {
-        'hash': _hash_of(ws, 'gamma', 'echo gamma', src + 'gamma'),
-        'debs': ['gamma_1_amd64.deb']}})
+    _publish(
+        pages, {
+            'gamma-amd64': {
+                'hash': _hash_of(ws, 'gamma', 'echo gamma', src + 'gamma'),
+                'debs': ['gamma_1_amd64.deb']
+            }
+        }
+    )
     outs, err = _plan(ws, pages)
     assert 'gamma' in json.loads(outs['wave0'])
     assert 'gamma_1_amd64.deb is not served' in err
@@ -300,21 +364,42 @@ def test_fetch_published_only_for_dependencies_not_rebuilt(
     """
     ws = _workspace(tmp_path)
     pages = tmp_path / 'pages'
-    _publish(pages, {'alpha-amd64': {'hash': 'h', 'debs': ['Alpha_1_amd64.deb']},
-                     'zeta-amd64': {'hash': 'h', 'debs': ['zeta_1_amd64.deb']}})
+    _publish(
+        pages, {
+            'alpha-amd64': {
+                'hash': 'h',
+                'debs': ['Alpha_1_amd64.deb']
+            },
+            'zeta-amd64': {
+                'hash': 'h',
+                'debs': ['zeta_1_amd64.deb']
+            }
+        }
+    )
     (pages / 'debs-cache' / 'Alpha_1_amd64.deb').write_bytes(b'old')
     dest = tmp_path / 'prior'
-    env = {**os.environ, 'MAN': str(ws / 'workflows/bootc-debs-builder/packages.yml'),
-           'DEPS': 'Alpha', 'ARCH': 'amd64', 'DEST': str(dest),
-           'PAGES_URL': f'file://{pages}'}
+    env = {
+        **os.environ, 'MAN':
+        str(ws / 'workflows/bootc-debs-builder/packages.yml'),
+        'DEPS': 'Alpha',
+        'ARCH': 'amd64',
+        'DEST': str(dest),
+        'PAGES_URL': f'file://{pages}'
+    }
     fetch = ROOT / 'fetch-published' / 'fetch.sh'
-    done = subprocess.run(['bash', str(fetch)], env=env, capture_output=True,
-                          text=True, check=False)
+    done = subprocess.run(['bash', str(fetch)],
+                          env=env,
+                          capture_output=True,
+                          text=True,
+                          check=False)
     assert done.returncode == 0, done.stderr
     assert (dest / 'Alpha_1_amd64.deb').read_bytes() == b'old'
     (dest / 'Alpha_1_amd64.deb').unlink()
     (dest / 'Alpha_2_amd64.deb').write_bytes(b'new')
-    done = subprocess.run(['bash', str(fetch)], env=env, capture_output=True,
-                          text=True, check=False)
+    done = subprocess.run(['bash', str(fetch)],
+                          env=env,
+                          capture_output=True,
+                          text=True,
+                          check=False)
     assert done.returncode == 0, done.stderr
     assert sorted(p.name for p in dest.iterdir()) == ['Alpha_2_amd64.deb']

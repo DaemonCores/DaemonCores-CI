@@ -105,13 +105,22 @@ def test_deps_hash_survives_the_carry_over(tmp_path: Path) -> None:
     site = tmp_path / 'site'
     (site / 'debs-cache').mkdir(parents=True)
     (site / 'debs-cache' / 'a_1_amd64.deb').write_bytes(b'a')
-    (site / 'debs-cache' / 'hashes.json').write_text(json.dumps({
-        'a-amd64': {'hash': 'ha', 'deps_hash': 'dd', 'debs': ['a_1_amd64.deb']}
-    }))
+    (site / 'debs-cache' / 'hashes.json').write_text(
+        json.dumps({
+            'a-amd64': {
+                'hash': 'ha',
+                'deps_hash': 'dd',
+                'debs': ['a_1_amd64.deb']
+            }
+        })
+    )
     debs = tmp_path / 'debs'
     env = dict(os.environ, DEBS_DIR=str(debs), PAGES_URL=f'file://{site}')
-    done = subprocess.run(['bash', str(SCRIPT)], env=env,
-                          capture_output=True, text=True, check=False)
+    done = subprocess.run(['bash', str(SCRIPT)],
+                          env=env,
+                          capture_output=True,
+                          text=True,
+                          check=False)
     assert done.returncode == 0, done.stderr
     meta = json.loads((debs / '.meta' / 'a-amd64.json').read_text())
     assert meta['deps_hash'] == 'dd'
@@ -128,9 +137,13 @@ def test_an_unreadable_published_state_stops_the_publication(
     site = tmp_path / 'site'
     (site / 'debs-cache').mkdir(parents=True)
     (site / 'debs-cache' / 'hashes.json').write_text('<html>503</html>')
-    env = dict(os.environ, DEBS_DIR=str(tmp_path / 'debs'),
-               PAGES_URL=f'file://{site}')
-    done = subprocess.run(['bash', str(SCRIPT)], env=env,
-                          capture_output=True, text=True, check=False)
+    env = dict(
+        os.environ, DEBS_DIR=str(tmp_path / 'debs'), PAGES_URL=f'file://{site}'
+    )
+    done = subprocess.run(['bash', str(SCRIPT)],
+                          env=env,
+                          capture_output=True,
+                          text=True,
+                          check=False)
     assert done.returncode != 0
     assert 'not a JSON object' in done.stderr

@@ -21,13 +21,9 @@ def main(path: str, only: str) -> None:
     with open(path, encoding="utf-8") as fh:
         m = json.load(fh)
     pkgs = m.get("packages", [])
-    info = {
-        p["name"]: p for p in pkgs if isinstance(p, dict) and "name" in p
-    }
+    info = {p["name"]: p for p in pkgs if isinstance(p, dict) and "name" in p}
     prefix = only if only.endswith("-") else only + "-"
-    keep = {
-        name for name in info if name == only or name.startswith(prefix)
-    }
+    keep = {name for name in info if name == only or name.startswith(prefix)}
     frontier = collections.deque(keep)
     while frontier:
         name = frontier.popleft()
@@ -38,8 +34,8 @@ def main(path: str, only: str) -> None:
     dropped = len(info) - len(keep)
     m["packages"] = [p for p in pkgs if p.get("name") in keep]
     print(
-        "only closure: kept %d/%d packages (%d dropped): %s"
-        % (len(keep), len(info), dropped, " ".join(sorted(keep))),
+        "only closure: kept %d/%d packages (%d dropped): %s" %
+        (len(keep), len(info), dropped, " ".join(sorted(keep))),
         file=sys.stderr,
     )
     with open(path, "w", encoding="utf-8") as fh:

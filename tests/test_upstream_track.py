@@ -44,9 +44,8 @@ def _tarball_digest(api: Path, version: str) -> str:
     """
     import hashlib
 
-    return hashlib.sha256(
-        (api / 'cdn' / f'linux-{version}.tar.xz').read_bytes()
-    ).hexdigest()
+    return hashlib.sha256((api / 'cdn' / f'linux-{version}.tar.xz').read_bytes()
+                          ).hexdigest()
 
 
 def _release(root: Path, repo: str, tag: str, assets: dict[str, str]) -> None:
@@ -599,17 +598,21 @@ def _kernel_with_engine(api: Path, available: set[str]) -> None:
         (staging / 'k').write_text('feature\n')
         tarball = cdn / f'linux-{version}.tar.xz'
         subprocess.run([
-            'tar', '-cJf', str(tarball), '-C', str(api), f'linux-{version}'
-        ], check=True)
+            'tar', '-cJf',
+            str(tarball), '-C',
+            str(api), f'linux-{version}'
+        ],
+                       check=True)
         digest = hashlib.sha256(tarball.read_bytes()).hexdigest()
         with (cdn / 'sha256sums.asc').open('a') as sums:
             sums.write(f'{digest}  linux-{version}.tar.xz\n')
         sdir = api / f'linux-{series}.y-xanmod'
         (sdir / 'topic').mkdir(parents=True, exist_ok=True)
         (sdir / 'topic' / '0001-xanmod-bore.patch').write_text(
-            '--- a/k\n+++ b/k\n@@ -1 +1,2 @@\n' +
-            (' feature\n+elected\n' if series in available
-             else ' absent\n+elected\n')
+            '--- a/k\n+++ b/k\n@@ -1 +1,2 @@\n' + (
+                ' feature\n+elected\n' if series in
+                available else ' absent\n+elected\n'
+            )
         )
     manifest = (
         'patches:\n'

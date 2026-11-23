@@ -79,13 +79,23 @@ def test_workflow_uses_the_file_not_a_heredoc() -> None:
 
 def test_a_chain_deeper_than_the_wave_jobs_is_an_error(tmp_path: Path) -> None:
     """A fifth wave has no job: it must fail loudly, not drop the package."""
-    chain = [{"name": "p0"}] + [{"name": f"p{i}", "deps": [f"p{i - 1}"]}
-                                for i in range(1, 5)]
+    chain = [{
+        "name": "p0"
+    }] + [{
+        "name": f"p{i}",
+        "deps": [f"p{i - 1}"]
+    } for i in range(1, 5)]
     manifest = tmp_path / "pkgs.json"
     manifest.write_text(json.dumps({"packages": chain}))
-    done = subprocess.run(
-        [sys.executable, str(SCRIPT), str(manifest)],
-        env={**os.environ, "GITHUB_OUTPUT": str(tmp_path / "output")},
-        capture_output=True, text=True, check=False)
+    done = subprocess.run([sys.executable,
+                           str(SCRIPT),
+                           str(manifest)],
+                          env={
+                              **os.environ, "GITHUB_OUTPUT":
+                              str(tmp_path / "output")
+                          },
+                          capture_output=True,
+                          text=True,
+                          check=False)
     assert done.returncode != 0
     assert "p4" in done.stderr

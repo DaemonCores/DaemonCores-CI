@@ -895,8 +895,10 @@ def test_enforced_scan_fails_the_image_on_a_fixable_finding(
     sb: Sandbox
 ) -> None:
     """TRIVY_ENFORCE=1: a finding fails the image; the default never does."""
-    done = sb.run([entry('latest', twin='-nosign')], TRIVY_ENFORCE='1',
-                  TRIVY_ENFORCED_RC='5', TRIVY_IGNOREFILE='/x/.trivyignore')
+    done = sb.run([entry('latest', twin='-nosign')],
+                  TRIVY_ENFORCE='1',
+                  TRIVY_ENFORCED_RC='5',
+                  TRIVY_IGNOREFILE='/x/.trivyignore')
     assert done.returncode != 0
     assert 'image latest: scan-failed' in done.stdout
     enforced = sb.calls('trivy image --input')[1]
@@ -908,11 +910,10 @@ def test_enforced_scan_fails_the_image_on_a_fixable_finding(
 
 
 @needs_jq
-def test_enforced_scan_treats_a_scanner_error_as_a_warning(
-    sb: Sandbox
-) -> None:
+def test_enforced_scan_treats_a_scanner_error_as_a_warning(sb: Sandbox) -> None:
     """Exit 1 (database unreachable) is not a vulnerability."""
-    done = sb.run([entry('latest', twin='-nosign')], TRIVY_ENFORCE='1',
+    done = sb.run([entry('latest', twin='-nosign')],
+                  TRIVY_ENFORCE='1',
                   TRIVY_ENFORCED_RC='1')
     assert done.returncode == 0, done.stderr
     assert 'enforced vulnerability scan of latest could not run' in done.stdout
