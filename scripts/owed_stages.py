@@ -2,7 +2,7 @@
 
 Usage:
     python3 owed_stages.py --repo OWNER/REPO --workflow FILE --branch BRANCH
-                           [--limit N]
+                           [--limit N] [--all-if-unknown]
 
 A green run proves nothing about a stage it skipped. This walks the completed
 runs of the caller workflow on one branch, newest first, and for each stage
@@ -17,7 +17,11 @@ per owed stage is printed on stdout::
     STAGE<TAB>RUN_URL<TAB>JOB<TAB>FAILED_STEP
 
 and nothing is printed when no stage is owed. A failed API call exits non-zero:
-an unknown history must never read as a clean one.
+an unknown history must never read as a clean one. With ``--all-if-unknown``
+the same failure prints every stage instead (empty run column): an unreadable
+history then means "run everything", which is the other way never to read an
+unknown history as a clean one, and it keeps a GitHub network error from
+turning the whole pipeline into a run that skips every stage.
 """
 
 import argparse
@@ -258,14 +262,33 @@ def main(argv: list[str] | None = None, fetch: Fetch = history) -> int:
     parser.add_argument('--workflow', required=True)
     parser.add_argument('--branch', required=True)
     parser.add_argument('--limit', type=int, default=30)
+    parser.add_argument(
+        '--all-if-unknown',
+        action='store_true',
+        help='print every stage when the history cannot be read, instead of '
+        'failing'
+    )
     args = parser.parse_args(argv)
     repo, workflow = cast(str, args.repo), cast(str, args.workflow)
     branch, limit = cast(str, args.branch), cast(int, args.limit)
+    all_if_unknown = cast(bool, args.all_if_unknown)
     try:
         found = owed(fetch(repo, workflow, branch, limit))
     except RuntimeError as err:
-        print(err, file=sys.stderr)
-        return 1
+        if not all_if_unknown:
+            print(err, file=sys.stderr)
+            return 1
+        # Conservative reading of an unknown history: every stage is owed.
+        # Failing instead took the whole run down (run 45160784394: the plan
+        # job died on a GitHub stream error and every stage was skipped).
+        print(
+            f'{err}\n'
+            f'history unreadable: forcing every stage: {", ".join(STAGES)}',
+            file=sys.stderr
+        )
+        for stage in STAGES:
+            print(f'{stage}\t\t\t')
+        return 0
     for stage, ev in found.items():
         print(f'{stage}\t{ev.url}\t{ev.job}\t{ev.step}')
     return 0

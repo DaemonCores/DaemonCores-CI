@@ -110,3 +110,31 @@ def test_output_line_carries_the_evidence(
     owed_stages.main(['--repo', 'o/r', '--workflow', 'w.yml', '--branch', 'm'],
                      fetch=lambda *_: history)
     assert capsys.readouterr().out == 'iso\tu\trun / Build ISO / x\tSmoke\n'
+
+
+def test_all_if_unknown_forces_every_stage_instead_of_failing(
+    capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A dead API must not turn the pipeline into a run that skips everything.
+
+    Run 45160784394: one ``stream error`` on the jobs endpoint made the plan
+    job exit 1, so every stage was skipped. Forcing every stage is still
+    "unknown history is never clean", and it costs CI time, not a dead run.
+
+    Args:
+        capsys: Output capture.
+    """
+    url = 'repos/o/r/actions/runs/1/jobs?per_page=100'
+
+    def broken(*_: object) -> Iterable[owed_stages.Run]:
+        raise RuntimeError(f'gh api {url}: stream error: stream ID 1; CANCEL')
+
+    code = owed_stages.main([
+        '--repo', 'o/r', '--workflow', 'w.yml', '--branch', 'main',
+        '--all-if-unknown'
+    ],
+                            fetch=broken)
+    out = capsys.readouterr()
+    assert code == 0
+    assert out.out.splitlines() == [f'{s}\t\t\t' for s in owed_stages.STAGES]
+    assert 'stream error' in out.err

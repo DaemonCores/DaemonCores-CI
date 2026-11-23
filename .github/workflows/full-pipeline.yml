@@ -172,14 +172,20 @@ jobs:
           # red/cancelled stays owed. A push forces it again whatever the diff
           # says, so a green run can never hide a failure proven by an earlier
           # one. The only state is the run history (no cache, no stored file).
-          # A history that cannot be read fails the plan: unknown != clean.
+          # A history that cannot be read is never clean: every stage is owed
+          # then (--all-if-unknown). Failing the job instead made run
+          # 45160784394 skip every stage because of one GitHub stream error.
           owed_file=$(mktemp)
           wf="${CALLER_WORKFLOW#*/.github/workflows/}"; wf="${wf%%@*}"
-          python3 .ci-tooling/scripts/owed_stages.py \
+          python3 .ci-tooling/scripts/owed_stages.py --all-if-unknown \
             --repo "$REPO" --workflow "$wf" --branch "$BRANCH" >"$owed_file"
           while IFS=$'\t' read -r stage url job step; do
             [ -n "$stage" ] || continue
-            echo "::warning title=owed stage ${stage}::${job} (step: ${step:-?}) failed in ${url} and was never proven green since; forced again"
+            if [ -z "$url" ]; then
+              echo "::warning title=owed stage ${stage}::the run history could not be read; every stage runs (an unknown history is never read as clean)"
+            else
+              echo "::warning title=owed stage ${stage}::${job} (step: ${step:-?}) failed in ${url} and was never proven green since; forced again"
+            fi
           done <"$owed_file"
           owes() { cut -f1 "$owed_file" | grep -qx "$1"; }
           case "$EVENT" in
