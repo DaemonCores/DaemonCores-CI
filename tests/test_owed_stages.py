@@ -25,6 +25,21 @@ def _raise(message: str, *args: object) -> NoReturn:
     raise RuntimeError(message)
 
 
+def _fixed_history(
+    runs: list[tuple[str, list[owed_stages.Job]]], *_args: object
+) -> list[tuple[str, list[owed_stages.Job]]]:
+    """Return a fixed run history, ignoring the fetch arguments.
+
+    Args:
+        runs: History to return.
+        *_args: Arguments of the fetch call, ignored.
+
+    Returns:
+        The given history.
+    """
+    return runs
+
+
 def job(name: str, conclusion: str, step: str = '') -> owed_stages.Job:
     """Build a job as the history reports it.
 
@@ -118,7 +133,7 @@ def test_output_line_carries_the_evidence(
     """
     history = [('u', [job('Build ISO / x', 'failure', 'Smoke')])]
     owed_stages.main(['--repo', 'o/r', '--workflow', 'w.yml', '--branch', 'm'],
-                     fetch=lambda *_: history)
+                     fetch=functools.partial(_fixed_history, history))
     assert capsys.readouterr().out == 'iso\tu\trun / Build ISO / x\tSmoke\n'
 
 

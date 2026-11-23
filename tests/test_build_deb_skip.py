@@ -4,6 +4,8 @@ import json
 import subprocess
 from pathlib import Path
 
+from typed_docs import as_str_mapping, load_json
+
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / 'build-deb' / 'build-deb.sh'
 PRIOR_HASH = 'prior-hash'
@@ -90,7 +92,9 @@ def test_nothing_to_build_keeps_the_last_good_deb(tmp_path: Path) -> None:
     assert 'skipped=true' in out
     assert 'build_failed=true' not in out
     assert (debs / DEB).is_file()
-    meta = json.loads((debs / '.meta' / 'kernel-amd64.json').read_text())
+    meta = as_str_mapping(
+        load_json((debs / '.meta' / 'kernel-amd64.json').read_text())
+    )
     assert meta == {'hash': PRIOR_HASH, 'skipped': True, 'debs': [DEB]}
 
 

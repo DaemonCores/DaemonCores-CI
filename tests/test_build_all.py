@@ -13,6 +13,7 @@ from pathlib import Path
 
 import issues_api
 import pytest
+from typed_docs import as_str, as_str_mapping
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -92,7 +93,7 @@ def _sandbox(tmp_path: Path) -> Path:
 def _run(
     root: Path,
     env_extra: dict[str, str] | None = None
-) -> subprocess.CompletedProcess:
+) -> subprocess.CompletedProcess[str]:
     """Run build-all.sh in the sandbox.
 
     Args:
@@ -208,10 +209,11 @@ def test_repeat_failure_refreshes_the_issue_body_without_a_comment(
         assert 'result broken: kept' in done.stdout, done.stderr
         patches = api.calls('PATCH', '/repos/o/r/issues/7')
         assert len(patches) == 1, api.requests
-        assert 'title' not in patches[0]['data']
-        assert 'the fix will be retried' in patches[0]['data']['body']
-        assert 'Run: http://127.0.0.1:9/o/r/actions/runs/42' in \
-            patches[0]['data']['body']
+        data = as_str_mapping(patches[0]['data'])
+        assert 'title' not in data
+        body = as_str(data['body'])
+        assert 'the fix will be retried' in body
+        assert 'Run: http://127.0.0.1:9/o/r/actions/runs/42' in body
         assert api.calls('POST', '/comments') == []
         assert api.calls('POST', '/repos/o/r/issues') == []
     finally:
@@ -231,9 +233,10 @@ def test_first_failure_opens_one_issue_in_english(tmp_path: Path) -> None:
         assert 'result broken: kept' in done.stdout, done.stderr
         created = api.calls('POST', '/repos/o/r/issues')
         assert len(created) == 1, api.requests
-        assert created[0]['data']['title'] == \
+        data = as_str_mapping(created[0]['data'])
+        assert as_str(data['title']) == \
             '⚠️ Broken build: broken (last valid .deb reused)'
-        body = created[0]['data']['body']
+        body = as_str(data['body'])
         assert 'build failed (compilation or post-patch content check)' in body
         assert 'last published .deb was reused' in body
         assert api.calls('PATCH', '/issues') == []
@@ -256,7 +259,7 @@ def test_recovery_comments_once_and_closes_the_issue(tmp_path: Path) -> None:
         assert 'result app: built' in done.stdout, done.stderr
         comments = api.calls('POST', '/repos/o/r/issues/5/comments')
         assert len(comments) == 1, api.requests
-        body = comments[0]['data']['body']
+        body = as_str(as_str_mapping(comments[0]['data'])['body'])
         assert 'Build of `app` succeeded in run 42' in body
         patches = api.calls('PATCH', '/repos/o/r/issues/5')
         assert len(patches) == 1, api.requests

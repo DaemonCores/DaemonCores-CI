@@ -13,7 +13,14 @@ consume the helper primitives through scripts/kernel_helpers.sh, unchanged.
 import subprocess
 from pathlib import Path
 
-import yaml
+from typed_docs import (
+    as_list,
+    as_mapping,
+    as_str,
+    is_str_mapping,
+    load_yaml,
+    mappings_by_name,
+)
 
 REPO = Path(__file__).resolve().parents[1]
 PRODUCT = REPO.parent / "debian-bootc"
@@ -107,10 +114,9 @@ def test_patch_manifest_schema_and_gates() -> None:
     CachyOS dry-run still fails fuzz-0 on vanilla 7.2.15) and the ARM OPTI
     completions stay sha-pinned stage-common entries.
     """
-    doc = yaml.safe_load(
-        (KERNEL_SRC / "patches" / "kernel.yml").read_text(encoding="utf-8")
-    )
-    names = {p["name"]: p for p in doc["patches"]}
+    manifest = KERNEL_SRC / "patches" / "kernel.yml"
+    doc = as_mapping(load_yaml(manifest.read_text(encoding="utf-8")))
+    names = mappings_by_name(as_list(doc["patches"]))
     bore = names["bore"]
     assert bore["exclude-series"] == ["7.0", "7.1", "7.2", "7.3"]
     helper = (REPO / "scripts" / "kernel_helpers.sh").read_text()
@@ -125,9 +131,8 @@ def test_patch_manifest_schema_and_gates() -> None:
     assert "0174-memcg-charge-batch-128" not in names
     # the msm devfreq siblings are K-PORT (run 42715501467):
     assert "msm-adreno-devfreq-ifpc-relax" not in names
-    pve = yaml.safe_load(
-        (KERNEL_SRC / "patches" / "pve.yml").read_text(encoding="utf-8")
-    )
+    pve_manifest = KERNEL_SRC / "patches" / "pve.yml"
+    pve = as_mapping(load_yaml(pve_manifest.read_text(encoding="utf-8")))
     assert isinstance(pve.get("patches"), list)
     assert pve["patches"]
 
@@ -169,12 +174,10 @@ def test_packages_yml_reads_the_product_checkout() -> None:
     assert "kernel-src/patches/kernel.yml" in text
     assert "CI_KERNEL_SHARED" not in text
     assert "require-patches: engine" in text
-    import yaml
-
-    doc = yaml.safe_load(text)
+    doc = as_mapping(load_yaml(text))
     offenders = [
-        p["name"] for p in doc["packages"]
-        if isinstance(p, dict) and "patches" in p
+        as_str(p["name"]) for p in as_list(doc["packages"])
+        if is_str_mapping(p) and "patches" in p
     ]
     assert not offenders, (
         "production entries carry no native patch data (the canonical set "

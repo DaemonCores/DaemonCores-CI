@@ -60,7 +60,7 @@ exclude = '\.git|\.tox'
 
 [tool.mypy]
 # scripts/ is the import root of the shared checks.
-mypy_path = "scripts"
+mypy_path = "scripts:tests"
 explicit_package_bases = true
 namespace_packages = true
 exclude = ["^\\.kronn/"]

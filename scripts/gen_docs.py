@@ -65,7 +65,7 @@ def _python_section(root: Path, path: Path) -> str:
     return "\n".join(parts)
 
 
-def _shell_header(path: Path) -> str:
+def shell_header(path: Path) -> str:
     """Return the leading comment block of a shell script.
 
     Args:
@@ -95,10 +95,10 @@ def _shell_section(root: Path, path: Path) -> str:
         Markdown with the script path and its header comment.
     """
     rel = path.relative_to(root)
-    return f"## `{rel}`\n\n{_shell_header(path)}\n"
+    return f"## `{rel}`\n\n{shell_header(path)}\n"
 
 
-def _page(title: str, body: str, current: str) -> str:
+def page(title: str, body: str, current: str) -> str:
     """Splice ``body`` into the generated region of an existing page.
 
     Args:
@@ -177,7 +177,7 @@ def main() -> int:
     for name, (title, body) in pages.items():
         target = out_dir / name
         current = target.read_text(encoding="utf-8") if target.exists() else ""
-        new = _page(title, body, current)
+        new = page(title, body, current)
         if new == current:
             continue
         stale = True

@@ -11,9 +11,8 @@ the ISO, so the arm64 CPU model is pinned to a real one.
 
 import re
 from pathlib import Path
-from typing import Any, cast
 
-import yaml
+from typed_docs import as_mapping, as_str, iter_steps, load_yaml
 
 WORKFLOW = Path(__file__).resolve(
 ).parents[1] / '.github' / 'workflows' / 'iso-builder.yml'
@@ -28,11 +27,10 @@ def _smoke_script() -> str:
     Raises:
         AssertionError: If the smoke step is not found in the workflow.
     """
-    doc = cast(dict[str, Any], yaml.safe_load(WORKFLOW.read_text()))
-    for job in doc['jobs'].values():
-        for step in job.get('steps', []):
-            if step.get('name') == 'Boot smoke test the ISO (QEMU)':
-                return cast(str, step['run'])
+    workflow = as_mapping(load_yaml(WORKFLOW.read_text()))
+    for step in iter_steps(workflow):
+        if step.get('name') == 'Boot smoke test the ISO (QEMU)':
+            return as_str(step['run'])
     raise AssertionError('smoke step not found')
 
 

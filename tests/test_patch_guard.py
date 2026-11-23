@@ -1,11 +1,11 @@
 """Unit tests for ``scripts/patch_guard.py``."""
 
 import hashlib
-import json
 import sys
 from pathlib import Path
 
 import pytest
+from typed_docs import as_mapping, as_str, as_str_mapping, load_json
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 
@@ -56,7 +56,9 @@ def test_update_then_check_passes(env: tuple[Path, Path, Path]) -> None:
     args = ["--tree", str(tree), "--lock", str(lock), str(patch)]
     assert patch_guard.main([*args, "--update"]) == 0
     expected = hashlib.sha256(b"a\n").hexdigest()
-    assert json.loads(lock.read_text()) == {"kernel/sched/core.c": expected}
+    assert as_str_mapping(load_json(lock.read_text())) == {
+        "kernel/sched/core.c": expected
+    }
     assert patch_guard.main(args) == 0
 
 
@@ -103,5 +105,5 @@ def test_update_merges_with_the_existing_lock(
     lock.write_text('{"other.c": "abc"}\n')
     args = ["--tree", str(tree), "--lock", str(lock), str(patch), "--update"]
     assert patch_guard.main(args) == 0
-    assert set(json.loads(lock.read_text())
-               ) == {"other.c", "kernel/sched/core.c"}
+    keys = {as_str(key) for key in as_mapping(load_json(lock.read_text()))}
+    assert keys == {"other.c", "kernel/sched/core.c"}

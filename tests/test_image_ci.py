@@ -12,10 +12,17 @@ import shutil
 import stat
 import subprocess
 from pathlib import Path
-from typing import Any, cast
 
 import pytest
-import yaml
+from typed_docs import (
+    as_list,
+    as_mapping,
+    as_mappings,
+    as_str,
+    as_str_mapping,
+    find_mapping,
+    load_yaml,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 CI = ROOT / 'scripts' / 'image-ci'
@@ -138,7 +145,7 @@ ISO_CF = (
 )
 
 
-def _script(path: Path, body: str) -> None:
+def write_stub(path: Path, body: str) -> None:
     """Write an executable script.
 
     Args:
@@ -171,9 +178,9 @@ class Sandbox:
         for name, body in (('podman', PODMAN), ('skopeo', SKOPEO),
                            ('curl', CURL), ('trivy', TRIVY), ('cosign', COSIGN),
                            ('sudo', SUDO)):
-            _script(bindir / name, body)
+            write_stub(bindir / name, body)
         self.image_test = tmp / 'image-test.sh'
-        _script(self.image_test, IMAGE_TEST)
+        write_stub(self.image_test, IMAGE_TEST)
         (self.root / 'Containerfile.base').write_text(BASE_CF)
         (self.root / 'Containerfile').write_text(MAIN_CF)
         (self.root / 'Containerfile.iso').write_text(ISO_CF)
@@ -341,9 +348,10 @@ def _old_chash_script() -> str:
                           check=True,
                           capture_output=True,
                           text=True).stdout
-    workflow = cast(dict[str, Any], yaml.safe_load(text))
-    steps = workflow['jobs']['build-test-push']['steps']
-    run = next(s['run'] for s in steps if s.get('id') == 'chash')
+    workflow = as_mapping(load_yaml(text))
+    jobs = as_str_mapping(workflow['jobs'])
+    build = as_str_mapping(jobs['build-test-push'])
+    run = as_str(find_mapping(as_list(build['steps']), 'id', 'chash')['run'])
     values = {'github.event_name': 'push', 'inputs.force_no_cache': 'false'}
     return re.sub(
         r'\$\{\{\s*([\w.]+)\s*\}\}', lambda m: values[m.group(1)], run
@@ -562,7 +570,7 @@ def test_prepare_installs_in_one_apt_call(sb: Sandbox) -> None:
     Args:
         sb: Sandbox running the harness.
     """
-    _script(
+    write_stub(
         sb.root.parent / 'bin' / 'apt-get',
         '#!/bin/bash\necho "apt-get $*" >>"${STUB_LOG}"\n'
     )
@@ -603,6 +611,24 @@ def test_parent_of_a_derived_image_is_read_from_its_from_line(
     assert sb.row('latest')[5] == '-'
 
 
+def _tag_of(command: str) -> str:
+    """Return the image tag a podman build command passes to ``--tag``.
+
+    Args:
+        command: Full command line of one build.
+
+    Returns:
+        The tag argument.
+
+    Raises:
+        AssertionError: When the command carries no ``--tag`` option.
+    """
+    match = re.search(r'--tag (\S+)', command)
+    if match is None:
+        raise AssertionError(f'no --tag option in {command}')
+    return match.group(1)
+
+
 @needs_jq
 def test_build_order_and_no_cache_flags(sb: Sandbox) -> None:
     """Base once; per Containerfile primary then twin; no-cache on primaries.
@@ -620,10 +646,7 @@ def test_build_order_and_no_cache_flags(sb: Sandbox) -> None:
     assert done.returncode == 0, done.stderr
     builds = sb.calls('podman build')
     assert len(builds) == 5
-    tags = [
-        re.search(r'--tag (\S+)', b).group(1)  # type: ignore[union-attr]
-        for b in builds
-    ]
+    tags = [_tag_of(b) for b in builds]
     assert tags[0] == 'localhost/debian-bootc-base'
     assert [t for t in tags if t.endswith('_arm64')] == [
         f'{IMAGE}:latest_arm64', f'{IMAGE}:latest-nosign_arm64',
@@ -1093,7 +1116,7 @@ def test_a_failed_signature_fails_the_job(sb: Sandbox) -> None:
     Args:
         sb: Sandbox running the harness.
     """
-    _script(sb.root.parent / 'bin' / 'cosign', '#!/bin/bash\nexit 1\n')
+    write_stub(sb.root.parent / 'bin' / 'cosign', '#!/bin/bash\nexit 1\n')
     done = sb.run([entry('latest')], GITHUB_REF='refs/heads/main')
     assert done.returncode == 1
     assert 'Signature: **failed**' in sb.summary.read_text()
@@ -1117,34 +1140,37 @@ def test_unchanged_images_are_reported_not_failed(sb: Sandbox) -> None:
 
 
 # ------------------------------------------------------------- workflow ----
-def _workflow() -> dict[str, Any]:
+def _workflow() -> dict[object, object]:
     """Load bootc-build.yml.
 
     Returns:
         The parsed workflow.
     """
-    return cast(dict[str, Any], yaml.safe_load(WORKFLOW.read_text()))
+    return as_mapping(load_yaml(WORKFLOW.read_text()))
 
 
 def test_workflow_runs_one_job_per_arch_through_the_script() -> None:
     """Build-test-push is the per-arch job; build-iso is gone."""
-    jobs = _workflow()['jobs']
+    jobs = as_str_mapping(_workflow()['jobs'])
     assert 'build-iso' not in jobs
-    job = jobs['build-test-push']
-    assert job['strategy']['matrix']['group'] == \
+    job = as_str_mapping(jobs['build-test-push'])
+    matrix = as_str_mapping(as_str_mapping(job['strategy'])['matrix'])
+    assert matrix['group'] == \
         '${{ fromJSON(needs.discover.outputs.arch_matrix) }}'
     assert job['runs-on'] == '${{ matrix.group.runner }}'
-    runs = ' '.join(s.get('run', '') for s in job['steps'])
+    steps = as_mappings(as_list(job['steps']))
+    runs = ' '.join(as_str(step.get('run', '')) for step in steps)
     assert 'scripts/image-ci/build-arch.sh' in runs
     assert 'scripts/image-ci/prepare.sh' in runs
-    assert set(jobs['manifest']['needs']) == {'discover', 'build-test-push'}
+    manifest = as_str_mapping(jobs['manifest'])
+    assert set(as_list(manifest['needs'])) == {'discover', 'build-test-push'}
 
 
 def test_workflow_keeps_every_input() -> None:
     """The reusable workflow inputs are unchanged."""
     # YAML 1.1 reads the key `on` as the boolean True.
-    triggers = cast(dict[Any, Any], _workflow())[True]
-    inputs = triggers['workflow_call']['inputs']
+    triggers = as_mapping(as_mapping(_workflow())[True])
+    inputs = as_str_mapping(as_mapping(triggers['workflow_call'])['inputs'])
     assert set(inputs) == {
         'force_no_cache', 'bootc_gpg_sha256', 'apt_url', 'trivy_enforce',
         'trivy_ignorefile'

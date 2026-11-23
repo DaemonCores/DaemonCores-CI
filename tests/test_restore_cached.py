@@ -39,7 +39,7 @@ def _deb(path: Path) -> None:
     shutil.rmtree(tree)
 
 
-def _restore(tmp: Path, name: str) -> subprocess.CompletedProcess:
+def _restore(tmp: Path, name: str) -> subprocess.CompletedProcess[str]:
     """Run restore_cached for one deb served from a file:// site.
 
     Args:

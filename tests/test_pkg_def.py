@@ -9,7 +9,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
-import yaml
+from typed_docs import as_mapping, as_str, iter_steps, load_yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / 'pkg-def' / 'pkg-def.sh'
@@ -42,6 +42,21 @@ pytestmark = pytest.mark.skipif(
 )
 
 
+def _yq_dir() -> str:
+    """Return the directory holding the ``yq`` binary.
+
+    Returns:
+        Parent directory of ``yq``, to prepend to ``PATH``.
+
+    Raises:
+        RuntimeError: When ``yq`` is not installed.
+    """
+    yq = shutil.which('yq')
+    if yq is None:
+        raise RuntimeError('yq is not installed')
+    return str(Path(yq).parent)
+
+
 def old_step() -> str:
     """Return the former inline ``Read package definition`` script.
 
@@ -58,11 +73,10 @@ def old_step() -> str:
                           check=True,
                           capture_output=True,
                           text=True).stdout
-    workflow = yaml.safe_load(text)
-    for job in workflow['jobs'].values():
-        for step in job['steps']:
-            if step.get('id') == 'def':
-                return step['run']
+    workflow = as_mapping(load_yaml(text))
+    for step in iter_steps(workflow):
+        if step.get('id') == 'def':
+            return as_str(step['run'])
     raise AssertionError('step def not found')
 
 
@@ -83,8 +97,7 @@ def run(script: Path, tmp: Path, pkg: str) -> str:
     out.write_text('')
     subprocess.run(['bash', str(script)],
                    env={
-                       'PATH':
-                       f'{Path(shutil.which("yq")).parent}:/usr/bin:/bin',
+                       'PATH': f'{_yq_dir()}:/usr/bin:/bin',
                        'MAN': str(manifest),
                        'PKG': pkg,
                        'ARCH': 'amd64',

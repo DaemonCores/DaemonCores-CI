@@ -33,7 +33,8 @@ def tree(tmp_path: Path) -> Path:
     return tmp_path
 
 
-def call(tree: Path, function: str, **env: str) -> subprocess.CompletedProcess:
+def call(tree: Path, function: str,
+         **env: str) -> subprocess.CompletedProcess[str]:
     """Run one library function from the fake tree.
 
     Args:

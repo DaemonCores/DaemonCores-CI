@@ -26,7 +26,8 @@ REPO = Path(__file__).resolve().parents[1]
 HELPER = REPO / "scripts" / "deb_helpers.sh"
 
 
-def run_detect(script: str, **env_over: str) -> subprocess.CompletedProcess:
+def run_detect(script: str,
+               **env_over: str) -> subprocess.CompletedProcess[str]:
     """Run a snippet with deb_helpers.sh sourced.
 
     This is the same contract the builds get: deb_helpers.sh is imported
@@ -138,7 +139,7 @@ def make_tagged_repo(base: Path, tags: list[str]) -> str:
 def run_roll(
     tmp: Path, repo_dir: str, repo_versions: list[str], tags: list[str],
     **env_over: str
-) -> subprocess.CompletedProcess:
+) -> subprocess.CompletedProcess[str]:
     """Whole fixture: fake apt repo + fake tag repo + one helper run.
 
     Args:

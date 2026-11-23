@@ -5,6 +5,8 @@ import os
 import subprocess
 from pathlib import Path
 
+from typed_docs import as_str_mapping, load_json
+
 SCRIPT = Path(__file__
               ).resolve().parent.parent / 'bootc-debs-end' / 'carry-over.sh'
 
@@ -65,15 +67,14 @@ def test_missing_packages_are_kept(tmp_path: Path) -> None:
                           check=False)
     assert done.returncode == 0, done.stderr
     assert (debs / 'b_1_amd64.deb').read_bytes() == b'b'
-    meta = json.loads(
-        (debs / '.meta' / 'b-amd64.json').read_text(encoding='utf-8')
+    meta = as_str_mapping(
+        load_json((debs / '.meta' / 'b-amd64.json').read_text(encoding='utf-8'))
     )
     assert meta == {'hash': 'hb', 'skipped': True, 'debs': ['b_1_amd64.deb']}
-    assert json.loads(
-        (debs / '.meta' / 'a-amd64.json').read_text(encoding='utf-8')
-    ) == {
-        'fresh': True
-    }
+    fresh = as_str_mapping(
+        load_json((debs / '.meta' / 'a-amd64.json').read_text(encoding='utf-8'))
+    )
+    assert fresh == {'fresh': True}
     assert not (debs / '.meta' / 'c-amd64.json').exists()
     assert (
         '::warning::c-amd64: its published deb(s) cannot be restored'
@@ -126,7 +127,9 @@ def test_deps_hash_survives_the_carry_over(tmp_path: Path) -> None:
                           text=True,
                           check=False)
     assert done.returncode == 0, done.stderr
-    meta = json.loads((debs / '.meta' / 'a-amd64.json').read_text())
+    meta = as_str_mapping(
+        load_json((debs / '.meta' / 'a-amd64.json').read_text())
+    )
     assert meta['deps_hash'] == 'dd'
 
 

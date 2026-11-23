@@ -14,7 +14,7 @@ import sys
 from pathlib import Path
 
 import pytest
-import yaml
+from typed_docs import as_list, as_mapping, as_str, find_mapping, load_yaml
 
 REPO = Path(__file__).resolve().parents[1]
 PVE_PACKAGES = (
@@ -39,11 +39,11 @@ def test_zfs_module_depends_on_the_abi_virtual() -> None:
     builds of one release string share the modules dir, so any profile satisfies
     the slot.
     """
-    entry = next(
-        p for p in yaml.safe_load(PVE_PACKAGES.read_text())["packages"]
-        if p["name"] == "zfs-module-pve"
+    packages = as_list(
+        as_mapping(load_yaml(PVE_PACKAGES.read_text()))["packages"]
     )
-    build = entry["build"]
+    entry = find_mapping(packages, "name", "zfs-module-pve")
+    build = as_str(entry["build"])
     assert 'ZDEP="linux-image-${KVER}"' in build
     # The Depends chain must carry NO profile package at all.
     zdep_line = "\n".join(
@@ -68,10 +68,10 @@ def test_both_profiles_provide_the_virtual_slot() -> None:
     """
     text = DEB_PACKAGES.read_text()
     assert "'Provides: %s, linux-image-%s (= %s)" in text
-    packages = yaml.safe_load(text)["packages"]
-    entry = next(e for e in packages if e["name"] == "linux-image-profile")
-    keys = set(entry["variants"])
-    assert {k.split("-")[0] for k in keys} >= {"ia", "vm"}
+    packages = as_list(as_mapping(load_yaml(text))["packages"])
+    entry = find_mapping(packages, "name", "linux-image-profile")
+    keys = {as_str(variant) for variant in as_mapping(entry["variants"])}
+    assert {key.split("-")[0] for key in keys} >= {"ia", "vm"}
     # Two distinct profiles of a flavour (x64v3) both Provide the release.
     assert any(k.startswith("ia-x64v3") for k in keys)
     assert any(k.startswith("vm-x64v3") for k in keys)
@@ -87,12 +87,12 @@ def test_bore_xanmod_alternate_sibling_registered() -> None:
     Xanmod linux-patches with the per-series topic file path targeting the same
     `bore` entry: a candidate the election re-judges, never a local patch edit.
     """
-    doc = yaml.safe_load(SIBLINGS_YML.read_text())
-    alt = next(s for s in doc["siblings"] if s["name"] == "bore-xanmod")
+    doc = as_mapping(load_yaml(SIBLINGS_YML.read_text()))
+    alt = find_mapping(as_list(doc["siblings"]), "name", "bore-xanmod")
     assert alt["entry"] == "bore"
-    assert alt["repo"].endswith("xanmod/linux-patches")
-    assert "linux-{series}.y-xanmod/xanmod/" in alt["file"]
-    assert set(alt["series"]) == {"7.3", "7.2"}
+    assert as_str(alt["repo"]).endswith("xanmod/linux-patches")
+    assert "linux-{series}.y-xanmod/xanmod/" in as_str(alt["file"])
+    assert {as_str(s) for s in as_list(alt["series"])} == {"7.3", "7.2"}
     # The documented K-PORT verdict of the 2026-11-14 probe stays in the
     # entry comment (xanmod ships no bore file at all).
     text = SIBLINGS_YML.read_text()

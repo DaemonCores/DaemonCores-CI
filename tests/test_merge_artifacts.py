@@ -33,7 +33,7 @@ def _deb(path: Path, payload: bytes) -> None:
     shutil.rmtree(root)
 
 
-def _run(tmp: Path) -> subprocess.CompletedProcess:
+def _run(tmp: Path) -> subprocess.CompletedProcess[str]:
     """Run the script on tmp/debs-in.
 
     Args:

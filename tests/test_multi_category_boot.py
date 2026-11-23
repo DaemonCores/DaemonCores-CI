@@ -10,7 +10,7 @@ failing the tag, the failing category named in the detail.
 from pathlib import Path
 
 import pytest
-from test_image_ci import Sandbox, _script, entry, needs_jq
+from test_image_ci import Sandbox, entry, needs_jq, write_stub
 
 IMAGE_TEST = r"""#!/bin/bash
 echo "image-test $* CATEGORY=${CATEGORY:-}" >>"${STUB_LOG}"
@@ -39,7 +39,7 @@ def sb(tmp_path: Path) -> Sandbox:
         The sandbox.
     """
     box = Sandbox(tmp_path)
-    _script(box.image_test, IMAGE_TEST)
+    write_stub(box.image_test, IMAGE_TEST)
     return box
 
 

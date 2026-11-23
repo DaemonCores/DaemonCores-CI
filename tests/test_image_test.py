@@ -10,7 +10,7 @@ import os
 import shutil
 import socket
 import subprocess
-import textwrap
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
@@ -23,20 +23,18 @@ needs_yq = pytest.mark.skipif(
     shutil.which("yq") is None, reason="yq is required"
 )
 
-MANIFEST = textwrap.dedent(
-    """\
-    boot_timeout: 60
-    categories:
-      - {name: plain, arch: amd64, suffix: "", secure_boot: 1, reference: true}
-      - {name: nosign, arch: amd64, suffix: "-nosign", secure_boot: 1}
-      - {name: k4, arch: amd64, suffix: "-4k", secure_boot: 0}
-      - {name: enforce, arch: amd64, suffix: "-enf", secure_boot: 1,
-         kargs: ["module.sig_enforce=1", "quiet"]}
-      - {name: lax, arch: amd64, suffix: "-enf", secure_boot: 1}
-    tests:
-      - {name: a, run: "true", diag: "echo a"}
-    """
-)
+MANIFEST = """\
+boot_timeout: 60
+categories:
+  - {name: plain, arch: amd64, suffix: "", secure_boot: 1, reference: true}
+  - {name: nosign, arch: amd64, suffix: "-nosign", secure_boot: 1}
+  - {name: k4, arch: amd64, suffix: "-4k", secure_boot: 0}
+  - {name: enforce, arch: amd64, suffix: "-enf", secure_boot: 1,
+     kargs: ["module.sig_enforce=1", "quiet"]}
+  - {name: lax, arch: amd64, suffix: "-enf", secure_boot: 1}
+tests:
+  - {name: a, run: "true", diag: "echo a"}
+"""
 
 
 def sh(snippet: str, env: dict[str, str],
@@ -567,7 +565,7 @@ def test_fingerprint_tracks_crt_and_mok(stubs: Path) -> None:
     mok = certdir(stubs, "mok", "CRT1", {"x.pem": "Y"})
     extra = certdir(stubs, "extra", "CRT1", {"x.pem": "X", "z.pem": "Z"})
     nomok = certdir(stubs, "nomok", "CRT1", {})
-    fps = {}
+    fps: dict[str, str] = {}
     for d in (a, same, crt, mok, extra, nomok):
         r = sh(f'sb_fingerprint "{d}"', {}, stubs)
         assert r.returncode == 0, r.stderr
@@ -1037,6 +1035,18 @@ def test_stop_vm_kills_a_guest_that_ignores_poweroff(stubs: Path) -> None:
         proc.kill()
 
 
+def _sockaddr(sock: socket.socket) -> Iterator[tuple[str, int]]:
+    """Yield the address a socket is bound to.
+
+    Args:
+        sock: A bound internet socket.
+
+    Yields:
+        tuple[str, int]: Host and port the socket listens on.
+    """
+    yield sock.getsockname()
+
+
 def test_free_ssh_port_waits_then_fails_when_taken(stubs: Path) -> None:
     """free_ssh_port fails while the port is taken, passes once free.
 
@@ -1046,7 +1056,7 @@ def test_free_ssh_port_waits_then_fails_when_taken(stubs: Path) -> None:
     with socket.socket() as s:
         s.bind(("127.0.0.1", 0))
         s.listen(1)
-        port = str(s.getsockname()[1])
+        port = str(next(_sockaddr(s))[1])
         r = sh("free_ssh_port 1", {"SSH_PORT": port}, stubs)
         assert r.returncode == 1
         assert "still in use" in r.stdout

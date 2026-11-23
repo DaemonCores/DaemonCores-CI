@@ -29,7 +29,7 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-import yaml
+from typed_docs import as_list, as_mapping, as_mappings, as_str, load_yaml
 
 REPO = Path(__file__).resolve().parents[1]
 PRODUCT = Path(__file__).resolve().parents[2] / "debian-bootc"
@@ -52,17 +52,18 @@ def test_gpu_manifests_present_and_schema() -> None:
         for name in ("nvidia.yml", "amd.yml", "intel.yml"):
             manifest = gpu / name
             assert manifest.is_file(), f"{profile}/{name}"
-            doc = yaml.safe_load(manifest.read_text())
+            doc = as_mapping(load_yaml(manifest.read_text()))
             assert isinstance(doc.get("patches"), list), name
-            for entry in doc["patches"]:
+            for entry in as_mappings(as_list(doc["patches"])):
                 assert entry.get("name")
                 assert entry.get("url")
-                assert entry.get("stage",
-                                 "common") in ("common", "amd64", "arm64")
+                stage = as_str(entry.get("stage", "common"))
+                assert stage in ("common", "amd64", "arm64")
                 sha = entry.get("sha256")
                 if sha is not None:
-                    assert len(sha) == 64
-                    assert all(c in "0123456789abcdef" for c in sha)
+                    digest = as_str(sha)
+                    assert len(digest) == 64
+                    assert all(c in "0123456789abcdef" for c in digest)
         # A profile set is EXACTLY the three driver manifests (no stray
         # file rides the product checkout path the builders glob).
         assert {p.name
@@ -83,7 +84,7 @@ def test_gpu_nvidia_candidates_documented_not_chosen() -> None:
         for name in ("nvidia.yml", "amd.yml", "intel.yml"):
             path = KERNEL_SRC / "patches" / "gpu" / profile / name
             text = path.read_text()
-            doc = yaml.safe_load(text)
+            doc = as_mapping(load_yaml(text))
             if not doc["patches"]:
                 # An EMPTY entered set is legitimate after a pin-bump re-proof
                 # (2026-11-09: the formerly entered release -> 620.70.06 —
@@ -96,23 +97,24 @@ def test_gpu_nvidia_candidates_documented_not_chosen() -> None:
                 assert "sha256" in text.lower(), name
                 continue
             assert True, name  # the applying subset is ENTERED
-            for entry in doc["patches"]:
+            for entry in as_mappings(as_list(doc["patches"])):
+                name_text = as_str(entry.get("name"))
                 sha = entry.get("sha256")
-                assert sha, entry.get("name")
-                assert len(sha) == 64, entry.get("name")
-                assert all(c in "0123456789abcdef"
-                           for c in sha), entry.get("name")
-                assert entry.get("url"), entry.get("name")
-                assert entry.get("stage",
-                                 "common") in ("common",
-                                               "amd64"), entry.get("name")
+                assert sha, name_text
+                digest = as_str(sha)
+                assert len(digest) == 64, name_text
+                assert all(c in "0123456789abcdef" for c in digest), name_text
+                assert entry.get("url"), name_text
+                stage = as_str(entry.get("stage", "common"))
+                assert stage in ("common", "amd64"), name_text
             assert "K-PORT" in text or "exclude-series" in text, (
                 name + ": the non-applying remainder is documented"
             )
             assert "sha256" in text.lower()  # proof documentation in manifest
 
 
-def run_helper(script: str, **env_over: str) -> subprocess.CompletedProcess:
+def run_helper(script: str,
+               **env_over: str) -> subprocess.CompletedProcess[str]:
     """Run a script in bash after sourcing the helper with strict mode.
 
     Args:

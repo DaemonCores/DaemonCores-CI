@@ -16,6 +16,13 @@ from collections.abc import Callable, Iterator
 from pathlib import Path
 
 import pytest
+from typed_docs import (
+    as_list,
+    as_mappings,
+    as_str,
+    as_str_mapping,
+    load_json,
+)
 
 CI = Path(__file__).resolve().parents[1]
 GATE = CI / 'upstream-track' / 'security_gate.sh'
@@ -65,17 +72,20 @@ def _gate(snippet: str,
                           timeout=60)
 
 
-def _log_events(election: Path) -> list[dict]:
+def _log_events(election: Path) -> list[dict[str, object]]:
     """Parse the JSONL selection.log of an election log directory.
 
     Args:
         election: Election log directory.
 
     Returns:
-        One dict per line.
+        One mapping per line.
     """
     text = (election / 'selection.log').read_text()
-    return [json.loads(line) for line in text.splitlines() if line.strip()]
+    return [
+        as_str_mapping(load_json(line)) for line in text.splitlines()
+        if line.strip()
+    ]
 
 
 def test_care_delay_holds_a_fresh_candidate(election: Path) -> None:
@@ -147,12 +157,8 @@ def test_osv_open_advisory_holds_the_election(
             }]
         })
     )
-    p = _gate(
-        """gate_osv '{\"commit\": \"1\"}'.""",
-        election,
-        GATE_OSV_FIXTURE=str(fixture),
-        PKG='r'
-    )
+    cmd = """gate_osv '{"commit": "1"}'."""
+    p = _gate(cmd, election, GATE_OSV_FIXTURE=str(fixture), PKG='r')
     assert p.returncode == 3
     assert 'OSV HOLD' in p.stderr
     assert 'GHSA-xxxx-yyyy-zzzz' in p.stderr
@@ -168,12 +174,8 @@ def test_osv_empty_response_passes(tmp_path: Path, election: Path) -> None:
     """
     fixture = tmp_path / 'osv.json'
     fixture.write_text('{}')
-    p = _gate(
-        """gate_osv '{\"commit\": \"1\"}'.""",
-        election,
-        GATE_OSV_FIXTURE=str(fixture),
-        PKG='r'
-    )
+    cmd = """gate_osv '{"commit": "1"}'."""
+    p = _gate(cmd, election, GATE_OSV_FIXTURE=str(fixture), PKG='r')
     assert p.returncode == 0
 
 
@@ -371,8 +373,13 @@ def test_record_materializes_the_selection_log(election: Path) -> None:
               "'ddee' '' bypass pass"
     p = _gate(snippet, election, PKG='k')
     assert p.returncode == 0, p.stderr
-    record = json.loads((election / 'election-k.json').read_text())
-    entries = {e['key']: e for e in record['entries']}
+    record = as_str_mapping(
+        load_json((election / 'election-k.json').read_text())
+    )
+    entries = {
+        as_str(entry['key']): entry
+        for entry in as_mappings(as_list(record['entries']))
+    }
     assert entries['KERNEL_VER']['kind'] == 'kernel'
     assert entries['KERNEL_VER']['sha256'] == 'aabbcc'
     assert entries['bore']['care_delay'] == 'bypass'
@@ -416,7 +423,7 @@ def fixture_track(tmp_path: Path) -> Path:
     )
     commit = api / 'repos' / 'acme' / 'rolling' / 'commits'
     commit.mkdir(parents=True)
-    head_doc = {
+    head_doc: dict[str, object] = {
         'sha': '0123456789abcdef0123456789abcdef01234567',
         'commit': {
             'committer': {
@@ -424,8 +431,9 @@ def fixture_track(tmp_path: Path) -> Path:
             }
         }
     }
+    sha = as_str(head_doc['sha'])
     (commit / 'HEAD').write_text(json.dumps(head_doc))
-    (commit / head_doc['sha']).write_text(json.dumps(head_doc))
+    (commit / sha).write_text(json.dumps(head_doc))
     advisories = api / 'repos' / 'acme' / 'rolling' / 'security-advisories'
     advisories.parent.mkdir(parents=True, exist_ok=True)
     advisories.write_text(json.dumps([]))
@@ -445,10 +453,12 @@ def _track_run(api: Path, date: str, **extra: str) \
         The completed process.
     """
     head = api / 'repos' / 'acme' / 'rolling' / 'commits' / 'HEAD'
-    body = json.loads(head.read_text())
-    body['commit']['committer']['date'] = date
+    body = as_str_mapping(load_json(head.read_text()))
+    commit = as_str_mapping(body['commit'])
+    committer = as_str_mapping(commit['committer'])
+    committer['date'] = date
     head.write_text(json.dumps(body))
-    (head.parent / body['sha']).write_text(json.dumps(body))
+    (head.parent / as_str(body['sha'])).write_text(json.dumps(body))
     env = {
         'PATH': os.environ['PATH'],
         'MAN': str(api / 'packages.yml'),
@@ -519,9 +529,10 @@ def test_track_passes_an_old_head_commit(track: Path) -> None:
     assert 'ROLL_COMMIT=0123456789abcdef0123456789abcdef01234567' in out
     assert 'skip=false' in out
     assert 'care-delay pass' in result.stderr
-    record = json.loads((api / 'election' / 'election-rolling.json').read_text()
-                        )
-    entry = record['entries'][0]
+    record = as_str_mapping(
+        load_json((api / 'election' / 'election-rolling.json').read_text())
+    )
+    entry = as_str_mapping(as_list(record['entries'])[0])
     assert entry['kind'] == 'commit'
     assert entry['id'] == '0123456789abcdef0123456789abcdef01234567'
     assert entry['care_delay'] == 'pass'
@@ -562,8 +573,12 @@ def test_write_meta_merges_the_election_record(tmp_path: Path) -> None:
                        env=env,
                        timeout=60)
     assert p.returncode == 0, p.stderr
-    meta = json.loads((debs / '.meta' / 'pkg-amd64.json').read_text())
-    assert meta['election']['entries'][0]['id'] == 'v1'
+    meta = as_str_mapping(
+        load_json((debs / '.meta' / 'pkg-amd64.json').read_text())
+    )
+    election = as_str_mapping(meta['election'])
+    entry = as_str_mapping(as_list(election['entries'])[0])
+    assert entry['id'] == 'v1'
     assert meta['hash'] == '1234'
 
 
@@ -592,7 +607,9 @@ def test_write_meta_without_a_record_stays_hash_only(tmp_path: Path) -> None:
                        env=env,
                        timeout=60)
     assert p.returncode == 0, p.stderr
-    meta = json.loads((debs / '.meta' / 'pkg-amd64.json').read_text())
+    meta = as_str_mapping(
+        load_json((debs / '.meta' / 'pkg-amd64.json').read_text())
+    )
     assert meta == {'hash': '1234', 'skipped': False, 'debs': ['p.deb']}
 
 
@@ -642,7 +659,7 @@ def test_sbom_aggregates_and_a_moved_id_lands_in_the_changelog(
             'debs': ['p_1_amd64.deb']
         })
     )
-    prior = {
+    prior: dict[str, object] = {
         'packages': [{
             'package': 'linux-image',
             'arch': 'amd64',
@@ -673,10 +690,15 @@ def test_sbom_aggregates_and_a_moved_id_lands_in_the_changelog(
                        },
                        timeout=60)
     assert p.returncode == 0, p.stderr
-    sbom = json.loads((out / 'sbom.json').read_text())
-    assert sbom['source'].startswith('election selection.log')
-    assert [x['package'] for x in sbom['packages']] == ['linux-image']
-    assert sbom['packages'][0]['election']['entries'][0]['id'] == '7.2.15'
+    sbom = as_str_mapping(load_json((out / 'sbom.json').read_text()))
+    assert as_str(sbom['source']).startswith('election selection.log')
+    packages = as_list(sbom['packages'])
+    names = [as_str(item['package']) for item in as_mappings(packages)]
+    assert names == ['linux-image']
+    package = as_str_mapping(packages[0])
+    election = as_str_mapping(package['election'])
+    entry = as_str_mapping(as_list(election['entries'])[0])
+    assert entry['id'] == '7.2.15'
     changelog = (out / 'CHANGELOG.md').read_text()
     assert 'Variants moved this publish' in changelog
     assert '7.2.14 -> 7.2.15' in changelog
@@ -754,14 +776,14 @@ def _release_api(tmp_path: Path, young: str, old: str) -> Path:
     )
     base = api / 'repos' / 'acme' / 'tool'
     base.mkdir(parents=True)
-    new = {
+    new: dict[str, object] = {
         'tag_name': 'v2.0.0',
         'published_at': young,
         'draft': False,
         'prerelease': False,
         'assets': []
     }
-    prev = {
+    prev: dict[str, object] = {
         'tag_name': 'v1.9.0',
         'published_at': old,
         'draft': False,
@@ -775,6 +797,44 @@ def _release_api(tmp_path: Path, young: str, old: str) -> Path:
     return api
 
 
+class _ApiServer(http.server.ThreadingHTTPServer):
+    """Threading HTTP server carrying the API tree root directory.
+
+    Attributes:
+        root: Directory of the API tree served.
+    """
+
+    root: Path
+
+
+class _Handler(http.server.BaseHTTPRequestHandler):
+    """Serve the API tree; a directory answers its .list file."""
+
+    def do_GET(self) -> None:
+        """Answer a GET from the API tree."""
+        server = self.server
+        assert isinstance(server, _ApiServer)
+        path = server.root / self.path.split('?')[0].lstrip('/')
+        if path.is_dir():
+            path = path.with_name(path.name + '.list')
+        if not path.is_file():
+            self.send_error(404)
+            return
+        body = path.read_bytes()
+        self.send_response(200)
+        self.send_header('Content-Length', str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def log_message(self, *args: object, **kwargs: object) -> None:
+        """Silence the default request log.
+
+        Args:
+            *args: Log arguments, ignored.
+            **kwargs: Log arguments, ignored.
+        """
+
+
 @pytest.fixture(name='serve')
 def fixture_serve() -> Iterator[Callable[[Path], str]]:
     """Serve an API tree over HTTP, ignoring the query string.
@@ -786,7 +846,7 @@ def fixture_serve() -> Iterator[Callable[[Path], str]]:
     Yields:
         Callable[[Path], str]: A function mapping an API tree to its base URL.
     """
-    servers: list[http.server.ThreadingHTTPServer] = []
+    servers: list[_ApiServer] = []
 
     def start(root: Path) -> str:
         """Serve root over HTTP on a free port and return its base URL.
@@ -797,32 +857,8 @@ def fixture_serve() -> Iterator[Callable[[Path], str]]:
         Returns:
             The http://127.0.0.1:<port> base URL of the server.
         """
-
-        class Handler(http.server.BaseHTTPRequestHandler):
-            """Serve the API tree; a directory answers its .list file."""
-
-            def do_GET(self) -> None:
-                """Answer a GET from the API tree."""
-                path = root / self.path.split('?')[0].lstrip('/')
-                if path.is_dir():
-                    path = path.with_name(path.name + '.list')
-                if not path.is_file():
-                    self.send_error(404)
-                    return
-                body = path.read_bytes()
-                self.send_response(200)
-                self.send_header('Content-Length', str(len(body)))
-                self.end_headers()
-                self.wfile.write(body)
-
-            def log_message(self, *args: object) -> None:
-                """Silence the default request log.
-
-                Args:
-                    *args: Log arguments, ignored.
-                """
-
-        server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), Handler)
+        server = _ApiServer(('127.0.0.1', 0), _Handler)
+        server.root = root
         threading.Thread(target=server.serve_forever, daemon=True).start()
         servers.append(server)
         return f'http://127.0.0.1:{server.server_address[1]}'

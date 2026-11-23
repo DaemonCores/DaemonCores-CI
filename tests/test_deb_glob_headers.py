@@ -8,9 +8,10 @@ pruned from the APT index and every cache hit restored a headers-less set (run
 now carries several space-separated patterns.
 """
 
-import json
 import subprocess
 from pathlib import Path
+
+from typed_docs import as_list, as_str, as_str_mapping, load_json
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / 'build-deb' / 'build-deb.sh'
@@ -67,10 +68,13 @@ def test_multi_glob_records_every_pattern(tmp_path: Path) -> None:
                    env=env,
                    capture_output=True,
                    text=True)
-    meta = json.loads(
-        (debs / '.meta' / 'linux-image-vm-x64v3-amd64.json').read_text()
+    meta = as_str_mapping(
+        load_json(
+            (debs / '.meta' / 'linux-image-vm-x64v3-amd64.json').read_text()
+        )
     )
-    assert sorted(meta['debs']) == sorted([IMAGE, HEADERS]), meta
+    listed = sorted(as_str(name) for name in as_list(meta['debs']))
+    assert listed == sorted([IMAGE, HEADERS]), meta
 
 
 def test_single_glob_still_works(tmp_path: Path) -> None:
@@ -115,5 +119,7 @@ def test_single_glob_still_works(tmp_path: Path) -> None:
                    env=env,
                    capture_output=True,
                    text=True)
-    meta = json.loads((debs / '.meta' / 'onlyimage-amd64.json').read_text())
+    meta = as_str_mapping(
+        load_json((debs / '.meta' / 'onlyimage-amd64.json').read_text())
+    )
     assert meta['debs'] == ['onlyimage_1_amd64.deb'], meta

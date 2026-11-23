@@ -5,6 +5,8 @@ import os
 import subprocess
 from pathlib import Path
 
+from typed_docs import as_list, as_str, load_json
+
 ROOT = Path(__file__).resolve().parents[1]
 PLAN = ROOT / 'deb-plan' / 'plan.sh'
 HASH = ROOT / 'build-deb' / 'content-hash.sh'
@@ -106,7 +108,7 @@ def _plan(ws: Path, pages: Path) -> tuple[dict[str, str], str]:
     ), done.stderr
 
 
-def _publish(pages: Path, entries: dict) -> None:
+def _publish(pages: Path, entries: dict[str, object]) -> None:
     """Write the published hashes.json.
 
     Args:
@@ -319,12 +321,12 @@ def test_every_planned_package_gets_a_verdict(tmp_path: Path) -> None:
     assert done.returncode == 0, done.stderr
     got = dict(line.split('=', 1) for line in out.read_text().splitlines())
     placed = [
-        n for key in ('wave0', 'wave1', 'skipped')
-        for n in json.loads(got[key])
+        as_str(n) for key in ('wave0', 'wave1', 'skipped')
+        for n in as_list(load_json(got[key]))
     ]
     assert sorted(placed) == sorted(n for ns in wanted.values() for n in ns)
-    assert 'Delta' in json.loads(got['wave0'])
-    assert json.loads(got['skipped']) == ['gamma']
+    assert 'Delta' in as_list(load_json(got['wave0']))
+    assert as_list(load_json(got['skipped'])) == ['gamma']
 
 
 def test_a_published_build_that_is_not_served_is_rebuilt(

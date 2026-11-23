@@ -11,10 +11,18 @@ import os
 import shutil
 import subprocess
 from pathlib import Path
-from typing import Any, cast
+from typing import TypedDict
 
 import pytest
-import yaml
+from typed_docs import (
+    as_list,
+    as_mapping,
+    as_mappings,
+    as_str,
+    as_str_mapping,
+    load_json,
+    load_yaml,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOWS = ROOT / '.github' / 'workflows'
@@ -24,25 +32,110 @@ JQ_WORKS = shutil.which('jq') is not None and subprocess.run(['jq', '-n', '1'],
 needs_jq = pytest.mark.skipif(not JQ_WORKS, reason='a working jq is required')
 
 
+class Entry(TypedDict):
+    """One image of the build matrix.
+
+    Attributes:
+        file: Containerfile the image is built from.
+        tag: Image tag.
+        arch: Target architecture.
+        kernel_suffix: Suffix of the kernel variant, empty for the default.
+        twin_suffix: Suffix of the usage twin, always empty since L1.
+    """
+
+    file: str
+    tag: str
+    arch: str
+    kernel_suffix: str
+    twin_suffix: str
+
+
+class Group(TypedDict):
+    """The matrix entries built by one runner.
+
+    Attributes:
+        arch: Architecture every entry of the group targets.
+        runner: GitHub runner the group is built on.
+        entries: Images of the group, in build order.
+    """
+
+    arch: str
+    runner: str
+    entries: list[Entry]
+
+
+class Discovered(TypedDict):
+    """The matrices written by the discover step.
+
+    Attributes:
+        groups: Entries grouped by architecture.
+        wave1: Every entry, flattened.
+        manifest: Raw entries of the manifest matrix.
+    """
+
+    groups: list[Group]
+    wave1: list[Entry]
+    manifest: list[dict[str, object]]
+
+
+def _entry(value: object) -> Entry:
+    """Narrow one matrix entry.
+
+    Args:
+        value: A parsed matrix entry.
+
+    Returns:
+        The entry, fields typed.
+    """
+    data = as_str_mapping(value)
+    return Entry(
+        file=as_str(data['file']),
+        tag=as_str(data['tag']),
+        arch=as_str(data['arch']),
+        kernel_suffix=as_str(data['kernel_suffix']),
+        twin_suffix=as_str(data['twin_suffix']),
+    )
+
+
+def _group(value: object) -> Group:
+    """Narrow one architecture group.
+
+    Args:
+        value: A parsed architecture group.
+
+    Returns:
+        The group, entries typed.
+    """
+    data = as_str_mapping(value)
+    return Group(
+        arch=as_str(data['arch']),
+        runner=as_str(data['runner']),
+        entries=[_entry(entry) for entry in as_list(data['entries'])],
+    )
+
+
 def _discover_script() -> str:
     """Return the shell of the discover step of ``bootc-build.yml``.
 
     Returns:
         The ``run`` script of the step that builds the matrices.
     """
-    workflow = cast(
-        dict[str, Any],
-        yaml.safe_load((WORKFLOWS / 'bootc-build.yml').read_text())
+    workflow = as_mapping(
+        load_yaml((WORKFLOWS / 'bootc-build.yml').read_text())
     )
-    steps = workflow['jobs']['discover']['steps']
-    return next(s['run'] for s in steps if s.get('id') == 'list')
+    discover = as_str_mapping(as_mapping(workflow['jobs'])['discover'])
+    steps = as_list(discover['steps'])
+    return next(
+        as_str(step['run']) for step in as_mappings(steps)
+        if step.get('id') == 'list'
+    )
 
 
 def _discover(
     tmp_path: Path,
     nosign: bool = False,
     extra: dict[str, str] | None = None
-) -> dict[str, list[dict[str, Any]]]:
+) -> Discovered:
     """Run the discover step on a repository with three Containerfiles.
 
     Args:
@@ -75,15 +168,22 @@ def _discover(
                    env=env,
                    check=True,
                    capture_output=True)
-    lines = dict(
-        ln.split('=', 1) for ln in out.read_text().splitlines() if '=' in ln
+    lines: dict[str, str] = {}
+    for line in out.read_text().splitlines():
+        if '=' in line:
+            key, _, value = line.partition('=')
+            lines[key] = value
+    parsed = as_list(load_json(lines['arch_matrix']))
+    groups = [_group(group) for group in parsed]
+    manifest = [
+        as_str_mapping(entry)
+        for entry in as_list(load_json(lines['manifest_matrix']))
+    ]
+    return Discovered(
+        groups=groups,
+        wave1=[entry for group in groups for entry in group['entries']],
+        manifest=manifest,
     )
-    groups = json.loads(lines['arch_matrix'])
-    return {
-        'groups': groups,
-        'wave1': [e for g in groups for e in g['entries']],
-        'manifest': json.loads(lines['manifest_matrix'])
-    }
 
 
 @needs_jq
@@ -145,7 +245,7 @@ def test_twin_only_for_the_generic_images(tmp_path: Path) -> None:
         ('iso', 'amd64'): '',
         ('iso', 'arm64'): '',
     }
-    manifest = {e['tag']: e['arches'] for e in result['manifest']}
+    manifest = {as_str(e['tag']): e['arches'] for e in result['manifest']}
     assert manifest['latest'] == ['amd64', 'arm64']
     assert manifest['latest-4k'] == ['arm64']
     assert manifest['board'] == ['amd64', 'arm64']
@@ -165,7 +265,7 @@ def test_no_twin_without_the_input(tmp_path: Path) -> None:
     """
     result = _discover(tmp_path, nosign=False)
     assert not [e for e in result['wave1'] if e['twin_suffix']]
-    assert not [e for e in result['manifest'] if 'nosign' in e['tag']]
+    assert not [e for e in result['manifest'] if 'nosign' in as_str(e['tag'])]
     assert not [e for e in result['wave1'] if 'nosign' in e['tag']]
 
 
@@ -198,7 +298,9 @@ def _expand(unsigned: str) -> list[str]:
                             capture_output=True,
                             text=True,
                             check=True)
-    return [p['name'] for p in json.loads(result.stdout)['packages']]
+    payload = as_str_mapping(load_json(result.stdout))
+    packages = as_list(payload['packages'])
+    return [as_str(as_mapping(package)['name']) for package in packages]
 
 
 @needs_jq
@@ -262,7 +364,7 @@ def test_arches_label_limits_an_image_to_its_architectures(
     amd64, arm64 = ([e['tag'] for e in g['entries']] for g in result['groups'])
     assert amd64 == ['latest', 'board', 'iso', 'vendor']
     assert 'vendor' not in arm64
-    manifest = {e['tag']: e['arches'] for e in result['manifest']}
+    manifest = {as_str(e['tag']): e['arches'] for e in result['manifest']}
     assert manifest['vendor'] == ['amd64']
     assert manifest['latest'] == ['amd64', 'arm64']
     assert len(result['groups']) == 2

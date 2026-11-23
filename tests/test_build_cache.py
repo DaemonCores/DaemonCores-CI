@@ -1,8 +1,9 @@
 """``build-deb.sh`` never builds the same content hash twice."""
 
-import json
 import subprocess
 from pathlib import Path
+
+from typed_docs import as_list, as_str_mapping, load_json
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / 'build-deb' / 'build-deb.sh'
@@ -64,7 +65,8 @@ def test_a_second_run_reuses_the_build_of_the_same_hash(tmp_path: Path) -> None:
     first, out1, _ = _run(tmp_path, '1', BUILD, DEB_CACHE_DIR=str(cache))
     assert first.returncode == 0, first.stderr
     assert 'skipped=false' in out1
-    assert json.loads((cache / 'debs.json').read_text()) == ['tool_1_amd64.deb']
+    published = as_list(load_json((cache / 'debs.json').read_text()))
+    assert published == ['tool_1_amd64.deb']
     # The first run never published: the site is still empty. The failing
     # build proves the second run does not build.
     second, out2, debs = _run(tmp_path, '2', 'exit 1', DEB_CACHE_DIR=str(cache))
@@ -72,7 +74,9 @@ def test_a_second_run_reuses_the_build_of_the_same_hash(tmp_path: Path) -> None:
     assert 'from_build_cache=true' in out2
     assert 'build_failed=true' not in out2
     assert (debs / 'tool_1_amd64.deb').is_file()
-    meta = json.loads((debs / '.meta' / 'tool-amd64.json').read_text())
+    meta = as_str_mapping(
+        load_json((debs / '.meta' / 'tool-amd64.json').read_text())
+    )
     assert meta['skipped'] is False
 
 

@@ -11,10 +11,16 @@ import os
 import shutil
 import subprocess
 from pathlib import Path
-from typing import Any, cast
 
 import pytest
-import yaml
+from typed_docs import (
+    as_list,
+    as_mapping,
+    as_str,
+    as_str_mapping,
+    load_json,
+    load_yaml,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOWS = ROOT / '.github' / 'workflows'
@@ -24,7 +30,7 @@ JQ_WORKS = shutil.which('jq') is not None and subprocess.run(['jq', '-n', '1'],
 needs_jq = pytest.mark.skipif(not JQ_WORKS, reason='a working jq is required')
 
 
-def _run_filter(manifest: dict[str, Any], **env: str) -> list[str]:
+def _run_filter(manifest: dict[str, object], **env: str) -> list[str]:
     """Run ``expand.jq`` on a manifest with the given env.
 
     Args:
@@ -43,10 +49,12 @@ def _run_filter(manifest: dict[str, Any], **env: str) -> list[str]:
                             capture_output=True,
                             text=True,
                             check=True)
-    return [p['name'] for p in json.loads(result.stdout)['packages']]
+    payload = as_str_mapping(load_json(result.stdout))
+    packages = as_list(payload['packages'])
+    return [as_str(as_mapping(package)['name']) for package in packages]
 
 
-def _manifest() -> dict[str, Any]:
+def _manifest() -> dict[str, object]:
     """A two-package manifest: one plain, one gpu-driver marked.
 
     Returns:
@@ -85,7 +93,7 @@ class TestManifestFilter:
 
     def test_coexists_with_the_signing_filter(self) -> None:
         """Unsigned-kernel kept while gpu-driver is dropped, and the reverse."""
-        unsigned = {
+        unsigned: dict[str, object] = {
             'packages': [{
                 'name': 'mesa'
             }, {
@@ -104,29 +112,28 @@ class TestManifestFilter:
 class TestWiring:
     """The workflows carry the flag end to end."""
 
-    def _action_env(self) -> dict[str, Any]:
+    def _action_env(self) -> dict[str, object]:
         """Read the env of the first step of the manifest-expand action.
 
         Returns:
             The parsed ``env`` mapping.
         """
-        action = cast(
-            dict[str, Any],
-            yaml.safe_load((ROOT / 'manifest-expand' / 'action.yml').read_text()
-                           )
+        action = as_str_mapping(
+            load_yaml((ROOT / 'manifest-expand' / 'action.yml').read_text())
         )
-        return action['runs']['steps'][0]['env']
+        steps = as_list(as_mapping(action['runs'])['steps'])
+        return as_str_mapping(as_mapping(steps[0])['env'])
 
     def test_action_declares_and_passes_gpu_driver(self) -> None:
         """The action input reaches the ``GPU_DRIVER`` env of the step."""
-        action = cast(
-            dict[str, Any],
-            yaml.safe_load((ROOT / 'manifest-expand' / 'action.yml').read_text()
-                           )
+        action = as_str_mapping(
+            load_yaml((ROOT / 'manifest-expand' / 'action.yml').read_text())
         )
-        assert action['inputs'].get('gpu-driver', {}).get('default') == ''
-        assert self._action_env(
-        ).get('GPU_DRIVER') == '${{ inputs.gpu-driver }}'
+        inputs = as_str_mapping(action['inputs'])
+        gpu_driver = as_str_mapping(inputs.get('gpu-driver', {}))
+        assert gpu_driver.get('default') == ''
+        assert self._action_env().get('GPU_DRIVER') == \
+            '${{ inputs.gpu-driver }}'
 
     def test_debs_builder_drops_by_default(self) -> None:
         """The deb builder maps a ``gpu_driver`` input to the filter.

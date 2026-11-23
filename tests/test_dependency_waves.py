@@ -6,12 +6,15 @@ import subprocess
 import sys
 from pathlib import Path
 
+from typed_docs import as_list, as_str, load_json
+
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts" / "dependency-waves.py"
 WORKFLOW = ROOT / ".github" / "workflows" / "bootc-debs-builder.yml"
 
 
-def run_waves(tmp_path: Path, packages: list[dict]) -> dict[str, list[str]]:
+def run_waves(tmp_path: Path,
+              packages: list[dict[str, object]]) -> dict[str, list[str]]:
     """Run the script on ``packages`` and return the parsed wave outputs.
 
     Args:
@@ -32,10 +35,10 @@ def run_waves(tmp_path: Path, packages: list[dict]) -> dict[str, list[str]]:
             **os.environ, "GITHUB_OUTPUT": str(out)
         },
     )
-    result = {}
+    result: dict[str, list[str]] = {}
     for line in out.read_text().splitlines():
         key, value = line.split("=", 1)
-        result[key] = json.loads(value)
+        result[key] = [as_str(name) for name in as_list(load_json(value))]
     return result
 
 

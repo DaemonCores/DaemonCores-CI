@@ -6,8 +6,7 @@ from pathlib import Path
 SCRIPT = Path(__file__
               ).resolve().parent.parent / 'scripts' / 'kernel_prepare.sh'
 
-_DRIVER =\
-          r'''
+_DRIVER = r'''
 set -euo pipefail
 source "$1"
 apt-get() { :; }

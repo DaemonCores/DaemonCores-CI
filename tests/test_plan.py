@@ -9,7 +9,7 @@ SCRIPT = Path(__file__).resolve().parents[1] / 'build-deb' / 'plan.py'
 KERNEL = 'kernel_signing_setup; make bindeb-pkg'
 
 
-def _plan(tmp_path: Path, packages: list[dict]) -> list[str]:
+def _plan(tmp_path: Path, packages: list[dict[str, object]]) -> list[str]:
     """Run plan.py on a manifest and return the printed order.
 
     Args:

@@ -31,7 +31,7 @@ def _gpg_home() -> tuple[Path, dict[str, str]]:
     Returns:
         The home directory and an environment pointing GNUPGHOME at it.
     """
-    home = Path(tempfile.mkdtemp(dir='/tmp'))
+    home = Path(tempfile.mkdtemp())
     return home, {**os.environ, 'GNUPGHOME': str(home)}
 
 

@@ -22,11 +22,12 @@ admission: $(VBIN)/pip
 
 check: admission
 	$(VBIN)/yapf --diff --recursive $(PYTHON_SRCS) $(PYTHON_TESTS)
-	$(VBIN)/docformatter --check --diff --recursive $(PYTHON_SRCS)
+	$(VBIN)/docformatter --check --diff --recursive $(PYTHON_SRCS) $(PYTHON_TESTS)
 	$(VBIN)/ruff check $(PYTHON_SRCS) $(PYTHON_TESTS)
-	$(VBIN)/mypy --explicit-package-bases $(PYTHON_SRCS)
-	$(VBIN)/basedpyright $(PYTHON_SRCS)
+	$(VBIN)/mypy --explicit-package-bases $(PYTHON_SRCS) $(PYTHON_TESTS)
+	$(VBIN)/basedpyright $(PYTHON_SRCS) $(PYTHON_TESTS)
 	$(VBIN)/pydoclint $(PYTHON_SRCS) $(PYTHON_TESTS)
+	$(VBIN)/bandit -r -ll $(PYTHON_SRCS) $(PYTHON_TESTS)
 	$(VBIN)/python scripts/check_docstrings.py --root .
 	shellcheck -x -P SCRIPTDIR $(SHELL_SRCS)
 	shfmt -d -i 2 -bn -ci $(SHELL_SRCS)

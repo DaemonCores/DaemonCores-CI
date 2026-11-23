@@ -11,10 +11,19 @@ debian-bootc checkout (kernel-src/patches); this test suite reads the pve.yml
 and kernel.yml from that checkout as the reference data the helper must resolve.
 """
 
+import json
 import os
 import subprocess
 from pathlib import Path
-from typing import Any
+
+from typed_docs import (
+    as_list,
+    as_mapping,
+    as_mappings,
+    as_str,
+    as_str_mapping,
+    load_yaml,
+)
 
 REPO = Path(__file__).resolve().parents[1]
 HELPER = REPO / "scripts" / "kernel_helpers.sh"
@@ -26,7 +35,8 @@ VE_MANIFEST = KERNEL_SRC / "patches" / "pve.yml"
 ENV = {"KERNEL_CDN": "", "PATH": os.environ["PATH"], "HOME": os.environ["HOME"]}
 
 
-def run_helper(script: str, **env_over: str) -> subprocess.CompletedProcess:
+def run_helper(script: str,
+               **env_over: str) -> subprocess.CompletedProcess[str]:
     """Run a script in bash after sourcing the kernel helper library.
 
     Args:
@@ -51,7 +61,7 @@ def test_helper_shell_syntax() -> None:
 
 
 def _expected_class_count(
-    doc: dict[str, Any], series: str, classes: tuple[str, ...]
+    doc: dict[str, object], series: str, classes: tuple[str, ...]
 ) -> int:
     """Count the entries the helper lists for a series and stage classes.
 
@@ -67,8 +77,9 @@ def _expected_class_count(
         The number of entries the helper should list.
     """
     return sum(
-        1 for p in doc["patches"] if series not in
-        (p.get("exclude-series") or []) and p.get("stage", "common") in classes
+        1 for entry in as_mappings(as_list(doc["patches"]))
+        if series not in as_list(entry.get("exclude-series") or [])
+        and as_str(entry.get("stage", "common")) in classes
     )
 
 
@@ -78,17 +89,14 @@ def test_patch_list_from_native_manifest() -> None:
     The product packages.yml carries NO native patch data (owner R-870b: the
     canonical set lives in kernel-src/patches).
     """
-    import json
-
-    import yaml
-
     manifest = PRODUCT / "workflows" / "bootc-debs-builder" / "packages.yml"
     assert manifest.is_file()
+    packages = as_mapping(load_yaml(manifest.read_text()))
     assert not [
-        p for p in yaml.safe_load(manifest.read_text())["packages"]
+        p for p in as_mappings(as_list(packages["packages"]))
         if p["name"] == "linux-image" and "patches" in p
     ]
-    doc = yaml.safe_load(VE_MANIFEST.read_text())
+    doc = as_str_mapping(load_yaml(VE_MANIFEST.read_text()))
     patches = json.dumps(doc["patches"])
     for series in ("7.0.14", "6.12.107", "6.14.11"):
         r = run_helper(
@@ -152,11 +160,7 @@ def test_series_templates_resolve(tmp_path: Path) -> None:
 
 def test_patch_list_from_native_patches_json() -> None:
     """PATCHES_JSON (the native export) yields the same lines as the file."""
-    import json
-
-    import yaml
-
-    doc = yaml.safe_load(VE_MANIFEST.read_text())
+    doc = as_str_mapping(load_yaml(VE_MANIFEST.read_text()))
     patches = json.dumps(doc["patches"])
     from_file = run_helper(f'kernel_patch_list "{VE_MANIFEST}" amd64 7.0.14')
     from_json = run_helper(
@@ -213,9 +217,8 @@ def _make_cdn(tmp_path: Path, version: str) -> tuple[Path, Path, str]:
                                                      ).hexdigest()
 
 
-def _fetch(
-    cdn: Path, version: str, want: str, cache: Path
-) -> subprocess.CompletedProcess:
+def _fetch(cdn: Path, version: str, want: str,
+           cache: Path) -> subprocess.CompletedProcess[str]:
     """Run kernel_fetch_source against the mirror with the given cache.
 
     Args:

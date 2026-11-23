@@ -13,12 +13,16 @@ import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlsplit
 
+from typed_docs import as_str, as_str_mapping, load_json
+
 
 class FakeIssuesApi:
     """Serve ``/repos/o/r`` issue endpoints on a local port."""
 
     def __init__(
-        self, repo: str = "o/r", open_issues: list[dict] | None = None
+        self,
+        repo: str = "o/r",
+        open_issues: list[dict[str, object]] | None = None,
     ) -> None:
         """Start the server and remember the caller's repo and open issues.
 
@@ -28,7 +32,7 @@ class FakeIssuesApi:
         """
         self.repo = repo
         self.open_issues = open_issues if open_issues is not None else []
-        self.requests: list[dict] = []
+        self.requests: list[dict[str, object]] = []
         outer = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -50,7 +54,9 @@ class FakeIssuesApi:
                 split = urlsplit(self.path)
                 path = split.path.rstrip("/")
                 length = int(self.headers.get("content-length") or 0)
-                payload = json.loads(self.rfile.read(length) or b"{}")
+                payload = as_str_mapping(
+                    load_json(self.rfile.read(length).decode() or "{}")
+                )
                 outer.requests.append({
                     "method": "POST",
                     "path": path,
@@ -70,7 +76,9 @@ class FakeIssuesApi:
                 split = urlsplit(self.path)
                 path = split.path.rstrip("/")
                 length = int(self.headers.get("content-length") or 0)
-                payload = json.loads(self.rfile.read(length) or b"{}")
+                payload = as_str_mapping(
+                    load_json(self.rfile.read(length).decode() or "{}")
+                )
                 outer.requests.append({
                     "method": "PATCH",
                     "path": path,
@@ -94,11 +102,12 @@ class FakeIssuesApi:
                 self.end_headers()
                 self.wfile.write(body)
 
-            def log_message(self, *_args: object) -> None:
+            def log_message(self, *args: object, **kwargs: object) -> None:
                 """Silence the default request log.
 
                 Args:
-                    *_args: Log arguments, ignored.
+                    *args: Log arguments, ignored.
+                    **kwargs: Log arguments, ignored.
                 """
                 return  # keep the pytest output quiet
 
@@ -115,10 +124,12 @@ class FakeIssuesApi:
         Returns:
             The ``http://host:port`` URL of the fake server.
         """
-        host, port = self._server.server_address[:2]
-        return f"http://{host}:{port}"
+        return (
+            f"http://{self._server.server_name}"
+            f":{self._server.server_port}"
+        )
 
-    def calls(self, method: str, suffix: str) -> list[dict]:
+    def calls(self, method: str, suffix: str) -> list[dict[str, object]]:
         """Recorded requests by method and path suffix.
 
         Args:
@@ -130,7 +141,7 @@ class FakeIssuesApi:
         """
         return [
             call for call in self.requests
-            if call["method"] == method and suffix in call["path"]
+            if call["method"] == method and suffix in as_str(call["path"])
         ]
 
     def stop(self) -> None:
@@ -140,7 +151,7 @@ class FakeIssuesApi:
         self._thread.join(timeout=5)
 
 
-def broken_issue(number: int, package: str) -> dict:
+def broken_issue(number: int, package: str) -> dict[str, object]:
     """An open "Broken build" issue as the CI title-matches it.
 
     Args:

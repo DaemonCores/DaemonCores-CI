@@ -20,13 +20,13 @@ def test_shell_header_extracts_comment_block(tmp_path: Path) -> None:
         "#!/bin/bash\n#\n# name - purpose\n# more\nset -e\n# x\n",
         encoding="utf-8"
     )
-    assert gen_docs._shell_header(script) == "name - purpose\nmore"
+    assert gen_docs.shell_header(script) == "name - purpose\nmore"
 
 
 def test_page_replaces_only_generated_region() -> None:
     """Text outside the markers survives regeneration."""
     current = f"intro\n{gen_docs.START}\nold\n{gen_docs.END}\noutro\n"
-    new = gen_docs._page("T", "new", current)
+    new = gen_docs.page("T", "new", current)
     assert new.startswith("intro\n")
     assert new.endswith("\noutro\n")
     assert "old" not in new

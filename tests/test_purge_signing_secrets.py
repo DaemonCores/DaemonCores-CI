@@ -8,6 +8,7 @@ leaving public certificates (.crt, *.x509) untouched.
 
 import os
 import subprocess
+import tempfile
 from pathlib import Path
 
 SCRIPT = (
@@ -44,7 +45,7 @@ def temp_env() -> dict[str, str]:
     Returns:
         The environment mapping.
     """
-    return {'HOME': os.environ.get('HOME', '/tmp')}
+    return {'HOME': os.environ.get('HOME') or tempfile.gettempdir()}
 
 
 def test_private_key_artifacts_are_purged(tmp_path: Path) -> None:
