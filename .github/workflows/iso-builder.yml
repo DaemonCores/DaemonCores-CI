@@ -322,7 +322,9 @@ jobs:
           fi
 
           mv "${ISO_PATH}" "${DEST}"
-          sha256sum "${DEST}" > "${DEST}.sha256"
+          # Hash from inside out/: the file must name the bare ISO so that
+          # `sha256sum -c` works next to a downloaded copy.
+          (cd "$(dirname "${DEST}")" && sha256sum "$(basename "${DEST}")" > "$(basename "${DEST}").sha256")
           echo "ISO_FINAL=${DEST}" >> "$GITHUB_ENV"
           echo "Built: $(du -sh ${DEST})"
 
