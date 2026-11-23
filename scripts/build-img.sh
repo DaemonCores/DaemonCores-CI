@@ -316,11 +316,22 @@ PART
         --karg rw \
         /target
   else
-    # arm64 phone: p1 = raw boot (64M, Android boot.img), p2 = ext4 root.
-    echo ">>> Partitioning (gallium/arm64 phone: raw boot 64M + ext4 /)..."
-    sfdisk "${DEV}" <<'PART'
+    # arm64 phone: p1 = raw boot (sized from the image, Android boot.img), p2 = ext4 root.
+    # The raw boot partition is made before the image is laid, so its size
+    # comes from the kernel + initramfs the image ships (a fixed 64M broke
+    # the build at the dd below once they reached 109 MB).
+    SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    PAYLOAD_SIZES="$(podman run --rm --entrypoint sh local-bootc:latest -c '
+      set -e
+      v="$(ls /usr/lib/modules | sort -V | tail -n 1)"
+      stat -c %s "/usr/lib/modules/${v}/vmlinuz" "/usr/lib/modules/${v}/initramfs.img"
+    ')"
+    # shellcheck disable=SC2086 # one argument per size line
+    BOOT_MB="$(python3 "${SELF_DIR}/boot_part_mb.py" ${PAYLOAD_SIZES})"
+    echo ">>> Partitioning (gallium/arm64 phone: raw boot ${BOOT_MB}M + ext4 /)..."
+    sfdisk "${DEV}" <<PART
 label: gpt
-size=64M, type=0fc63daf-8483-4772-8e79-3d69d8477de4, name="boot"
+size=${BOOT_MB}M, type=0fc63daf-8483-4772-8e79-3d69d8477de4, name="boot"
 type=0fc63daf-8483-4772-8e79-3d69d8477de4, name="root"
 PART
     partprobe "${DEV}" 2>/dev/null || true
