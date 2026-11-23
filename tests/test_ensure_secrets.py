@@ -1,9 +1,9 @@
 """Unit tests for ``scripts/ensure-secrets.sh``.
 
-Stub ``gh`` and ``cosign`` binaries stand in for GitHub and for key
-generation: ``gh secret list`` prints the names in ``EXISTING``, ``gh secret
-set`` stores its stdin under ``<SECRETS_DIR>/<name>``.  ``openssl`` and
-``gpg`` are the real ones.
+Stub ``gh`` and ``cosign`` binaries stand in for GitHub and for key generation:
+``gh secret list`` prints the names in ``EXISTING``, ``gh secret set`` stores
+its stdin under ``<SECRETS_DIR>/<name>``.  ``openssl`` and ``gpg`` are the real
+ones.
 """
 
 import base64

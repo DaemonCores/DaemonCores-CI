@@ -1,4 +1,5 @@
 """Tests for bootc-debs-end/carry-over.sh."""
+
 import json
 import os
 import subprocess
@@ -74,7 +75,10 @@ def test_missing_packages_are_kept(tmp_path: Path) -> None:
         'fresh': True
     }
     assert not (debs / '.meta' / 'c-amd64.json').exists()
-    assert '::warning::c-amd64: its published deb(s) cannot be restored' in done.stderr
+    assert (
+        '::warning::c-amd64: its published deb(s) cannot be restored'
+        in done.stderr
+    )
 
 
 def test_no_published_site_is_not_an_error(tmp_path: Path) -> None:

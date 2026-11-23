@@ -4,8 +4,8 @@ On the runner's QEMU 8.2.2 (Ubuntu 24.04) ``-cpu max`` advertises FEAT_MOPS and
 TCG mis-executes the kernel's MOPS memset: ``free_initmem`` poisons memory past
 ``__init_end`` (including sched_clock's ``cd``), the next ``printk`` jumps to
 ``0xcccccccccccccccc`` and the guest goes silent after ``PM: genpd: Disabling
-unused power domains`` (run 45163009666; ``arm64.nomops`` flips it to pass).
-A smoke that reports a kernel stall for an emulator defect proves nothing about
+unused power domains`` (run 45163009666; ``arm64.nomops`` flips it to pass). A
+smoke that reports a kernel stall for an emulator defect proves nothing about
 the ISO, so the arm64 CPU model is pinned to a real one.
 """
 
@@ -24,6 +24,9 @@ def _smoke_script() -> str:
 
     Returns:
         The shell text of ``Boot smoke test the ISO (QEMU)``.
+
+    Raises:
+        AssertionError: If the smoke step is not found in the workflow.
     """
     doc = cast(dict[str, Any], yaml.safe_load(WORKFLOW.read_text()))
     for job in doc['jobs'].values():
@@ -42,11 +45,11 @@ def test_arm64_smoke_does_not_use_cpu_max() -> None:
 
 
 def test_arm64_smoke_budget_exceeds_slow_tcg_boot() -> None:
-    """arm64 gets a larger login budget than the 900 s of the other arches.
+    """Arm64 gets a larger login budget than the 900 s of the other arches.
 
-    The live root reaches the login prompt in ~380 s on a fast host and ~2x
-    that on the shared runner (DEBUG.md 31): a flat 900 s reports a slow boot
-    as a stall. The login marker stays mandatory, only the time grows.
+    The live root reaches the login prompt in ~380 s on a fast host and ~2x that
+    on the shared runner (DEBUG.md 31): a flat 900 s reports a slow boot as a
+    stall. The login marker stays mandatory, only the time grows.
     """
     script = _smoke_script()
     match = re.search(r'arm64\)\s+BUDGET="\$\{SMOKE_BUDGET_S:-(\d+)\}"', script)

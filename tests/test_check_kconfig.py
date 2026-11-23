@@ -60,7 +60,9 @@ def test_parse_fragment_reads_values_and_unset(tmp_path: Path) -> None:
 
 
 def test_unknown_symbol_is_reported(tree: Path, tmp_path: Path) -> None:
-    """A symbol the tree does not declare is an ADVISORY (the FULL SERVER
+    """Report an undeclared symbol as advisory, a declared one silently.
+
+    A symbol the tree does not declare is an ADVISORY (the FULL SERVER
     union era: a distro config of a neighbouring kernel version drops
     removed drivers — the build passes, the gate logs loud), a declared one
     passes silent.
@@ -86,8 +88,9 @@ def test_unknown_symbol_is_reported(tree: Path, tmp_path: Path) -> None:
 
 
 def test_dropped_option_is_reported(tree: Path, tmp_path: Path) -> None:
-    """An option the generated .config lost to a dependency fails as a real
-    defect (the prompt is owned, not promptless).
+    """Fail an option the generated .config lost to a dependency.
+
+    It is a real defect (the prompt is owned, not promptless).
 
     Args:
         tree: Kernel tree fixture.

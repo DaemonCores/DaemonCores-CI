@@ -7,6 +7,15 @@ SCRIPT = (Path(__file__).resolve().parents[1] / "scripts" / "apply_overlays.sh")
 
 
 def run(overlay: Path, tree: Path) -> subprocess.CompletedProcess[str]:
+    """Run apply_overlays.sh on an overlay and a deb tree.
+
+    Args:
+        overlay: Overlay directory to apply.
+        tree: Deb tree the overlay is applied to.
+
+    Returns:
+        The finished process, with stdout and stderr as text.
+    """
     return subprocess.run(
         ["bash", str(SCRIPT), str(overlay),
          str(tree)],
@@ -16,11 +25,25 @@ def run(overlay: Path, tree: Path) -> subprocess.CompletedProcess[str]:
 
 
 def touch(path: Path, text: str) -> None:
+    """Write text to path, creating parent directories.
+
+    Args:
+        path: File to write.
+        text: Content to write.
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text)
 
 
 def make_tree(root: Path) -> Path:
+    """Create a minimal deb tree under root.
+
+    Args:
+        root: Directory to build the tree in.
+
+    Returns:
+        The root directory.
+    """
     touch(root / "usr/share/perl5/PVE/Up.pm", "one\n")
     touch(root / "usr/share/perl5/PVE/Two.pm", "line1\nline2\n")
     touch(root / "DEBIAN/control", "Package: t\n")
@@ -28,6 +51,15 @@ def make_tree(root: Path) -> Path:
 
 
 def make_overlay(root: Path, *, drifted: bool = False) -> Path:
+    """Create an overlay with a new file and one patch.
+
+    Args:
+        root: Directory to create the overlay under.
+        drifted: Write a patch that no longer applies to the tree.
+
+    Returns:
+        The overlay directory.
+    """
     # Gabriel spec 2026-10-30: the .patch file sits at the MIRROR PATH of
     # the file it patches, not at the overlay root.
     overlay = root / "overlay"
@@ -35,7 +67,8 @@ def make_overlay(root: Path, *, drifted: bool = False) -> Path:
     if drifted:
         touch(
             overlay / "usr/share/perl5/PVE/Up.pm.patch", (
-                "diff --git a/usr/share/perl5/PVE/Up.pm b/usr/share/perl5/PVE/Up.pm\n"
+                "diff --git a/usr/share/perl5/PVE/Up.pm "
+                "b/usr/share/perl5/PVE/Up.pm\n"
                 "--- a/usr/share/perl5/PVE/Up.pm\n"
                 "+++ b/usr/share/perl5/PVE/Up.pm\n"
                 "@@ -1 +1 @@\n"
@@ -46,7 +79,8 @@ def make_overlay(root: Path, *, drifted: bool = False) -> Path:
     else:
         touch(
             overlay / "usr/share/perl5/PVE/Two.pm.patch", (
-                "diff --git a/usr/share/perl5/PVE/Two.pm b/usr/share/perl5/PVE/Two.pm\n"
+                "diff --git a/usr/share/perl5/PVE/Two.pm "
+                "b/usr/share/perl5/PVE/Two.pm\n"
                 "--- a/usr/share/perl5/PVE/Two.pm\n"
                 "+++ b/usr/share/perl5/PVE/Two.pm\n"
                 "@@ -2 +2,2 @@\n"
@@ -58,11 +92,24 @@ def make_overlay(root: Path, *, drifted: bool = False) -> Path:
 
 
 def touch_meta(overlay: Path) -> Path:
+    """Add the patches.lock.json meta file to the overlay.
+
+    Args:
+        overlay: Overlay directory to add the meta file to.
+
+    Returns:
+        The overlay directory.
+    """
     touch(overlay / "patches.lock.json", "{}\n")
     return overlay
 
 
 def test_overlay_copies_tree_and_applies_patches(tmp_path: Path) -> None:
+    """Overlay files are copied and patches applied cleanly.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+    """
     tree = make_tree(tmp_path / "tree")
     overlay = touch_meta(make_overlay(tmp_path, drifted=False))
     result = run(overlay, tree)
@@ -82,6 +129,11 @@ def test_overlay_copies_tree_and_applies_patches(tmp_path: Path) -> None:
 def test_overlay_refuses_drifted_patch_and_keeps_tree_pristine(
     tmp_path: Path,
 ) -> None:
+    """A drifted patch exits 3 and leaves the tree untouched.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+    """
     tree = make_tree(tmp_path / "tree")
     overlay = make_overlay(tmp_path, drifted=True)
     result = run(overlay, tree)
@@ -93,6 +145,11 @@ def test_overlay_refuses_drifted_patch_and_keeps_tree_pristine(
 
 
 def test_overlay_without_patches_copies_only(tmp_path: Path) -> None:
+    """An overlay with no patches only copies files.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+    """
     tree = make_tree(tmp_path / "tree")
     overlay = tmp_path / "empty-overlay"
     overlay.mkdir(parents=True)
@@ -102,12 +159,22 @@ def test_overlay_without_patches_copies_only(tmp_path: Path) -> None:
 
 
 def test_overlay_missing_dirs_fail(tmp_path: Path) -> None:
+    """Missing overlay or tree directories fail with a message.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+    """
     result = run(tmp_path / "nope", tmp_path / "also-nope")
     assert result.returncode != 0
     assert "missing" in result.stderr
 
 
 def test_overlay_translates_the_triplet_for_arm64(tmp_path: Path) -> None:
+    """The multiarch triplet is rewritten for arm64 builds.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+    """
     # Debian multiarch: the overlay mirror names x86_64-linux-gnu; the arm64
     # deb tree names aarch64-linux-gnu. With BUILD_ARCH=arm64 the helper
     # rewrites the triplet in the patch stream before applying.
@@ -120,7 +187,8 @@ def test_overlay_translates_the_triplet_for_arm64(tmp_path: Path) -> None:
     touch(
         overlay /
         "usr/lib/x86_64-linux-gnu/perl5/5.40/Template/Provider.pm.patch", (
-            "diff --git a/usr/lib/x86_64-linux-gnu/perl5/5.40/Template/Provider.pm"
+            "diff --git "
+            "a/usr/lib/x86_64-linux-gnu/perl5/5.40/Template/Provider.pm"
             " b/usr/lib/x86_64-linux-gnu/perl5/5.40/Template/Provider.pm\n"
             "--- a/usr/lib/x86_64-linux-gnu/perl5/5.40/Template/Provider.pm\n"
             "+++ b/usr/lib/x86_64-linux-gnu/perl5/5.40/Template/Provider.pm\n"

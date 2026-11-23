@@ -1,11 +1,11 @@
 """build-deb.sh lists EVERY deb-glob pattern, not just the first one.
 
-The kernel class republishes the linux-headers deb of the same build next
-to the image deb. When the build ran (hash bump), the produced debs list
-came from a single ``ls <glob>.deb``: only the image rode hashes.json, the
-headers deb was pruned from the APT index and every cache hit restored a
-headers-less set (run 42899558906, 'no linux-headers for flavour x64v3 in
-the APT index'). DEB_GLOB now carries several space-separated patterns.
+The kernel class republishes the linux-headers deb of the same build next to the
+image deb. When the build ran (hash bump), the produced debs list came from a
+single ``ls <glob>.deb``: only the image rode hashes.json, the headers deb was
+pruned from the APT index and every cache hit restored a headers-less set (run
+42899558906, 'no linux-headers for flavour x64v3 in the APT index'). DEB_GLOB
+now carries several space-separated patterns.
 """
 
 import json
@@ -24,6 +24,9 @@ def test_multi_glob_records_every_pattern(tmp_path: Path) -> None:
     Before the fix the single ``ls <glob>.deb`` matched only the first
     pattern, so the headers deb stayed out of hashes.json and the
     end-of-run prune removed it from the published APT index.
+
+    Args:
+        tmp_path: Pytest temporary directory.
     """
     pages = tmp_path / 'pages'
     pages.mkdir()

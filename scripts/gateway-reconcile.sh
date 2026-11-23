@@ -42,17 +42,17 @@ GW_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Collects descriptions as one JSON object { "<vmid>": "<description>" }.
 collect_descriptions() {
-    python3 "${GW_SCRIPT_DIR}/gateway-reconcile-collect.py" "$GW_CONF_DIR" "$GW_NODE"
+  python3 "${GW_SCRIPT_DIR}/gateway-reconcile-collect.py" "$GW_CONF_DIR" "$GW_NODE"
 }
 
 reconcile() {
-    python3 "${GW_SCRIPT_DIR}/gateway-reconcile-render.py" "$GW_OUT"
+  python3 "${GW_SCRIPT_DIR}/gateway-reconcile-render.py" "$GW_OUT"
 }
 
 main() {
-    collect_descriptions | reconcile
+  collect_descriptions | reconcile
 }
 
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
-    main "$@"
+  main "$@"
 fi

@@ -1,10 +1,9 @@
 """Unit tests for ``gateway-reconcile.sh`` (NOTES bloc -> dynamic.yml).
 
-Format B (arbitrated 2026-10-30): the gateway bloc is a ```yaml fenced
-block inside the ``<!--gateway`` markers, holding a ``routers:`` mapping.
+Format B (arbitrated 2026-10-30): the gateway bloc is a ```yaml fenced block
+inside the ``<!--gateway`` markers, holding a ``routers:`` mapping.
 """
 
-import json
 import subprocess
 from pathlib import Path
 
@@ -33,6 +32,15 @@ BLOC_OK = (
 
 
 def run(conf_dir: Path, out: Path) -> subprocess.CompletedProcess[str]:
+    """Run gateway-reconcile.sh against a conf dir and output file.
+
+    Args:
+        conf_dir: Directory holding the guest conf files.
+        out: Output file the reconciled routers are written to.
+
+    Returns:
+        The finished process, with stdout and stderr as text.
+    """
     return subprocess.run(
         ["bash", str(SCRIPT), "testnode"],
         capture_output=True,
@@ -46,6 +54,16 @@ def run(conf_dir: Path, out: Path) -> subprocess.CompletedProcess[str]:
 
 
 def make_conf(tmp_path: Path, vmid: int, description: str) -> Path:
+    """Write a guest conf with the given description and return its dir.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+        vmid: VMID of the guest, used as the conf file name.
+        description: Text of the guest description field.
+
+    Returns:
+        The directory holding the guest conf files.
+    """
     d = tmp_path / "conf"
     d.mkdir(exist_ok=True)
     (d / f"{vmid}.conf"
@@ -54,25 +72,38 @@ def make_conf(tmp_path: Path, vmid: int, description: str) -> Path:
 
 
 def test_renders_routers_and_ids_by_ct(tmp_path: Path) -> None:
+    """Routers are rendered with container-prefixed ids.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+    """
     conf = make_conf(tmp_path, 120, BLOC_OK)
     out = tmp_path / "dynamic.yml"
     r = run(conf, out)
     assert r.returncode == 0, r.stderr
     text = out.read_text()
-    assert "ct120_forge:" in text and "ct120_portfolio:" in text
+    assert "ct120_forge:" in text
+    assert "ct120_portfolio:" in text
     assert 'rule: "Host(`example.test`) && PathPrefix(`/forge`)"' in text
     assert "- websecure" in text
     assert "tls: {}" in text
     assert 'url: "http://10.0.0.120:3000"' in text
-    assert "ct120_portfolio" in text and "no entryPoints" not in text
+    assert "ct120_portfolio" in text
+    assert "no entryPoints" not in text
     # default entrypoints for portfolio (no entrypoints key)
     text_portfolio = text.split("ct120_portfolio:\n")[1]
-    assert "entryPoints" in text_portfolio and "- websecure" in text_portfolio
+    assert "entryPoints" in text_portfolio
+    assert "- websecure" in text_portfolio
     # prose never leaks into the yaml
     assert "Free prose" not in text
 
 
 def test_skips_broken_router_but_keeps_valid_ones_exit4(tmp_path: Path) -> None:
+    """A broken router is skipped, valid ones kept, exit code 4.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+    """
     conf = make_conf(
         tmp_path,
         122,
@@ -92,6 +123,11 @@ def test_skips_broken_router_but_keeps_valid_ones_exit4(tmp_path: Path) -> None:
 
 
 def test_idempotent_no_rewrite_when_unchanged(tmp_path: Path) -> None:
+    """A second run with unchanged input does not rewrite the output.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+    """
     conf = make_conf(tmp_path, 120, BLOC_OK)
     out = tmp_path / "dynamic.yml"
     assert run(conf, out).returncode == 0
@@ -103,6 +139,11 @@ def test_idempotent_no_rewrite_when_unchanged(tmp_path: Path) -> None:
 
 
 def test_guest_without_bloc_writes_empty_header(tmp_path: Path) -> None:
+    """A guest without a gateway bloc yields only a header comment.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+    """
     conf = make_conf(tmp_path, 121, "plain prose, nothing else")
     out = tmp_path / "dynamic.yml"
     r = run(conf, out)
@@ -112,6 +153,11 @@ def test_guest_without_bloc_writes_empty_header(tmp_path: Path) -> None:
 
 
 def test_variant_a_flat_bloc_is_refused(tmp_path: Path) -> None:
+    """The flat variant A bloc is refused with exit code 4.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+    """
     conf = make_conf(
         tmp_path,
         120,
@@ -125,6 +171,11 @@ def test_variant_a_flat_bloc_is_refused(tmp_path: Path) -> None:
 
 
 def test_routers_without_fence_is_refused(tmp_path: Path) -> None:
+    """A routers mapping without a yaml fence is refused.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+    """
     conf = make_conf(
         tmp_path,
         140,
@@ -138,6 +189,11 @@ def test_routers_without_fence_is_refused(tmp_path: Path) -> None:
 
 
 def test_unparsable_yaml_refused_exit4(tmp_path: Path) -> None:
+    """Unparsable YAML in the bloc is refused with exit code 4.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+    """
     conf = make_conf(
         tmp_path,
         120,
@@ -151,6 +207,11 @@ def test_unparsable_yaml_refused_exit4(tmp_path: Path) -> None:
 
 
 def test_middlewares_list_rendered(tmp_path: Path) -> None:
+    """Middlewares lists are rendered under the router.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+    """
     conf = make_conf(
         tmp_path,
         130,
@@ -164,7 +225,8 @@ def test_middlewares_list_rendered(tmp_path: Path) -> None:
     assert r.returncode == 0, r.stderr
     text = out.read_text()
     assert "      middlewares:" in text
-    assert "        - rate-limit" in text and "        - basic-auth" in text
+    assert "        - rate-limit" in text
+    assert "        - basic-auth" in text
 
 
 def test_script_embeds_no_heredoc_and_helpers_are_real_files() -> None:

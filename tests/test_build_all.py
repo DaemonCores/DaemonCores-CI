@@ -1,9 +1,9 @@
 """Unit tests for ``build-deb/build-all.sh`` with stubbed sibling scripts.
 
-The real script is copied next to stub ``pkg-def.sh``, ``track.sh`` and
-``build-deb.sh``: the stubs append what they receive to a log and write the
-outputs the real ones would, so the test covers the orchestration only (order,
-results, dependency closure, exit status), not the builds themselves.
+The real script is copied next to stub ``pkg-def.sh``, ``track.sh`` and ``build-
+deb.sh``: the stubs append what they receive to a log and write the outputs the
+real ones would, so the test covers the orchestration only (order, results,
+dependency closure, exit status), not the builds themselves.
 """
 
 import os
@@ -11,9 +11,8 @@ import shutil
 import subprocess
 from pathlib import Path
 
-import pytest
-
 import issues_api
+import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -43,7 +42,8 @@ PKG_DEF = """#!/bin/bash
   echo "sources="
   echo "signs=no"
   echo "env="
-  echo "deps=$(yq ".packages[] | select(.name == \\"${PKG}\\") | (.deps // []) | join(\\" \\")" "${MAN}")"
+  echo "deps=$(yq ".packages[] | select(.name == \\"${PKG}\\") | \\
+(.deps // []) | join(\\" \\")" "${MAN}")"
   echo "build=echo"
 } >>"${GITHUB_OUTPUT}"
 """
@@ -56,7 +56,9 @@ BUILD_DEB = """#!/bin/bash
 echo "${PACKAGE} deps=${DEP_DEBS//$'\\n'/,}" >>"${STUB_LOG}"
 case "${PACKAGE}" in
   lib) echo "skipped=true" >>"${GITHUB_OUTPUT}" ;;
-  app) echo "skipped=false" >>"${GITHUB_OUTPUT}"; mkdir -p "${BUILD_DIR}/work" ;;
+  app)
+    echo "skipped=false" >>"${GITHUB_OUTPUT}"
+    mkdir -p "${BUILD_DIR}/work" ;;
   broken) echo "build_failed=true" >>"${GITHUB_OUTPUT}" ;;
   gone) exit 1 ;;
 esac

@@ -6,16 +6,15 @@ rolling), both consumed by the bootc-debs builders. The manifest schema is
 CANONICAL: declarative patches data (a patches.yml file or the native
 PATCHES_JSON entry export), consumed through yq, never a bashified list.
 
-Reference data (owner 11/11 R-870b): the product-canonical manifests live in
-the debian-bootc checkout (kernel-src/patches); this test suite reads the
-pve.yml and kernel.yml from that checkout as the reference data the helper
-must resolve.
+Reference data (owner 11/11 R-870b): the product-canonical manifests live in the
+debian-bootc checkout (kernel-src/patches); this test suite reads the pve.yml
+and kernel.yml from that checkout as the reference data the helper must resolve.
 """
 
 import os
 import subprocess
-import tempfile
 from pathlib import Path
+from typing import Any
 
 REPO = Path(__file__).resolve().parents[1]
 HELPER = REPO / "scripts" / "kernel_helpers.sh"
@@ -27,7 +26,16 @@ VE_MANIFEST = KERNEL_SRC / "patches" / "pve.yml"
 ENV = {"KERNEL_CDN": "", "PATH": os.environ["PATH"], "HOME": os.environ["HOME"]}
 
 
-def run_helper(script: str, **env_over) -> subprocess.CompletedProcess:
+def run_helper(script: str, **env_over: str) -> subprocess.CompletedProcess:
+    """Run a script in bash after sourcing the kernel helper library.
+
+    Args:
+        script: Bash snippet run after sourcing the helper.
+        **env_over: Environment variables set on top of the base environment.
+
+    Returns:
+        The finished process, with stdout and stderr as text.
+    """
     env = dict(ENV, **env_over)
     return subprocess.run(
         ["bash", "-c", f'source "{HELPER}"\n{script}'],
@@ -37,24 +45,39 @@ def run_helper(script: str, **env_over) -> subprocess.CompletedProcess:
     )
 
 
-def test_helper_shell_syntax():
+def test_helper_shell_syntax() -> None:
+    """The helper script passes a bash syntax check."""
     assert subprocess.run(["bash", "-n", str(HELPER)]).returncode == 0
 
 
-def _expected_class_count(doc, series: str, classes) -> int:
-    """How many entries the helper lists for the given series and stage
-    classes: an entry excluded on the series (exclude-series) or staged
-    outside the classes drops."""
+def _expected_class_count(
+    doc: dict[str, Any], series: str, classes: tuple[str, ...]
+) -> int:
+    """Count the entries the helper lists for a series and stage classes.
+
+    An entry excluded on the series (exclude-series) or staged outside the
+    classes drops.
+
+    Args:
+        doc: Parsed patch manifest.
+        series: Kernel series being built.
+        classes: Stage classes an entry must belong to.
+
+    Returns:
+        The number of entries the helper should list.
+    """
     return sum(
         1 for p in doc["patches"] if series not in
         (p.get("exclude-series") or []) and p.get("stage", "common") in classes
     )
 
 
-def test_patch_list_from_native_manifest():
-    """The product packages.yml carries NO native patch data (owner R-870b:
-    the canonical set lives in kernel-src/patches); the helper resolves the
-    class filter over the reference pve.yml via PATCHES_JSON."""
+def test_patch_list_from_native_manifest() -> None:
+    """Resolve the class filter over the reference pve.yml via PATCHES_JSON.
+
+    The product packages.yml carries NO native patch data (owner R-870b: the
+    canonical set lives in kernel-src/patches).
+    """
     import json
 
     import yaml
@@ -78,8 +101,16 @@ def test_patch_list_from_native_manifest():
 
 
 def _write_series_fixture(tmp: Path) -> Path:
-    """A manifest whose URL carries {seriesdir}/{topic}; the fixture creates
-    the resolved dirs for series 7.0 (eol layout) and 7.2."""
+    """Write a manifest whose URL carries {seriesdir}/{topic}.
+
+    The fixture creates the resolved dirs for series 7.0 (eol layout) and 7.2.
+
+    Args:
+        tmp: Directory the manifest and the series dirs are written under.
+
+    Returns:
+        The path of the manifest.
+    """
     manifest = tmp / "series.yml"
     manifest.write_text(
         "patches:\n"
@@ -89,9 +120,9 @@ def _write_series_fixture(tmp: Path) -> Path:
         "    stage: common\n"
         "    license: GPL-2.0-only\n"
     )
-    for series, seriesdir in (
-        ("7.0", "eol/linux-7.0.y-xanmod"),
-        ("7.2", "linux-7.2.y-xanmod"),
+    for seriesdir in (
+        "eol/linux-7.0.y-xanmod",
+        "linux-7.2.y-xanmod",
     ):
         sdir = tmp / seriesdir / "topic"
         sdir.mkdir(parents=True)
@@ -101,9 +132,10 @@ def _write_series_fixture(tmp: Path) -> Path:
     return manifest
 
 
-def test_series_templates_resolve(tmp_path: Path):
-    """The helper resolves {seriesdir} (7.0 → eol/ layout) and {topic}, and
-    passes the resolved absolute URLs to the patch application.
+def test_series_templates_resolve(tmp_path: Path) -> None:
+    """Resolve {seriesdir} (7.0 → eol/ layout) and {topic} in patch URLs.
+
+    The helper passes the resolved absolute URLs to the patch application.
 
     Args:
         tmp_path: Scratch directory hosting the fixture dirs.
@@ -114,10 +146,11 @@ def test_series_templates_resolve(tmp_path: Path):
     assert "eol/linux-7.0.y-xanmod/topic/0001-x86-cflags.patch" in r.stdout
     line = r.stdout.splitlines()[0]
     assert line.startswith("x86-cflags file://")
-    assert "{seriesdir}" not in line and "{topic}" not in line
+    assert "{seriesdir}" not in line
+    assert "{topic}" not in line
 
 
-def test_patch_list_from_native_patches_json():
+def test_patch_list_from_native_patches_json() -> None:
     """PATCHES_JSON (the native export) yields the same lines as the file."""
     import json
 
@@ -129,12 +162,14 @@ def test_patch_list_from_native_patches_json():
     from_json = run_helper(
         "kernel_patch_list - amd64 7.0.14", PATCHES_JSON=patches
     )
-    assert from_file.returncode == 0 and from_json.returncode == 0
+    assert from_file.returncode == 0
+    assert from_json.returncode == 0
     assert from_file.stdout == from_json.stdout
     assert from_json.stdout.strip()
 
 
-def test_flavour_kcflags():
+def test_flavour_kcflags() -> None:
+    """Each kernel flavour maps to its expected compiler flags."""
     r = run_helper('kernel_flavour_kcflags x64v3')
     assert r.stdout.strip() == "-march=x86-64-v3"
     r = run_helper('kernel_flavour_kcflags x64v1')
@@ -150,8 +185,17 @@ def test_flavour_kcflags():
     assert r.stdout.strip() == "-mcpu=neoverse-v2"
 
 
-def _make_cdn(tmp_path, version):
-    """A file:// kernel.org mirror holding a tiny linux-<version> tarball."""
+def _make_cdn(tmp_path: Path, version: str) -> tuple[Path, Path, str]:
+    """Build a file:// kernel.org mirror holding a tiny linux tarball.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+        version: Kernel version the tarball is built for.
+
+    Returns:
+        The mirror root, the tarball path, and the sha256 hex digest of the
+        tarball.
+    """
     import hashlib
     import shutil
     import tarfile
@@ -169,7 +213,20 @@ def _make_cdn(tmp_path, version):
                                                      ).hexdigest()
 
 
-def _fetch(cdn, version, want, cache):
+def _fetch(
+    cdn: Path, version: str, want: str, cache: Path
+) -> subprocess.CompletedProcess:
+    """Run kernel_fetch_source against the mirror with the given cache.
+
+    Args:
+        cdn: Root of the file:// mirror.
+        version: Kernel version to fetch.
+        want: Expected sha256 hex digest of the tarball.
+        cache: Tarball cache directory.
+
+    Returns:
+        The finished process, with stdout and stderr as text.
+    """
     return run_helper(
         f'kernel_fetch_source {version} {want} && echo "SRC=$SRCDIR"',
         KERNEL_CDN=f"file://{cdn}",
@@ -177,7 +234,12 @@ def _fetch(cdn, version, want, cache):
     )
 
 
-def test_tarball_cache_miss_then_hit(tmp_path):
+def test_tarball_cache_miss_then_hit(tmp_path: Path) -> None:
+    """A second fetch is served from the cache without the network.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+    """
     version = "9.97.1"
     cdn, tarball, want = _make_cdn(tmp_path, version)
     cache = tmp_path / "cache"
@@ -190,7 +252,12 @@ def test_tarball_cache_miss_then_hit(tmp_path):
     assert f"SRC=/tmp/linux-{version}" in r.stdout
 
 
-def test_tarball_cache_corrupted_is_redownloaded(tmp_path):
+def test_tarball_cache_corrupted_is_redownloaded(tmp_path: Path) -> None:
+    """A corrupted cached tarball is downloaded again.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+    """
     version = "9.97.2"
     cdn, tarball, want = _make_cdn(tmp_path, version)
     cache = tmp_path / "cache"
@@ -201,7 +268,12 @@ def test_tarball_cache_corrupted_is_redownloaded(tmp_path):
     assert "downloading again" in r.stderr
 
 
-def test_tarball_checksum_mismatch_fails(tmp_path):
+def test_tarball_checksum_mismatch_fails(tmp_path: Path) -> None:
+    """A checksum mismatch fails and leaves nothing in the cache.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+    """
     version = "9.97.3"
     cdn, tarball, _ = _make_cdn(tmp_path, version)
     cache = tmp_path / "cache"

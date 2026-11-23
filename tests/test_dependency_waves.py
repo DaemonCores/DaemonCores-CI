@@ -12,7 +12,15 @@ WORKFLOW = ROOT / ".github" / "workflows" / "bootc-debs-builder.yml"
 
 
 def run_waves(tmp_path: Path, packages: list[dict]) -> dict[str, list[str]]:
-    """Run the script on ``packages`` and return the parsed wave outputs."""
+    """Run the script on ``packages`` and return the parsed wave outputs.
+
+    Args:
+        tmp_path: Pytest temporary directory, holding the manifest and output.
+        packages: Package entries of the manifest.
+
+    Returns:
+        The wave outputs, keyed by output name.
+    """
     manifest = tmp_path / "pkgs.json"
     manifest.write_text(json.dumps({"packages": packages}))
     out = tmp_path / "output"
@@ -32,7 +40,11 @@ def run_waves(tmp_path: Path, packages: list[dict]) -> dict[str, list[str]]:
 
 
 def test_waves_follow_dependency_depth(tmp_path: Path) -> None:
-    """Depth of the deepest dep chain decides the wave; names are sorted."""
+    """Depth of the deepest dep chain decides the wave; names are sorted.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+    """
     got = run_waves(
         tmp_path, [
             {
@@ -65,7 +77,11 @@ def test_waves_follow_dependency_depth(tmp_path: Path) -> None:
 
 
 def test_empty_waves_are_empty_arrays(tmp_path: Path) -> None:
-    """Unused waves are still emitted as ``[]`` for the job conditions."""
+    """Unused waves are still emitted as ``[]`` for the job conditions.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+    """
     got = run_waves(tmp_path, [{"name": "only"}])
     assert got == {"wave0": ["only"], "wave1": [], "wave2": [], "wave3": []}
 
@@ -78,7 +94,11 @@ def test_workflow_uses_the_file_not_a_heredoc() -> None:
 
 
 def test_a_chain_deeper_than_the_wave_jobs_is_an_error(tmp_path: Path) -> None:
-    """A fifth wave has no job: it must fail loudly, not drop the package."""
+    """A fifth wave has no job: it must fail loudly, not drop the package.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+    """
     chain = [{
         "name": "p0"
     }] + [{

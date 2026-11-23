@@ -1,7 +1,5 @@
-"""Contract tests for ``deb_src_overlay`` (overlay on an upstream source tree)."""
+"""Contract tests for ``deb_src_overlay`` (overlay on an upstream tree)."""
 
-import hashlib
-import json
 import subprocess
 from pathlib import Path
 
@@ -9,10 +7,19 @@ SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
 
 
 def run(overlay: Path, tree: Path) -> subprocess.CompletedProcess[str]:
+    """Run deb_src_overlay on an overlay and a source tree.
+
+    Args:
+        overlay: Overlay directory to apply.
+        tree: Source tree the overlay is applied to.
+
+    Returns:
+        The finished process, with stdout and stderr as text.
+    """
     return subprocess.run(
         [
-            "bash", "-c",
-            f'. "{SCRIPTS}/deb_helpers.sh"; deb_src_overlay "{overlay}" "{tree}"'
+            "bash", "-c", f'. "{SCRIPTS}/deb_helpers.sh"; '
+            f'deb_src_overlay "{overlay}" "{tree}"'
         ],
         env={
             "CI_SCRIPTS": str(SCRIPTS),
@@ -24,23 +31,46 @@ def run(overlay: Path, tree: Path) -> subprocess.CompletedProcess[str]:
 
 
 def make_tree(root: Path) -> Path:
+    """Create a source tree with one file.
+
+    Args:
+        root: Directory to build the tree in.
+
+    Returns:
+        The root directory.
+    """
     (root / "src").mkdir(parents=True)
     (root / "src/a.txt").write_text("one\ntwo\n")
     return root
 
 
 def make_overlay(root: Path) -> Path:
-    """Build an overlay dir: new file + patch. No committed lock: the sha256
-    reference is computed and retained by the guard at build (build-local)."""
+    """Build an overlay dir: new file + patch.
+
+    No committed lock: the sha256 reference is computed and retained by the
+    guard at build (build-local).
+
+    Args:
+        root: Directory to build the overlay in.
+
+    Returns:
+        The overlay directory.
+    """
     (root / "src").mkdir(parents=True)
     (root / "src/a.txt.patch").write_text(
-        "--- a/src/a.txt\n+++ b/src/a.txt\n@@ -1,2 +1,2 @@\n one\n-two\n+three\n"
+        "--- a/src/a.txt\n+++ b/src/a.txt\n"
+        "@@ -1,2 +1,2 @@\n one\n-two\n+three\n"
     )
     (root / "src/new.txt").write_text("fresh\n")
     return root
 
 
 def test_new_file_and_patch_are_applied(tmp_path: Path) -> None:
+    """The overlay adds the new file and applies the patch.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+    """
     tree = make_tree(tmp_path / "tree")
     result = run(make_overlay(tmp_path / "ovl"), tree)
     assert result.returncode == 0, result.stderr
@@ -50,11 +80,16 @@ def test_new_file_and_patch_are_applied(tmp_path: Path) -> None:
 
 
 def test_lock_is_retained_build_local(tmp_path: Path) -> None:
-    """The sha256 reference is computed AND retained at build, under
-    ${PATCH_GUARD_LOCK_DIR:-/tmp/patch-guard}, never in the repository."""
+    """The sha256 reference is computed AND retained at build.
+
+    It lives under ${PATCH_GUARD_LOCK_DIR:-/tmp/patch-guard}, never in the
+    repository.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+    """
     tree = make_tree(tmp_path / "tree")
     result = run(make_overlay(tmp_path / "ovl"), tree)
-    sha = hashlib.sha256(b"one\ntwo\n").hexdigest()
     assert result.returncode == 0, result.stderr
     assert (tree / "src/a.txt").read_text() == "one\nthree\n"
     # The overlay applied: the new file ships.
@@ -64,6 +99,11 @@ def test_lock_is_retained_build_local(tmp_path: Path) -> None:
 
 
 def test_patch_drift_is_all_or_nothing(tmp_path: Path) -> None:
+    """A drifted patch exits 3 and applies nothing.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+    """
     tree = make_tree(tmp_path / "tree")
     (tree / "src/a.txt").write_text("one\nTWO\n")
     result = run(make_overlay(tmp_path / "ovl"), tree)
@@ -72,10 +112,19 @@ def test_patch_drift_is_all_or_nothing(tmp_path: Path) -> None:
 
 
 def run_apply(overlay: Path, tree: Path) -> subprocess.CompletedProcess[str]:
+    """Run deb_overlay_apply on an overlay and a tree.
+
+    Args:
+        overlay: Overlay directory to apply.
+        tree: Tree the overlay is applied to.
+
+    Returns:
+        The finished process, with stdout and stderr as text.
+    """
     return subprocess.run(
         [
-            "bash", "-c",
-            f'. "{SCRIPTS}/deb_helpers.sh"; deb_overlay_apply "{overlay}" "{tree}"'
+            "bash", "-c", f'. "{SCRIPTS}/deb_helpers.sh"; '
+            f'deb_overlay_apply "{overlay}" "{tree}"'
         ],
         env={
             "CI_SCRIPTS": str(SCRIPTS),
@@ -89,6 +138,11 @@ def run_apply(overlay: Path, tree: Path) -> subprocess.CompletedProcess[str]:
 def test_delete_marker_removes_the_file_whatever_its_content(
     tmp_path: Path
 ) -> None:
+    """A .delete marker removes the file regardless of content.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+    """
     for content in ("one\n", "a completely different revision\n"):
         tree = tmp_path / f"tree-{len(content)}"
         (tree / "etc").mkdir(parents=True)
@@ -105,6 +159,11 @@ def test_delete_marker_removes_the_file_whatever_its_content(
 
 
 def test_delete_marker_on_missing_file_is_drift(tmp_path: Path) -> None:
+    """A .delete marker on a missing file is drift (exit 3).
+
+    Args:
+        tmp_path: Pytest temporary directory.
+    """
     tree = tmp_path / "tree"
     (tree / "etc").mkdir(parents=True)
     ovl = tmp_path / "ovl"

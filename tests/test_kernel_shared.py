@@ -1,14 +1,13 @@
 """Contract tests of the product-canonical kernel build data.
 
-Owner arbitrations 2026-11-11 (R-869b..R-871b): the kernel build data lives
-in the PRODUCT repository (debian-bootc, workflows/bootc-debs-builder/
-kernel-src) — the build engine keeps NO kernel package data at all (the
-former build-deb/kernel-shared directory is deleted, the CI_KERNEL_SHARED
-export is gone from build-deb.sh and content-hash.sh answers "none"). The
-debian-bootc lane reads everything from its own checkout
-(packages.yml BASE_CONFIG / patches / kconfig paths); the VE and vanilla
-lanes carry their own data. Both kernel lanes still consume the helper
-primitives through scripts/kernel_helpers.sh, unchanged.
+Owner arbitrations 2026-11-11 (R-869b..R-871b): the kernel build data lives in
+the PRODUCT repository (debian-bootc, workflows/bootc-debs-builder/ kernel-src)
+— the build engine keeps NO kernel package data at all (the former build-
+deb/kernel-shared directory is deleted, the CI_KERNEL_SHARED export is gone from
+build-deb.sh and content-hash.sh answers "none"). The debian-bootc lane reads
+everything from its own checkout (packages.yml BASE_CONFIG / patches / kconfig
+paths); the VE and vanilla lanes carry their own data. Both kernel lanes still
+consume the helper primitives through scripts/kernel_helpers.sh, unchanged.
 """
 
 import subprocess
@@ -24,9 +23,11 @@ CONTENT_HASH_SH = REPO / "build-deb" / "content-hash.sh"
 
 
 def test_kernel_src_canonical_files_present() -> None:
-    """The canonical set is committed in the product repo: the base config,
-    the flavour/cpu fragments, the pages overlays, the kernel and PVE patch
-    manifests and the per-profile GPU patch sets."""
+    """Check the canonical kernel set is committed in the product repo.
+
+    It is the base config, the flavour/cpu fragments, the pages overlays, the
+    kernel and PVE patch manifests and the per-profile GPU patch sets.
+    """
     assert (KERNEL_SRC / "config.cfg").is_file()
     for name in (
         "x86-common.cfg",
@@ -50,10 +51,13 @@ def test_kernel_src_canonical_files_present() -> None:
 
 
 def test_engine_carries_no_kernel_package_data() -> None:
-    """The engine's former shared kernel data is GONE: no build-deb/
+    """Check the engine carries no kernel package data any more.
+
+    The former shared kernel data is GONE: no build-deb/
     kernel-shared directory, no CI_KERNEL_SHARED export in build-deb.sh,
     and shared_data_hash answers none (no engine-side term in any cache
-    key any more — the product checkout's checkout hash covers the data)."""
+    key any more — the product checkout's checkout hash covers the data).
+    """
     assert not (REPO / "build-deb" / "kernel-shared").exists()
     text = BUILD_DEB_SH.read_text(encoding="utf-8")
     assert "CI_KERNEL_SHARED" not in text
@@ -70,9 +74,12 @@ def test_engine_carries_no_kernel_package_data() -> None:
 
 
 def test_base_config_values() -> None:
-    """The base config keeps the surviving arbitration values: the network/
+    """Check the base config keeps the surviving arbitration values.
+
+    They are: the network/
     display built-ins fold, the GPU drivers stay =m, SQUASHFS=m (the ISO
-    livefs needs it — R-855b) and NR_CPUS=512 (MAXSMP dropped, R-872b)."""
+    livefs needs it — R-855b) and NR_CPUS=512 (MAXSMP dropped, R-872b).
+    """
     cfg = (KERNEL_SRC / "config.cfg").read_text(encoding="utf-8")
     for present in (
         "CONFIG_E1000=y",
@@ -93,10 +100,13 @@ def test_base_config_values() -> None:
 
 
 def test_patch_manifest_schema_and_gates() -> None:
-    """The canonical manifests carry the declarative schema and the known
+    """Check the patch manifests carry the schema and the known gates.
+
+    The canonical manifests carry the declarative schema and the known
     gates: the bore sibling stays series-excluded (re-armed 2026-11-09, the
     CachyOS dry-run still fails fuzz-0 on vanilla 7.2.15) and the ARM OPTI
-    completions stay sha-pinned stage-common entries."""
+    completions stay sha-pinned stage-common entries.
+    """
     doc = yaml.safe_load(
         (KERNEL_SRC / "patches" / "kernel.yml").read_text(encoding="utf-8")
     )
@@ -118,13 +128,16 @@ def test_patch_manifest_schema_and_gates() -> None:
     pve = yaml.safe_load(
         (KERNEL_SRC / "patches" / "pve.yml").read_text(encoding="utf-8")
     )
-    assert isinstance(pve.get("patches"), list) and pve["patches"]
+    assert isinstance(pve.get("patches"), list)
+    assert pve["patches"]
 
 
 def test_device_module_fragments_live_in_the_product_repo() -> None:
-    """The per-device module fragments are lane data of the debian-bootc
-    checkout (the engine keeps nothing); every declared device carries its
-    fragment file."""
+    """Check the per-device module fragments live in the product repo.
+
+    They are lane data of the debian-bootc checkout (the engine keeps nothing);
+    every declared device carries its fragment file.
+    """
     embedded = KERNEL_SRC / "modules" / "embeded"
     for device in (
         "rpi3",
@@ -143,17 +156,20 @@ def test_device_module_fragments_live_in_the_product_repo() -> None:
 
 
 def test_packages_yml_reads_the_product_checkout() -> None:
-    """The debian-bootc packages.yml resolves its kernel data from its own
+    """Check packages.yml reads its kernel data from the product checkout.
+
+    The debian-bootc packages.yml resolves its kernel data from its own
     checkout: the BASE_CONFIG and the patch/kconfig paths point inside
     kernel-src, and the track entry still requires the engine election
-    (require-patches: engine — resolved by track.sh from THIS repo)."""
+    (require-patches: engine — resolved by track.sh from THIS repo).
+    """
     packages = (PRODUCT / "workflows" / "bootc-debs-builder" / "packages.yml")
     text = packages.read_text(encoding="utf-8")
     assert "kernel-src/config.cfg" in text
     assert "kernel-src/patches/kernel.yml" in text
     assert "CI_KERNEL_SHARED" not in text
     assert "require-patches: engine" in text
-    import yaml  # noqa: PLC0415 — local import keeps the module import light
+    import yaml
 
     doc = yaml.safe_load(text)
     offenders = [

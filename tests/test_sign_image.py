@@ -1,3 +1,5 @@
+"""Unit tests for sign-image/sign.sh with a stubbed cosign."""
+
 import os
 import stat
 import subprocess
@@ -7,7 +9,19 @@ SCRIPT = Path(__file__).resolve().parent.parent / "sign-image" / "sign.sh"
 DIGEST = "sha256:" + "a" * 64
 
 
-def run(tmp_path, refs, key=""):
+def run(tmp_path: Path,
+        refs: str,
+        key: str = "") -> tuple[subprocess.CompletedProcess[str], list[str]]:
+    """Run sign.sh with a stub cosign and return result and calls.
+
+    Args:
+        tmp_path: Pytest temporary directory, holding the stub and its log.
+        refs: Value of the REFS variable.
+        key: Value of COSIGN_PRIVATE_KEY, empty for keyless signing.
+
+    Returns:
+        The finished process, and the cosign calls it logged.
+    """
     bindir = tmp_path / "bin"
     bindir.mkdir(exist_ok=True)
     log = tmp_path / "calls.log"
@@ -27,7 +41,12 @@ def run(tmp_path, refs, key=""):
     return r, calls
 
 
-def test_signs_each_ref_lowercased(tmp_path):
+def test_signs_each_ref_lowercased(tmp_path: Path) -> None:
+    """Each non-empty ref is signed in lowercase.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+    """
     r, calls = run(
         tmp_path,
         f"GHCR.io/Org/Img@{DIGEST}\n\nghcr.io/org/two@{DIGEST}\n",
@@ -40,14 +59,24 @@ def test_signs_each_ref_lowercased(tmp_path):
     ]
 
 
-def test_keyless_warns(tmp_path):
+def test_keyless_warns(tmp_path: Path) -> None:
+    """Without a key, signing is keyless and a warning is printed.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+    """
     r, calls = run(tmp_path, f"ghcr.io/org/img@{DIGEST}")
     assert r.returncode == 0
     assert "signing keyless" in r.stdout
     assert calls == [f"sign --yes ghcr.io/org/img@{DIGEST}"]
 
 
-def test_unpinned_ref_rejected(tmp_path):
+def test_unpinned_ref_rejected(tmp_path: Path) -> None:
+    """A ref without a digest is rejected and never signed.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+    """
     r, calls = run(tmp_path, "ghcr.io/org/img:latest", key="k")
     assert r.returncode == 1
     assert calls == []

@@ -12,6 +12,7 @@ import os
 import subprocess
 import threading
 import time
+from collections.abc import Callable, Iterator
 from pathlib import Path
 
 import pytest
@@ -147,7 +148,7 @@ def test_osv_open_advisory_holds_the_election(
         })
     )
     p = _gate(
-        """gate_osv '{\"commit\": \"1\"}'""",
+        """gate_osv '{\"commit\": \"1\"}'.""",
         election,
         GATE_OSV_FIXTURE=str(fixture),
         PKG='r'
@@ -168,7 +169,7 @@ def test_osv_empty_response_passes(tmp_path: Path, election: Path) -> None:
     fixture = tmp_path / 'osv.json'
     fixture.write_text('{}')
     p = _gate(
-        """gate_osv '{\"commit\": \"1\"}'""",
+        """gate_osv '{\"commit\": \"1\"}'.""",
         election,
         GATE_OSV_FIXTURE=str(fixture),
         PKG='r'
@@ -775,21 +776,33 @@ def _release_api(tmp_path: Path, young: str, old: str) -> Path:
 
 
 @pytest.fixture(name='serve')
-def fixture_serve():
-    """Serve an API tree over HTTP, query string ignored (curl's file:// cannot).
+def fixture_serve() -> Iterator[Callable[[Path], str]]:
+    """Serve an API tree over HTTP, ignoring the query string.
+
+    Curl's file:// cannot ignore it.
 
     ``<path>.list`` answers the directory-like ``<path>`` (the releases list).
 
     Yields:
-        A function mapping an API tree to its base URL.
+        Callable[[Path], str]: A function mapping an API tree to its base URL.
     """
-    servers = []
+    servers: list[http.server.ThreadingHTTPServer] = []
 
     def start(root: Path) -> str:
+        """Serve root over HTTP on a free port and return its base URL.
+
+        Args:
+            root: Directory of the API tree to serve.
+
+        Returns:
+            The http://127.0.0.1:<port> base URL of the server.
+        """
 
         class Handler(http.server.BaseHTTPRequestHandler):
+            """Serve the API tree; a directory answers its .list file."""
 
-            def do_GET(self) -> None:  # noqa: N802
+            def do_GET(self) -> None:
+                """Answer a GET from the API tree."""
                 path = root / self.path.split('?')[0].lstrip('/')
                 if path.is_dir():
                     path = path.with_name(path.name + '.list')
@@ -803,7 +816,11 @@ def fixture_serve():
                 self.wfile.write(body)
 
             def log_message(self, *args: object) -> None:
-                pass
+                """Silence the default request log.
+
+                Args:
+                    *args: Log arguments, ignored.
+                """
 
         server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), Handler)
         threading.Thread(target=server.serve_forever, daemon=True).start()
@@ -816,9 +833,11 @@ def fixture_serve():
 
 
 def test_a_held_release_falls_back_to_the_newest_passing_one(
-    tmp_path: Path, serve
+    tmp_path: Path, serve: Callable[[Path], str]
 ) -> None:
-    """A release younger than CARE_DELAY does not block: the previous one builds.
+    """Build the previous release when a younger one is held.
+
+    A release younger than CARE_DELAY does not block.
 
     Args:
         tmp_path: Scratch directory.
@@ -848,7 +867,9 @@ def test_a_held_release_falls_back_to_the_newest_passing_one(
     assert 'built instead' in result.stderr
 
 
-def test_every_release_held_stays_a_hold(tmp_path: Path, serve) -> None:
+def test_every_release_held_stays_a_hold(
+    tmp_path: Path, serve: Callable[[Path], str]
+) -> None:
     """When no release passes the gates the hold is reported, nothing built.
 
     Args:

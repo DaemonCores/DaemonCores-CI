@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-import json, pathlib, subprocess, sys
+"""Print a JSON map of container id to description for the gateway."""
+
+import json
+import pathlib
+import subprocess
+import sys
 
 conf_dir, node = sys.argv[1], sys.argv[2]
 if conf_dir:

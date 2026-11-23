@@ -1,15 +1,23 @@
 """Tests for the kernel deb lookup in scripts/kernel_prepare.sh."""
+
 import subprocess
 from pathlib import Path
 
 SCRIPT = Path(__file__
               ).resolve().parent.parent / 'scripts' / 'kernel_prepare.sh'
 
-_DRIVER = r'''
+_DRIVER =\
+          r'''
 set -euo pipefail
 source "$1"
 apt-get() { :; }
-dpkg-deb() { case "$3" in Version) echo 7.2.14-1;; Package) echo "${STUB_PACKAGE:-daemoncores-kernel-7.2.14}";; Provides) echo "${STUB_PROVIDES:-}";; esac; }
+dpkg-deb() {
+  case "$3" in
+    Version) echo 7.2.14-1;;
+    Package) echo "${STUB_PACKAGE:-daemoncores-kernel-7.2.14}";;
+    Provides) echo "${STUB_PROVIDES:-}";;
+  esac
+}
 kernel_fetch_source() { echo "$COMMON_DEB"; echo "KVER=$KVER" >&2; exit 0; }
 DEB_ARCH=amd64
 kernel_prepare

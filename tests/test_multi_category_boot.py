@@ -1,9 +1,9 @@
 """Tests of the boot phase when one tag has several manifest categories.
 
-The image-test harness is a stub: ``categories`` prints the categories the
-tag is tested under, ``test`` logs the category it was asked to boot and fails
-for the one named in ``FAIL_CATEGORY``. What is covered is the orchestration
-of ``scripts/image-ci/build-arch.sh``: one boot per category, one failing boot
+The image-test harness is a stub: ``categories`` prints the categories the tag
+is tested under, ``test`` logs the category it was asked to boot and fails for
+the one named in ``FAIL_CATEGORY``. What is covered is the orchestration of
+``scripts/image-ci/build-arch.sh``: one boot per category, one failing boot
 failing the tag, the failing category named in the detail.
 """
 
@@ -20,7 +20,8 @@ case "$1" in
     # ssh, run by the real harness, reads the standard input it inherits.
     [ -z "${READ_STDIN:-}" ] || cat >/dev/null
     mkdir -p "${IMAGE_TEST_STATE}/logs"
-    echo "boot of ${CATEGORY:-default}" >"${IMAGE_TEST_STATE}/logs/serial.${CATEGORY:-default}.log"
+    echo "boot of ${CATEGORY:-default}" \
+      >"${IMAGE_TEST_STATE}/logs/serial.${CATEGORY:-default}.log"
     [ -z "${FAIL_CATEGORY:-}" ] || [ "${CATEGORY:-}" != "${FAIL_CATEGORY}" ]
     ;;
 esac
@@ -56,7 +57,11 @@ def boots(sb: Sandbox) -> list[str]:
 
 @needs_jq
 def test_one_boot_per_matching_category(sb: Sandbox) -> None:
-    """A tag with two categories is installed and booted twice."""
+    """A tag with two categories is installed and booted twice.
+
+    Args:
+        sb: Sandbox running the harness.
+    """
     done = sb.run([entry('latest')], CATEGORIES='plain sigenforce')
     assert done.returncode == 0, done.stdout + done.stderr
     assert boots(sb) == ['plain', 'sigenforce']
@@ -65,7 +70,11 @@ def test_one_boot_per_matching_category(sb: Sandbox) -> None:
 
 @needs_jq
 def test_one_failing_category_fails_the_tag(sb: Sandbox) -> None:
-    """Every category still boots; the tag fails and names the category."""
+    """Every category still boots; the tag fails and names the category.
+
+    Args:
+        sb: Sandbox running the harness.
+    """
     done = sb.run([entry('latest')],
                   CATEGORIES='plain sigenforce',
                   FAIL_CATEGORY='plain')
@@ -80,7 +89,12 @@ def test_one_failing_category_fails_the_tag(sb: Sandbox) -> None:
 def test_zero_or_one_category_keeps_the_single_boot(
     sb: Sandbox, categories: str
 ) -> None:
-    """The harness picks the category itself: no CATEGORY is forced."""
+    """The harness picks the category itself: no CATEGORY is forced.
+
+    Args:
+        sb: Sandbox running the harness.
+        categories: Value of the CATEGORIES variable.
+    """
     done = sb.run([entry('latest')], CATEGORIES=categories)
     assert done.returncode == 0, done.stdout + done.stderr
     assert boots(sb) == ['']
@@ -88,7 +102,11 @@ def test_zero_or_one_category_keeps_the_single_boot(
 
 @needs_jq
 def test_boot_does_not_consume_the_tag_list(sb: Sandbox) -> None:
-    """A harness reading stdin (ssh) must not swallow the tags still to test."""
+    """A harness reading stdin (ssh) must not swallow the tags still to test.
+
+    Args:
+        sb: Sandbox running the harness.
+    """
     done = sb.run([entry('latest'), entry('other')],
                   'hash',
                   'build',

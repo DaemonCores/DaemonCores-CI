@@ -1,9 +1,9 @@
 """Tests of the ``when.gpu-driver`` opt-in flag of the manifest.
 
-The filter in ``manifest-expand/expand.jq`` is run on a small manifest, and
-the wiring of the workflows is checked on the text, since a workflow cannot
-be run outside GitHub. Nothing here runs a real build: the flag only decides
-which packages the plan carries.
+The filter in ``manifest-expand/expand.jq`` is run on a small manifest, and the
+wiring of the workflows is checked on the text, since a workflow cannot be run
+outside GitHub. Nothing here runs a real build: the flag only decides which
+packages the plan carries.
 """
 
 import json
@@ -24,12 +24,12 @@ JQ_WORKS = shutil.which('jq') is not None and subprocess.run(['jq', '-n', '1'],
 needs_jq = pytest.mark.skipif(not JQ_WORKS, reason='a working jq is required')
 
 
-def _run_filter(manifest: Any, **env: str) -> list[str]:
+def _run_filter(manifest: dict[str, Any], **env: str) -> list[str]:
     """Run ``expand.jq`` on a manifest with the given env.
 
     Args:
         manifest: JSON-serialisable manifest.
-        env: Extra environment variables for the jq process.
+        **env: Extra environment variables for the jq process.
 
     Returns:
         The kept package names.
@@ -46,7 +46,7 @@ def _run_filter(manifest: Any, **env: str) -> list[str]:
     return [p['name'] for p in json.loads(result.stdout)['packages']]
 
 
-def _manifest() -> Any:
+def _manifest() -> dict[str, Any]:
     """A two-package manifest: one plain, one gpu-driver marked.
 
     Returns:
@@ -75,8 +75,8 @@ class TestManifestFilter:
     def test_yes_and_empty_keep_everything(self) -> None:
         """``yes`` and an empty value keep every package.
 
-        The build-one-deb path sets no variable at all, so the empty value
-        must behave as keep.
+        The build-one-deb path sets no variable at all, so the empty value must
+        behave as keep.
         """
         assert _run_filter(_manifest(), GPU_DRIVER='yes') == \
             ['mesa', 'nvidia-libs']
@@ -84,7 +84,7 @@ class TestManifestFilter:
             ['mesa', 'nvidia-libs']
 
     def test_coexists_with_the_signing_filter(self) -> None:
-        """unsigned-kernel kept while gpu-driver is dropped, and the reverse."""
+        """Unsigned-kernel kept while gpu-driver is dropped, and the reverse."""
         unsigned = {
             'packages': [{
                 'name': 'mesa'
@@ -118,11 +118,7 @@ class TestWiring:
         return action['runs']['steps'][0]['env']
 
     def test_action_declares_and_passes_gpu_driver(self) -> None:
-        """The action input reaches the ``GPU_DRIVER`` env of the step.
-
-        Args:
-            fixture_action: Parsed ``action.yml``.
-        """
+        """The action input reaches the ``GPU_DRIVER`` env of the step."""
         action = cast(
             dict[str, Any],
             yaml.safe_load((ROOT / 'manifest-expand' / 'action.yml').read_text()
@@ -135,8 +131,8 @@ class TestWiring:
     def test_debs_builder_drops_by_default(self) -> None:
         """The deb builder maps a ``gpu_driver`` input to the filter.
 
-        A push plan (no dispatch) writes ``no``, so the EULA-restricted
-        entries never join a public build by accident.
+        A push plan (no dispatch) writes ``no``, so the EULA-restricted entries
+        never join a public build by accident.
         """
         text = (WORKFLOWS / 'bootc-debs-builder.yml').read_text()
         assert "gpu_driver == 'yes' && 'yes' || 'no'" in text

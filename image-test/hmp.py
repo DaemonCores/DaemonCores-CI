@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Send human-monitor commands to a QEMU monitor unix socket and print the replies.
+"""Send human-monitor commands to a QEMU monitor socket, print the replies.
 
 usage: hmp.py SOCKET COMMAND...
 """
@@ -8,7 +8,8 @@ import socket
 import sys
 
 
-def read_reply(sock):
+def read_reply(sock: socket.socket) -> str:
+    """Read from the monitor until the (qemu) prompt and strip escapes."""
     out = b""
     try:
         while not out.rstrip().endswith(b"(qemu)"):
@@ -16,14 +17,15 @@ def read_reply(sock):
             if not chunk:
                 break
             out += chunk
-    except socket.timeout:
+    except TimeoutError:
         pass
     text = out.decode(errors="replace")
     # Drop the line-editor escape sequences QEMU echoes back.
     return re.sub(r"\x1b\[[0-9;?]*[A-Za-z]", "", text)
 
 
-def main():
+def main() -> None:
+    """Send the command-line commands to the monitor and print replies."""
     path, commands = sys.argv[1], sys.argv[2:]
     sock = socket.socket(socket.AF_UNIX)
     sock.settimeout(5)

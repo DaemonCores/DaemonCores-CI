@@ -28,7 +28,7 @@ check: admission
 	$(VBIN)/basedpyright $(PYTHON_SRCS)
 	$(VBIN)/pydoclint $(PYTHON_SRCS) $(PYTHON_TESTS)
 	$(VBIN)/python scripts/check_docstrings.py --root .
-	shellcheck $(SHELL_SRCS)
+	shellcheck -x -P SCRIPTDIR $(SHELL_SRCS)
 	shfmt -d -i 2 -bn -ci $(SHELL_SRCS)
 
 test: admission

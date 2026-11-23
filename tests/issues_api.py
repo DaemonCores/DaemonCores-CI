@@ -1,11 +1,11 @@
 """Fake GitHub Issues API for the CI test suite.
 
-A tiny threaded HTTP server speaking just enough of the GitHub REST API for
-the issue-writing code paths (build-one-deb.yml "Flag broken build" / "Close
-broken-build issue on success" and build-deb/build-all.sh ``issue()``): list
-open issues, create an issue, update an issue body, post a comment. Every
-request handled is recorded in :attr:`requests` so tests assert on the exact
-HTTP calls the CI made instead of on side effects in the real GitHub.
+A tiny threaded HTTP server speaking just enough of the GitHub REST API for the
+issue-writing code paths (build-one-deb.yml "Flag broken build" / "Close broken-
+build issue on success" and build-deb/build-all.sh ``issue()``): list open
+issues, create an issue, update an issue body, post a comment. Every request
+handled is recorded in :attr:`requests` so tests assert on the exact HTTP calls
+the CI made instead of on side effects in the real GitHub.
 """
 
 import json
@@ -32,8 +32,10 @@ class FakeIssuesApi:
         outer = self
 
         class Handler(BaseHTTPRequestHandler):
+            """Record each call on the outer FakeIssuesApi."""
 
             def do_GET(self) -> None:
+                """Answer a GET with the open issues or an empty list."""
                 split = urlsplit(self.path)
                 path = split.path.rstrip("/")
                 if path == f"/repos/{outer.repo}/issues":
@@ -44,6 +46,7 @@ class FakeIssuesApi:
                 return
 
             def do_POST(self) -> None:
+                """Record a POST and create an issue on the issues list."""
                 split = urlsplit(self.path)
                 path = split.path.rstrip("/")
                 length = int(self.headers.get("content-length") or 0)
@@ -63,6 +66,7 @@ class FakeIssuesApi:
                 return
 
             def do_PATCH(self) -> None:
+                """Record a PATCH and update the matching open issue."""
                 split = urlsplit(self.path)
                 path = split.path.rstrip("/")
                 length = int(self.headers.get("content-length") or 0)
@@ -79,6 +83,11 @@ class FakeIssuesApi:
                 return
 
             def _reply(self, body: bytes) -> None:
+                """Send a 200 JSON reply.
+
+                Args:
+                    body: Raw JSON bytes to send.
+                """
                 self.send_response(200)
                 self.send_header("content-type", "application/json")
                 self.send_header("content-length", str(len(body)))
@@ -86,6 +95,11 @@ class FakeIssuesApi:
                 self.wfile.write(body)
 
             def log_message(self, *_args: object) -> None:
+                """Silence the default request log.
+
+                Args:
+                    *_args: Log arguments, ignored.
+                """
                 return  # keep the pytest output quiet
 
         self._server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
@@ -96,7 +110,11 @@ class FakeIssuesApi:
 
     @property
     def base_url(self) -> str:
-        """Root URL to hand to the code under test as GITHUB_API_URL."""
+        """Root URL to hand to the code under test as GITHUB_API_URL.
+
+        Returns:
+            The ``http://host:port`` URL of the fake server.
+        """
         host, port = self._server.server_address[:2]
         return f"http://{host}:{port}"
 

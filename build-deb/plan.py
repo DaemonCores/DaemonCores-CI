@@ -15,11 +15,12 @@ Usage:
 
 import json
 import sys
+from typing import Any
 
 KERNEL_MARKER = 'kernel_signing_setup'
 
 
-def build_order(packages):
+def build_order(packages: list[dict[str, Any]]) -> list[str]:
     """Return the package names in build order.
 
     Args:
@@ -29,15 +30,19 @@ def build_order(packages):
         Names ordered by (dependency level, kernel group, name).
     """
     deps = {p['name']: list(p.get('deps') or []) for p in packages}
-    signs = {p['name']: KERNEL_MARKER in (p.get('build') or '') for p in packages}
-    memo = {}
+    signs = {
+        p['name']: KERNEL_MARKER in (p.get('build') or '')
+        for p in packages
+    }
+    memo: dict[str, int] = {}
 
-    def level(name):
+    def level(name: str) -> int:
         if name not in memo:
-            memo[name] = 1 + max((level(d) for d in deps.get(name, [])), default=-1)
+            memo[name] = 1 + max((level(d) for d in deps.get(name, [])),
+                                 default=-1)
         return memo[name]
 
-    def group(name):
+    def group(name: str) -> int:
         if not signs[name]:
             return 2
         return 0 if not deps[name] else 1
@@ -45,7 +50,7 @@ def build_order(packages):
     return sorted(deps, key=lambda n: (level(n), group(n), n))
 
 
-def main(argv):
+def main(argv: list[str]) -> int:
     """Read the manifest JSON named by argv[1] and print the order."""
     if len(argv) != 2:
         print(__doc__, file=sys.stderr)

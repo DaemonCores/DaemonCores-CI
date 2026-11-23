@@ -1,8 +1,8 @@
 """Parity test for ``build-deb/content-hash.sh`` against the pre-split script.
 
 The hash is the key of the published ``hashes.json``: if the extracted library
-computed a different value, every package would rebuild once. The old
-``build-deb.sh`` is read from git history and both paths hash the same fixture.
+computed a different value, every package would rebuild once. The old ``build-
+deb.sh`` is read from git history and both paths hash the same fixture.
 """
 
 import subprocess
@@ -78,7 +78,11 @@ def run_hash(prelude: str, env: dict[str, str]) -> str:
 
 
 def test_hash_matches_pre_split_script(fixture_env: dict[str, str]) -> None:
-    """The extracted library yields the hash of the old script."""
+    """The extracted library yields the hash of the old script.
+
+    Args:
+        fixture_env: Environment for the hash helper.
+    """
     old = old_script().split('\nmain() {')[0]
     old = old.replace('set -euo pipefail', 'set -eu', 1)
     new = f'. {LIB}'
@@ -89,7 +93,11 @@ def test_hash_matches_pre_split_script(fixture_env: dict[str, str]) -> None:
 
 
 def test_secret_keys_do_not_feed_the_hash(fixture_env: dict[str, str]) -> None:
-    """Rotating a token leaves the hash unchanged."""
+    """Rotating a token leaves the hash unchanged.
+
+    Args:
+        fixture_env: Environment for the hash helper.
+    """
     first = run_hash(f'. {LIB}', fixture_env)
     fixture_env['EXTRA_ENV'] = 'VERSION=1.2\nGH_TOKEN=other\nB=2'
     assert run_hash(f'. {LIB}', fixture_env) == first
@@ -103,6 +111,10 @@ def test_hash_follows_the_shared_build_scripts(
     Without this, a fixed ``deb_helpers.sh`` never replaced a deb built by the
     broken one: the published ``pve-manager`` kept a ``/tmp/overlays.*`` tree
     and broke the image build that installs it.
+
+    Args:
+        fixture_env: Environment for the hash helper.
+        tmp_path: Pytest temporary directory, holding the test helper script.
     """
     helper = tmp_path / 'helper.sh'
     helper.write_text('echo one\n')
@@ -118,7 +130,11 @@ def test_hash_follows_the_shared_build_scripts(
 def test_default_helper_scripts_exist_and_feed_the_hash(
     fixture_env: dict[str, str]
 ) -> None:
-    """With no override the hash covers the real scripts builds source."""
+    """With no override the hash covers the real scripts builds source.
+
+    Args:
+        fixture_env: Environment for the hash helper.
+    """
     with_default = run_hash(f'. {LIB}', fixture_env)
     fixture_env['CI_HELPER_SCRIPTS'] = ''
     assert with_default != run_hash(f'. {LIB}', fixture_env)

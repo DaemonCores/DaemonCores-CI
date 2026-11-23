@@ -29,8 +29,14 @@ set -euo pipefail
 OV="${1:?usage: apply_overlays.sh <overlay-dir> <extracted-tree>}"
 T="${2:?usage: apply_overlays.sh <overlay-dir> <extracted-tree>}"
 
-[[ -d "${OV}" ]] || { echo "apply_overlays: overlay dir missing: ${OV}" >&2; exit 1; }
-[[ -d "${T}" ]] || { echo "apply_overlays: tree dir missing: ${T}" >&2; exit 1; }
+[[ -d "${OV}" ]] || {
+  echo "apply_overlays: overlay dir missing: ${OV}" >&2
+  exit 1
+}
+[[ -d "${T}" ]] || {
+  echo "apply_overlays: tree dir missing: ${T}" >&2
+  exit 1
+}
 
 #######################################
 # Drift report: annotation, step summary, exit 3 (caller skips the build).
@@ -88,8 +94,8 @@ echo "apply_overlays: ${local_patch_count} patch(es) dry-run OK."
 # keeps its .patch files (Gabriel spec 2026-10-30).
 if compgen -G "${OV}/*" >/dev/null; then
   cp -r "${OV}"/. "${T}/"
-  find "${T}" -name '*.patch' -delete          # meta, never shipped
-  find "${T}" -name patches.lock.json -delete  # meta, never shipped
+  find "${T}" -name '*.patch' -delete         # meta, never shipped
+  find "${T}" -name patches.lock.json -delete # meta, never shipped
 fi
 echo "apply_overlays: overlay copied."
 

@@ -41,6 +41,9 @@ def _tarball_digest(api: Path, version: str) -> str:
     Args:
         api: API tree root.
         version: The fixture kernel version the tarball was written for.
+
+    Returns:
+        The hex digest of the tarball.
     """
     import hashlib
 

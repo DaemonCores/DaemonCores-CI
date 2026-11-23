@@ -216,7 +216,7 @@ def test_a_block_scalar_build_keeps_its_trailing_newline(
 
 
 def test_a_rebuilt_dependency_rebuilds_its_dependents(tmp_path: Path) -> None:
-    """beta is built when Alpha changed, even if beta's own inputs did not.
+    """Beta is built when Alpha changed, even if beta's own inputs did not.
 
     Args:
         tmp_path: Scratch directory.

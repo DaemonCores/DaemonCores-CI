@@ -1,9 +1,9 @@
 """Tests of the per-architecture image job (``scripts/image-ci``).
 
 ``podman``, ``skopeo``, ``curl``, ``trivy``, ``cosign`` and the boot test
-(``image-test.sh``) are stubs first on ``PATH`` that log their arguments, so
-the tests cover the orchestration (order, states, flags, exit status) and the
-hash parity with the former workflow step, not the builds themselves.
+(``image-test.sh``) are stubs first on ``PATH`` that log their arguments, so the
+tests cover the orchestration (order, states, flags, exit status) and the hash
+parity with the former workflow step, not the builds themselves.
 """
 
 import os
@@ -61,7 +61,8 @@ case "$1" in
       exit 1
     fi
     if [ "$2" = "--digestfile" ]; then
-      echo "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" >"$3"
+      echo "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\
+aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" >"$3"
     fi
     ;;
   save)
@@ -181,9 +182,9 @@ class Sandbox:
         git = ['git', '-c', 'user.email=t@t', '-c', 'user.name=t']
         subprocess.run(['git', 'init', '-q'], cwd=self.root, check=True)
         subprocess.run(['git', 'add', '-A'], cwd=self.root, check=True)
-        subprocess.run(
-            git + ['commit', '-q', '-m', 'init'], cwd=self.root, check=True
-        )
+        subprocess.run([*git, 'commit', '-q', '-m', 'init'],
+                       cwd=self.root,
+                       check=True)
         self.env = dict(
             os.environ,
             PATH=f'{bindir}:{os.environ["PATH"]}',
@@ -212,9 +213,9 @@ class Sandbox:
 
         Args:
             entries: Matrix entries of the architecture.
-            phases: Phases to run (all when empty).
-            arch: Architecture.
-            env: Extra environment variables.
+            *phases: Phases to run, all when empty.
+            arch: Architecture the entries are built for.
+            **env: Extra environment variables.
 
         Returns:
             The completed process.
@@ -257,10 +258,13 @@ class Sandbox:
         """Return the TSV columns of one image.
 
         Args:
-            tag: Image tag.
+            tag: Image tag to look up.
 
         Returns:
-            The columns.
+            The TSV columns of the image row.
+
+        Raises:
+            KeyError: If no row has this tag.
         """
         tsv = self.runner_temp / 'image-ci' / 'state.tsv'
         for ln in tsv.read_text().splitlines():
@@ -356,6 +360,9 @@ def test_hash_is_identical_to_the_former_workflow_step(sb: Sandbox) -> None:
     hash (measured 2026-11-02, runs of session 41451549641/41455682594).
     The DEBS / kernel-debs fingerprints are base-independent and must stay
     byte-identical to the formula the published hashes came from.
+
+    Args:
+        sb: Sandbox running the harness.
     """
     out = sb.root.parent / 'old.out'
     env = dict(
@@ -396,6 +403,28 @@ def test_hash_is_identical_to_the_former_workflow_step(sb: Sandbox) -> None:
         assert new[key] == old[key], key
 
 
+def _image_hash(sb: Sandbox, env: dict[str, str]) -> str:
+    """Hash the image of the sandbox Containerfile with the given environment.
+
+    Args:
+        sb: Sandbox running the harness.
+        env: Environment of the hashing shell.
+
+    Returns:
+        The image content hash the harness printed.
+    """
+    script = (
+        f'. {CI}/hash.sh; ci_hash_inputs; '
+        'ci_image_hash Containerfile latest'
+    )
+    return subprocess.run(['bash', '-c', script],
+                          cwd=sb.root,
+                          env=env,
+                          check=True,
+                          capture_output=True,
+                          text=True).stdout.strip()
+
+
 @needs_jq
 def test_hash_ignores_a_base_rebuild_with_identical_content(
     sb: Sandbox
@@ -406,36 +435,31 @@ def test_hash_ignores_a_base_rebuild_with_identical_content(
     the manifest digest changes each time. The image content hash must
     follow the content-hash label and stay stable across such a rebuild,
     then move when the base content genuinely changes.
+
+    Args:
+        sb: Sandbox running the harness.
     """
     (sb.root / 'Containerfile').write_text('FROM scratch\n')
 
-    def image_hash(label: str | None = None) -> str:
-        script = (
-            f'. {CI}/hash.sh; ci_hash_inputs; '
-            'ci_image_hash Containerfile latest'
-        )
-        envv: dict[str, str] = dict(sb.env, SUDO='sudo', ARCH='amd64')
-        if label:
-            envv['BASE_LABEL'] = label
-        return subprocess.run(['bash', '-c', script],
-                              cwd=sb.root,
-                              env=envv,
-                              check=True,
-                              capture_output=True,
-                              text=True).stdout.strip()
-
-    first = image_hash()
+    env: dict[str, str] = dict(sb.env, SUDO='sudo', ARCH='amd64')
+    first = _image_hash(sb, env)
     # A rebuild: the manifest digest changes, the label stays.
-    assert image_hash() == first, \
+    assert _image_hash(sb, env) == first, \
         'a base digest float must not move the image hash'
     # The default label stub value differs from the changed label below.
-    assert image_hash('sha256:' + 'b' * 64) != first, \
+    assert _image_hash(
+        sb, dict(env, BASE_LABEL='sha256:' + 'b' * 64)
+    ) != first, \
         'a changed base label must move the image hash'
 
 
 @needs_jq
 def test_hash_follows_the_files_the_containerfile_copies(sb: Sandbox) -> None:
-    """Editing a copied file changes the hash; an unrelated file does not."""
+    """Editing a copied file changes the hash; an unrelated file does not.
+
+    Args:
+        sb: Sandbox running the harness.
+    """
     (sb.root / 'src').mkdir()
     (sb.root / 'src' / 'a.conf').write_text('one\n')
     (sb.root / 'other.txt').write_text('x\n')
@@ -449,23 +473,11 @@ def test_hash_follows_the_files_the_containerfile_copies(sb: Sandbox) -> None:
         BOOTC_GPG_SHA256='key'
     )
 
-    def image_hash() -> str:
-        script = (
-            f'. {CI}/hash.sh; ci_hash_inputs; '
-            'ci_image_hash Containerfile latest'
-        )
-        return subprocess.run(['bash', '-c', script],
-                              cwd=sb.root,
-                              env=env,
-                              check=True,
-                              capture_output=True,
-                              text=True).stdout.strip()
-
-    before = image_hash()
+    before = _image_hash(sb, env)
     (sb.root / 'other.txt').write_text('y\n')
-    assert image_hash() == before
+    assert _image_hash(sb, env) == before
     (sb.root / 'src' / 'a.conf').write_text('two\n')
-    assert image_hash() != before
+    assert _image_hash(sb, env) != before
 
 
 @pytest.mark.parametrize(
@@ -502,7 +514,11 @@ def test_skip_decision(
 
 @needs_jq
 def test_hash_phase_skips_unchanged_images(sb: Sandbox) -> None:
-    """An image whose published label matches is skipped-unchanged."""
+    """An image whose published label matches is skipped-unchanged.
+
+    Args:
+        sb: Sandbox running the harness.
+    """
     sb.run(LATEST, 'hash')
     latest, twin = sb.row('latest')[6], sb.row('latest-nosign')[6]
     sb.publish('latest', 'amd64', latest)
@@ -541,7 +557,11 @@ def test_prepare_lists_the_packages_of_the_architecture(
 
 
 def test_prepare_installs_in_one_apt_call(sb: Sandbox) -> None:
-    """A single apt-get install receives every package."""
+    """A single apt-get install receives every package.
+
+    Args:
+        sb: Sandbox running the harness.
+    """
     _script(
         sb.root.parent / 'bin' / 'apt-get',
         '#!/bin/bash\necho "apt-get $*" >>"${STUB_LOG}"\n'
@@ -573,7 +593,11 @@ def test_prepare_rejects_an_unknown_architecture() -> None:
 def test_parent_of_a_derived_image_is_read_from_its_from_line(
     sb: Sandbox
 ) -> None:
-    """FROM naming an image of this repository records its parent tag."""
+    """FROM naming an image of this repository records its parent tag.
+
+    Args:
+        sb: Sandbox running the harness.
+    """
     sb.run(LATEST, 'hash')
     assert sb.row('iso')[5] == 'latest'
     assert sb.row('latest')[5] == '-'
@@ -581,7 +605,11 @@ def test_parent_of_a_derived_image_is_read_from_its_from_line(
 
 @needs_jq
 def test_build_order_and_no_cache_flags(sb: Sandbox) -> None:
-    """Base once; per Containerfile primary then twin; no-cache on primaries."""
+    """Base once; per Containerfile primary then twin; no-cache on primaries.
+
+    Args:
+        sb: Sandbox running the harness.
+    """
     entries = [
         entry('latest', suffix='-16k', twin='-16k-nosign'),
         entry('latest-4k'),
@@ -614,7 +642,11 @@ def test_build_order_and_no_cache_flags(sb: Sandbox) -> None:
 def test_cache_to_only_on_main_and_canonical_tags_only_on_amd64(
     sb: Sandbox
 ) -> None:
-    """The layer cache is written on main; extra tags follow the arch."""
+    """The layer cache is written on main; extra tags follow the arch.
+
+    Args:
+        sb: Sandbox running the harness.
+    """
     sb.run([entry('latest')], 'hash', 'build')
     assert not [b for b in sb.calls('podman build') if '--cache-to' in b]
     amd = sb.calls('podman build')[1]
@@ -632,7 +664,11 @@ def test_cache_to_only_on_main_and_canonical_tags_only_on_amd64(
 
 @needs_jq
 def test_stale_cache_blob_retries_without_cache_to(sb: Sandbox) -> None:
-    """A failed cache push is retried read-only and the build succeeds."""
+    """A failed cache push is retried read-only and the build succeeds.
+
+    Args:
+        sb: Sandbox running the harness.
+    """
     done = sb.run([entry('latest')],
                   'hash',
                   'build',
@@ -648,7 +684,11 @@ def test_stale_cache_blob_retries_without_cache_to(sb: Sandbox) -> None:
 
 @needs_jq
 def test_a_failed_build_is_recorded_and_the_loop_continues(sb: Sandbox) -> None:
-    """The twin fails; the primary still goes through; exit status is 1."""
+    """The twin fails; the primary still goes through; exit status is 1.
+
+    Args:
+        sb: Sandbox running the harness.
+    """
     entries = [entry('latest', twin='-nosign'), entry('second')]
     done = sb.run(entries, 'hash', 'build', FAIL_BUILD='latest-nosign_amd64')
     assert done.returncode == 1
@@ -663,7 +703,11 @@ def test_a_failed_build_is_recorded_and_the_loop_continues(sb: Sandbox) -> None:
 
 @needs_jq
 def test_a_failed_base_fails_every_image_of_the_wave(sb: Sandbox) -> None:
-    """Nothing is built on a base that did not build."""
+    """Nothing is built on a base that did not build.
+
+    Args:
+        sb: Sandbox running the harness.
+    """
     done = sb.run(
         LATEST,
         'hash',
@@ -685,7 +729,11 @@ def test_a_failed_base_fails_every_image_of_the_wave(sb: Sandbox) -> None:
 def test_the_derived_image_is_built_after_the_tests_on_the_local_parent(
     sb: Sandbox
 ) -> None:
-    """Wave 2 follows the boot test of its parent and builds on it."""
+    """Wave 2 follows the boot test of its parent and builds on it.
+
+    Args:
+        sb: Sandbox running the harness.
+    """
     done = sb.run(LATEST)
     assert done.returncode == 0, done.stderr
     log = sb.log.read_text()
@@ -717,6 +765,9 @@ def test_a_derived_image_never_falls_back_to_the_published_parent(
 
     Pulling the published tag would build on the previous publication and
     push it back under the parent's tag.
+
+    Args:
+        sb: Sandbox running the harness.
     """
     done = sb.run(LATEST, MISSING_IMAGE=f'{IMAGE}:latest_amd64')
     assert done.returncode == 1
@@ -728,11 +779,14 @@ def test_a_derived_image_never_falls_back_to_the_published_parent(
 def test_a_derived_vendor_image_is_built_and_boot_tested_in_the_same_job(
     sb: Sandbox
 ) -> None:
-    """A derived image that runs a VM is built on its tested parent, then tested.
+    """Build a derived VM image on its tested parent, then boot-test it.
 
     Unlike the installer image it is not in the boot-test skip list: it is a
     bootable image, so its own boot test runs in the job of its parent, after
     the second build wave, and it is pushed without the canonical tags.
+
+    Args:
+        sb: Sandbox running the harness.
     """
     (sb.root / 'Containerfile.vendor').write_text(ISO_CF)
     done = sb.run([entry('latest'), entry('vendor', 'Containerfile.vendor')])
@@ -754,7 +808,11 @@ def test_a_derived_vendor_image_is_built_and_boot_tested_in_the_same_job(
 def test_the_derived_image_is_blocked_when_its_parent_failed(
     sb: Sandbox
 ) -> None:
-    """A parent that did not pass blocks the image built on it."""
+    """A parent that did not pass blocks the image built on it.
+
+    Args:
+        sb: Sandbox running the harness.
+    """
     done = sb.run(LATEST, FAIL_TEST='latest_amd64')
     assert done.returncode == 1
     states = sb.states()
@@ -767,7 +825,11 @@ def test_the_derived_image_is_blocked_when_its_parent_failed(
 def test_a_skipped_parent_lets_the_derived_image_build_on_the_published_one(
     sb: Sandbox
 ) -> None:
-    """With an unchanged parent the derived image is built, pulling it."""
+    """With an unchanged parent the derived image is built, pulling it.
+
+    Args:
+        sb: Sandbox running the harness.
+    """
     sb.run(LATEST, 'hash')
     sb.publish('latest', 'amd64', sb.row('latest')[6])
     sb.publish('latest-nosign', 'amd64', sb.row('latest-nosign')[6])
@@ -785,7 +847,11 @@ def test_a_skipped_parent_lets_the_derived_image_build_on_the_published_one(
 def test_an_unchanged_derived_image_follows_a_rebuilt_parent(
     sb: Sandbox
 ) -> None:
-    """The derived image is rebuilt when its parent was, even if unchanged."""
+    """The derived image is rebuilt when its parent was, even if unchanged.
+
+    Args:
+        sb: Sandbox running the harness.
+    """
     sb.run(LATEST, 'hash')
     sb.publish('iso', 'amd64', sb.row('iso')[6])
     done = sb.run(LATEST)
@@ -802,7 +868,11 @@ def test_an_unchanged_derived_image_follows_a_rebuilt_parent(
 
 @needs_jq
 def test_an_unknown_parent_blocks(sb: Sandbox) -> None:
-    """A parent that is not part of this run cannot be vouched for."""
+    """A parent that is not part of this run cannot be vouched for.
+
+    Args:
+        sb: Sandbox running the harness.
+    """
     done = sb.run([entry('iso', 'Containerfile.iso')])
     assert done.returncode == 1
     assert sb.states() == {'iso': 'blocked'}
@@ -811,7 +881,11 @@ def test_an_unknown_parent_blocks(sb: Sandbox) -> None:
 # ----------------------------------------------------- lint, test, scan ----
 @needs_jq
 def test_lint_failure_is_recorded(sb: Sandbox) -> None:
-    """A failing lint stops the image before its boot test."""
+    """A failing lint stops the image before its boot test.
+
+    Args:
+        sb: Sandbox running the harness.
+    """
     done = sb.run([entry('latest')], FAIL_RUN='bootc container lint')
     assert done.returncode == 1
     assert sb.states() == {'latest': 'lint-failed'}
@@ -822,7 +896,11 @@ def test_lint_failure_is_recorded(sb: Sandbox) -> None:
 def test_boot_tests_use_one_prepare_and_one_child_process_per_image(
     sb: Sandbox
 ) -> None:
-    """Prepare once, test each image with its RAM budget, teardown once."""
+    """Prepare once, test each image with its RAM budget, teardown once.
+
+    Args:
+        sb: Sandbox running the harness.
+    """
     entries = [entry('latest', twin='-nosign'), entry('extra')]
     (sb.root / 'Containerfile.extra').write_text(MAIN_CF)
     entries[1]['file'] = 'Containerfile.extra'
@@ -847,7 +925,11 @@ def test_boot_tests_use_one_prepare_and_one_child_process_per_image(
 def test_a_failed_boot_test_is_recorded_with_its_serial_log(
     sb: Sandbox
 ) -> None:
-    """The failure is reported with the serial log; the next image runs."""
+    """The failure is reported with the serial log; the next image runs.
+
+    Args:
+        sb: Sandbox running the harness.
+    """
     entries = [entry('latest', twin='-nosign')]
     done = sb.run(entries, FAIL_TEST='latest_amd64')
     assert done.returncode == 1
@@ -860,7 +942,11 @@ def test_a_failed_boot_test_is_recorded_with_its_serial_log(
 
 @needs_jq
 def test_a_hung_boot_test_is_killed_by_the_timeout(sb: Sandbox) -> None:
-    """The child process is bounded by BOOT_TEST_TIMEOUT."""
+    """The child process is bounded by BOOT_TEST_TIMEOUT.
+
+    Args:
+        sb: Sandbox running the harness.
+    """
     done = sb.run([entry('latest')],
                   HANG_TEST='latest_amd64',
                   BOOT_TEST_TIMEOUT='1')
@@ -871,7 +957,11 @@ def test_a_hung_boot_test_is_killed_by_the_timeout(sb: Sandbox) -> None:
 
 @needs_jq
 def test_a_failed_prepare_fails_the_tests_not_the_loop(sb: Sandbox) -> None:
-    """Every image to test is reported, nothing is pushed or hidden."""
+    """Every image to test is reported, nothing is pushed or hidden.
+
+    Args:
+        sb: Sandbox running the harness.
+    """
     done = sb.run(LATEST, FAIL_PREPARE='1')
     assert done.returncode == 1
     assert sb.states()['latest'] == 'test-failed'
@@ -882,7 +972,11 @@ def test_a_failed_prepare_fails_the_tests_not_the_loop(sb: Sandbox) -> None:
 
 @needs_jq
 def test_scan_is_report_only_and_removes_its_archive(sb: Sandbox) -> None:
-    """A scanner failure is a warning; the archive never stays."""
+    """A scanner failure is a warning; the archive never stays.
+
+    Args:
+        sb: Sandbox running the harness.
+    """
     done = sb.run([entry('latest', twin='-nosign')], FAIL_TRIVY='1')
     assert done.returncode == 0, done.stderr
     assert len(sb.calls('trivy image --input')) == 1
@@ -894,7 +988,11 @@ def test_scan_is_report_only_and_removes_its_archive(sb: Sandbox) -> None:
 def test_enforced_scan_fails_the_image_on_a_fixable_finding(
     sb: Sandbox
 ) -> None:
-    """TRIVY_ENFORCE=1: a finding fails the image; the default never does."""
+    """TRIVY_ENFORCE=1: a finding fails the image; the default never does.
+
+    Args:
+        sb: Sandbox running the harness.
+    """
     done = sb.run([entry('latest', twin='-nosign')],
                   TRIVY_ENFORCE='1',
                   TRIVY_ENFORCED_RC='5',
@@ -911,7 +1009,11 @@ def test_enforced_scan_fails_the_image_on_a_fixable_finding(
 
 @needs_jq
 def test_enforced_scan_treats_a_scanner_error_as_a_warning(sb: Sandbox) -> None:
-    """Exit 1 (database unreachable) is not a vulnerability."""
+    """Exit 1 (database unreachable) is not a vulnerability.
+
+    Args:
+        sb: Sandbox running the harness.
+    """
     done = sb.run([entry('latest', twin='-nosign')],
                   TRIVY_ENFORCE='1',
                   TRIVY_ENFORCED_RC='1')
@@ -922,7 +1024,11 @@ def test_enforced_scan_treats_a_scanner_error_as_a_warning(sb: Sandbox) -> None:
 # ----------------------------------------------------------- push, sign ----
 @needs_jq
 def test_nothing_is_pushed_outside_main(sb: Sandbox) -> None:
-    """A branch run builds and tests but never pushes or signs."""
+    """A branch run builds and tests but never pushes or signs.
+
+    Args:
+        sb: Sandbox running the harness.
+    """
     done = sb.run(LATEST)
     assert done.returncode == 0, done.stderr
     assert not sb.calls('podman push')
@@ -931,7 +1037,11 @@ def test_nothing_is_pushed_outside_main(sb: Sandbox) -> None:
 
 @needs_jq
 def test_main_pushes_ok_images_and_signs_once(sb: Sandbox) -> None:
-    """Per-arch and canonical tags are pushed, one sign call covers all."""
+    """Per-arch and canonical tags are pushed, one sign call covers all.
+
+    Args:
+        sb: Sandbox running the harness.
+    """
     done = sb.run(
         LATEST,
         FAIL_TEST='latest-nosign_amd64',
@@ -960,7 +1070,11 @@ def test_main_pushes_ok_images_and_signs_once(sb: Sandbox) -> None:
 
 @needs_jq
 def test_a_failed_push_is_recorded_and_not_signed(sb: Sandbox) -> None:
-    """The failing image has no signature; the other ones go on."""
+    """The failing image has no signature; the other ones go on.
+
+    Args:
+        sb: Sandbox running the harness.
+    """
     entries = [entry('latest'), entry('second')]
     done = sb.run(
         entries, GITHUB_REF='refs/heads/main', FAIL_PUSH='latest_amd64'
@@ -974,7 +1088,11 @@ def test_a_failed_push_is_recorded_and_not_signed(sb: Sandbox) -> None:
 
 @needs_jq
 def test_a_failed_signature_fails_the_job(sb: Sandbox) -> None:
-    """A signing error is reported and the exit status is 1."""
+    """A signing error is reported and the exit status is 1.
+
+    Args:
+        sb: Sandbox running the harness.
+    """
     _script(sb.root.parent / 'bin' / 'cosign', '#!/bin/bash\nexit 1\n')
     done = sb.run([entry('latest')], GITHUB_REF='refs/heads/main')
     assert done.returncode == 1
@@ -983,7 +1101,11 @@ def test_a_failed_signature_fails_the_job(sb: Sandbox) -> None:
 
 @needs_jq
 def test_unchanged_images_are_reported_not_failed(sb: Sandbox) -> None:
-    """A fully unchanged arch builds nothing and succeeds."""
+    """A fully unchanged arch builds nothing and succeeds.
+
+    Args:
+        sb: Sandbox running the harness.
+    """
     entries = [entry('latest')]
     sb.run(entries, 'hash')
     sb.publish('latest', 'amd64', sb.row('latest')[6])
@@ -1005,7 +1127,7 @@ def _workflow() -> dict[str, Any]:
 
 
 def test_workflow_runs_one_job_per_arch_through_the_script() -> None:
-    """build-test-push is the per-arch job; build-iso is gone."""
+    """Build-test-push is the per-arch job; build-iso is gone."""
     jobs = _workflow()['jobs']
     assert 'build-iso' not in jobs
     job = jobs['build-test-push']
@@ -1040,6 +1162,9 @@ def test_the_thin_twin_is_derived_with_the_owner_tags(sb: Sandbox) -> None:
     build), builds on the tested parent and carries the owner's twin tags:
     the per-arch ref is <primary>_<arch>-<twin>, the manifest list is
     <primary>-<twin>.
+
+    Args:
+        sb: Sandbox running the harness.
     """
     (sb.root / 'Containerfile.thpalways').write_text(ISO_CF)
     done = sb.run([

@@ -27,11 +27,12 @@
 set -euo pipefail
 
 KERNEL_HELPERS="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/kernel_helpers.sh"
+# shellcheck source=kernel_helpers.sh
 . "${KERNEL_HELPERS}"
 
 deb_overlay_apply() {
   local ovl="${1:?}" tree="${2:?}"
-  local tdir cand p tmp
+  local tdir cand p
   tdir=$(mktemp -d "/tmp/overlays.XXXXXX")
   cp -r "${ovl}" "${tdir}/overlay"
   # Debian multiarch: the overlay mirror paths name x86_64-linux-gnu; the
@@ -44,15 +45,15 @@ deb_overlay_apply() {
   # Mirror everything EXCEPT the patch/lock metadata onto the tree copy so a
   # dry-run sees the exact files the apply will create or replace.
   (cd "${tdir}/overlay" && find . -name '*.patch' -print) >"${tdir}/patchlist"
-  (cd "${tdir}/overlay" && find . -name '*.delete' -type f -print) |
-    sed -e 's|^\./||' -e 's|\.delete$||' >"${tdir}/deletelist"
+  (cd "${tdir}/overlay" && find . -name '*.delete' -type f -print) \
+    | sed -e 's|^\./||' -e 's|\.delete$||' >"${tdir}/deletelist"
   if [ "${BUILD_ARCH:-amd64}" = "arm64" ]; then
     sed -i 's/x86_64-linux-gnu/aarch64-linux-gnu/g' "${tdir}/deletelist"
   fi
   mkdir -p "${tdir}/tree"
   (cd "${tdir}/overlay" && find . -name '*.patch' -prune -o -name '*.delete' -prune -o \
-       -name 'patches.lock.json' -prune -o -type f -print) |
-    while read -r cand; do
+    -name 'patches.lock.json' -prune -o -type f -print) \
+    | while read -r cand; do
       cand="${cand#./}"
       mkdir -p "${tdir}/tree/$(dirname "${cand}")"
       cp -a "${tdir}/overlay/${cand}" "${tdir}/tree/${cand}"
@@ -61,7 +62,11 @@ deb_overlay_apply() {
   while read -r p; do
     [ -n "${p}" ] || continue
     [ -e "${tree}/${p}" ] \
-      || { echo "ERROR: ${p}.delete targets a file absent from ${tree} — overlay drift." >&2; rm -rf "${tdir}"; return 3; }
+      || {
+        echo "ERROR: ${p}.delete targets a file absent from ${tree} — overlay drift." >&2
+        rm -rf "${tdir}"
+        return 3
+      }
   done <"${tdir}/deletelist"
   # Copy the pristine tree for the dry run of the patches it touches.
   rm -rf "${tdir}/tree-dry"
@@ -73,7 +78,11 @@ deb_overlay_apply() {
     # deletes its content (--remove-empty-files makes the deletion real).
     patch --quiet --dry-run --forward --remove-empty-files -d "${tdir}/tree-dry" -p1 \
       <"${tdir}/overlay/${p}" \
-      || { echo "ERROR: ${p} fails dry-run on ${tree} — overlay drift." >&2; rm -rf "${tdir}"; return 3; }
+      || {
+        echo "ERROR: ${p} fails dry-run on ${tree} — overlay drift." >&2
+        rm -rf "${tdir}"
+        return 3
+      }
   done <"${tdir}/patchlist"
   # Real application on the real tree.
   cp -a "${tdir}/tree/." "${tree}/"
@@ -82,7 +91,11 @@ deb_overlay_apply() {
     [ -n "${p}" ] || continue
     patch --quiet --forward --remove-empty-files -d "${tree}" -p1 \
       <"${tdir}/overlay/${p}" \
-      || { echo "ERROR: ${p} failed to apply (unexpected: dry-run passed)." >&2; rm -rf "${tdir}"; return 3; }
+      || {
+        echo "ERROR: ${p} failed to apply (unexpected: dry-run passed)." >&2
+        rm -rf "${tdir}"
+        return 3
+      }
   done <"${tdir}/patchlist"
   while read -r p; do
     [ -n "${p}" ] || continue
@@ -126,7 +139,10 @@ deb_repack() {
   local UP_DEB
   set -- "/tmp/${pkg}"_*.deb
   [ -f "${1:-}" ] \
-    || { echo "ERROR: no upstream .deb for ${pkg} left in /tmp after download" >&2; exit 1; }
+    || {
+      echo "ERROR: no upstream .deb for ${pkg} left in /tmp after download" >&2
+      exit 1
+    }
   UP_DEB="$1"
   dpkg-deb -R "$UP_DEB" "$O"
 
@@ -144,10 +160,10 @@ deb_repack() {
     exit 0
   fi
 
-  find "$O" -not -path '*/DEBIAN/*' -type f \
-    | xargs md5sum \
+  find "$O" -not -path '*/DEBIAN/*' -type f -print0 \
+    | xargs -0 md5sum \
     | sed "s|$O/||" \
-    > "$O/DEBIAN/md5sums"
+      >"$O/DEBIAN/md5sums"
   sed -i "s/^Version: .*/Version: 1:${ORIG_VER}${suffix}/" "$O/DEBIAN/control"
   dpkg-deb --build "$O" \
     "/debs/${pkg}_${ORIG_VER}${suffix}_${ARCH}.deb"
@@ -169,15 +185,24 @@ deb_overlay_tree() {
   local UP_DEB
   set -- "/tmp/${pkg}"_*.deb
   [ -f "${1:-}" ] \
-    || { echo "ERROR: no upstream .deb for ${pkg} left in /tmp after download" >&2; exit 1; }
+    || {
+      echo "ERROR: no upstream .deb for ${pkg} left in /tmp after download" >&2
+      exit 1
+    }
   UP_DEB="$1"
   dpkg-deb -R "$UP_DEB" "$O"
   cp -r "${SAVE_PWD}/workflows/bootc-debs-builder/${tree:?}"/* "$O/"
   for f in "${EXEC_LIST[@]}"; do
     [ -e "$O/${f:?}" ] \
-      || { echo "ERROR: ${pkg} tree entry ${f} missing in the overlay" >&2; exit 1; }
+      || {
+        echo "ERROR: ${pkg} tree entry ${f} missing in the overlay" >&2
+        exit 1
+      }
     test -x "$O/${f}" \
-      || { echo "ERROR: ${pkg} ${f} not executable" >&2; exit 1; }
+      || {
+        echo "ERROR: ${pkg} ${f} not executable" >&2
+        exit 1
+      }
     chmod 0755 "$O/${f}"
   done
 
@@ -185,14 +210,17 @@ deb_overlay_tree() {
   ORIG_VER=$(dpkg-deb -f "$UP_DEB" Version)
   ARCH=$(dpkg-deb -f "$UP_DEB" Architecture)
 
-  find "$O" -not -path '*/DEBIAN/*' -type f \
-    | xargs md5sum \
+  find "$O" -not -path '*/DEBIAN/*' -type f -print0 \
+    | xargs -0 md5sum \
     | sed "s|$O/||" \
-    > "$O/DEBIAN/md5sums"
+      >"$O/DEBIAN/md5sums"
   sed -i "s/^Version: .*/Version: 1:${ORIG_VER}${suffix}/" "$O/DEBIAN/control"
   # Re-verify: a control without a Version: line made the sed a silent no-op.
   grep -qF "Version: 1:${ORIG_VER}${suffix}" "$O/DEBIAN/control" \
-    || { echo "ERROR: ${pkg} rewritten Version missing/wrong" >&2; exit 1; }
+    || {
+      echo "ERROR: ${pkg} rewritten Version missing/wrong" >&2
+      exit 1
+    }
   dpkg-deb --build "$O" \
     "/debs/${pkg}_${ORIG_VER}${suffix}_${ARCH}.deb"
 }
@@ -204,8 +232,12 @@ deb_overlay_tree() {
 # Plain http: the CDN SNI mismatch breaks https; the keyring still authenticates.
 deb_setup_pve_repo() {
   local suite keyring="${PVE_KEYRING:-/usr/share/keyrings/proxmox-archive-keyring.gpg}"
+  # shellcheck source=/dev/null
   suite=$(. /etc/os-release && echo "${VERSION_CODENAME:?}")
-  [ -r "$keyring" ] || { echo "ERROR: Proxmox keyring ${keyring} missing" >&2; return 1; }
+  [ -r "$keyring" ] || {
+    echo "ERROR: Proxmox keyring ${keyring} missing" >&2
+    return 1
+  }
   echo "deb [signed-by=${keyring}] http://download.proxmox.com/debian/pve ${suite} pve-no-subscription" \
     >/etc/apt/sources.list.d/pve-no-subscription.list
   apt-get update
@@ -236,7 +268,10 @@ deb_source_build() {
     || exit 3
   for p in "${SAVE_PWD}/workflows/bootc-debs-builder/${lane}"/src/pmxcfs/*.patch; do
     patch --quiet --dry-run --forward --remove-empty-files -p1 -d "$O/src" <"$p" \
-      || { echo "ERROR: pve-src patch ${p} fails dry-run — lane drift." >&2; exit 3; }
+      || {
+        echo "ERROR: pve-src patch ${p} fails dry-run — lane drift." >&2
+        exit 3
+      }
   done
   for p in "${SAVE_PWD}/workflows/bootc-debs-builder/${lane}"/src/pmxcfs/*.patch; do
     patch --quiet --forward --remove-empty-files -p1 -d "$O/src" <"$p"
@@ -248,17 +283,24 @@ deb_source_build() {
   # the overlay model.
   for o in "${@:?}"; do
     while read -r p; do
-      p="${p#./}"; [ -n "${p}" ] || continue
-      sp=$(echo "${p%.patch}" | sed 's|^usr/share/perl5/|src/|')
+      p="${p#./}"
+      [ -n "${p}" ] || continue
+      sp="${p%.patch}"
+      sp="${sp/#usr\/share\/perl5\//src/}"
       patch --quiet --dry-run --forward -p3 -d "$O/src" "$sp" \
         <"${SAVE_PWD}/workflows/bootc-debs-builder/${o}/${p}" \
-        || { echo "ERROR: overlay ${o}/${p} fails dry-run — overlay drift." >&2; exit 3; }
+        || {
+          echo "ERROR: overlay ${o}/${p} fails dry-run — overlay drift." >&2
+          exit 3
+        }
     done < <(cd "${SAVE_PWD}/workflows/bootc-debs-builder/${o}" && find . -name '*.patch' -print)
   done
   for o in "${@}"; do
     while read -r p; do
-      p="${p#./}"; [ -n "${p}" ] || continue
-      sp=$(echo "${p%.patch}" | sed 's|^usr/share/perl5/|src/|')
+      p="${p#./}"
+      [ -n "${p}" ] || continue
+      sp="${p%.patch}"
+      sp="${sp/#usr\/share\/perl5\//src/}"
       patch --quiet --forward -p3 -d "$O/src" "$sp" \
         <"${SAVE_PWD}/workflows/bootc-debs-builder/${o}/${p}"
     done < <(cd "${SAVE_PWD}/workflows/bootc-debs-builder/${o}" && find . -name '*.patch' -print)
@@ -283,9 +325,8 @@ deb_source_build() {
 
 deb_custom() {
   local pkg="${1:?}" ver="${2:?}" tree="${3:?}"
-  local O SAVE_PWD key src
+  local O SAVE_PWD src
   SAVE_PWD="${SAVE_PWD:-$PWD}"
-  key="$(echo "${pkg^^}" | tr '[:lower:]-' '[:upper:]_')_VER"
   O="/output/${pkg}"
   mkdir -p "$O"
   cp -r "${SAVE_PWD}/workflows/bootc-debs-builder/${tree:?}"/* "$O/"
@@ -298,25 +339,37 @@ deb_custom() {
     "$O/DEBIAN/control"
 
   ! grep -q '{{' "$O/DEBIAN/control" \
-    || { echo "ERROR: ${pkg} control has unexpanded template" >&2; exit 1; }
+    || {
+      echo "ERROR: ${pkg} control has unexpanded template" >&2
+      exit 1
+    }
   src="$O/usr/sbin/${pkg}"
   if [ -e "${src}" ]; then
     test -x "${src}" \
-      || { echo "ERROR: ${pkg} ${src} missing/not exec" >&2; exit 1; }
+      || {
+        echo "ERROR: ${pkg} ${src} missing/not exec" >&2
+        exit 1
+      }
     if head -1 "${src}" | grep -qE "^#!.*sh"; then
       bash -n "${src}" \
-        || { echo "ERROR: ${pkg} ${src} shell syntax" >&2; exit 1; }
+        || {
+          echo "ERROR: ${pkg} ${src} shell syntax" >&2
+          exit 1
+        }
     fi
   fi
   if head -1 "$O/DEBIAN/postinst" | grep -qE "^#!.*sh"; then
     bash -n "$O/DEBIAN/postinst" \
-      || { echo "ERROR: ${pkg} postinst shell syntax" >&2; exit 1; }
+      || {
+        echo "ERROR: ${pkg} postinst shell syntax" >&2
+        exit 1
+      }
   fi
 
-  find "$O" -not -path '*/DEBIAN/*' -type f \
-    | xargs md5sum \
+  find "$O" -not -path '*/DEBIAN/*' -type f -print0 \
+    | xargs -0 md5sum \
     | sed "s|$O/||" \
-    > "$O/DEBIAN/md5sums"
+      >"$O/DEBIAN/md5sums"
   dpkg-deb --build "$O" \
     "/debs/${pkg}_${ver}_all.deb"
 }
@@ -367,9 +420,9 @@ nvidia_driver_detect() {
     exit 1
   fi
   if [ -s "${work}/Packages.gz" ]; then
-    gzip -dc "${work}/Packages.gz" > "${work}/Packages"
+    gzip -dc "${work}/Packages.gz" >"${work}/Packages"
   else
-    xz -dc "${work}/Packages.xz" > "${work}/Packages"
+    xz -dc "${work}/Packages.xz" >"${work}/Packages"
   fi
   local v nvidia_tags=""
   local nvidia_repo="${NVIDIA_OPEN_REPO:-https://github.com/NVIDIA/open-gpu-kernel-modules.git}"
@@ -377,11 +430,14 @@ nvidia_driver_detect() {
   # the tag names the bare release. A curl cache miss on the tag list
   # fails every probe: fetch ONCE, grep it after.
   if ! nvidia_tags=$(git ls-remote --tags "${nvidia_repo}" \
-      | sed 's|.*refs/tags/||' | grep -v '\^{}' || true); then
+    | sed 's|.*refs/tags/||' | grep -v '\^{}' || true); then
     nvidia_tags=""
   fi
   test -n "${nvidia_tags}" \
-    || { echo "ERROR: open-gpu-kernel-modules tag list unreachable" >&2; exit 1; }
+    || {
+      echo "ERROR: open-gpu-kernel-modules tag list unreachable" >&2
+      exit 1
+    }
   while IFS= read -r v; do
     [ -n "${v}" ] || continue
     v="${v%-*}"

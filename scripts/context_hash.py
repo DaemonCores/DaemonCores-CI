@@ -37,10 +37,12 @@ def extra_context_roots(containerfile: Path) -> list[str]:
         The declared directory paths (name:path pairs, path part only).
     """
     roots: list[str] = []
-    for m in EXTRA_CTX_RE.findall(containerfile.read_text()):
-        for pair in m.split(","):
-            if ":" in pair:
-                roots.append(pair.split(":", 1)[1].strip())
+    declared: list[str] = EXTRA_CTX_RE.findall(containerfile.read_text())
+    for m in declared:
+        roots.extend(
+            pair.split(":", 1)[1].strip() for pair in m.split(",")
+            if ":" in pair
+        )
     return roots
 
 

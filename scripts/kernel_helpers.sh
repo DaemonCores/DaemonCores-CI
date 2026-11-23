@@ -51,7 +51,9 @@
 set -euo pipefail
 
 KERNEL_HELPERS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=kernel_signing.sh
 . "${KERNEL_HELPERS_DIR}/kernel_signing.sh"
+# shellcheck source=kernel_prepare.sh
 . "${KERNEL_HELPERS_DIR}/kernel_prepare.sh"
 
 KERNEL_CDN="${KERNEL_CDN:-https://cdn.kernel.org/pub/linux/kernel}"
@@ -169,13 +171,17 @@ kernel_patch_list() {
     doc="${PATCHES_JSON}"
     filter='.[]'
   else
-    [[ -f "${manifest}" ]] || { echo "ERROR: patch manifest ${manifest} missing" >&2; exit 1; }
+    [[ -f "${manifest}" ]] || {
+      echo "ERROR: patch manifest ${manifest} missing" >&2
+      exit 1
+    }
     doc=$(cat "${manifest}")
     filter='.patches[]'
   fi
   for stage in common "${arch}"; do
-    printf '%s\n' "${doc}" | \
-      CLASS="${class:--}" STAGE="${stage}" SERIES="${series}" VERSION="${version}" \
+    # shellcheck disable=SC2016 # $e is a yq variable, not a shell expansion
+    printf '%s\n' "${doc}" \
+      | CLASS="${class:--}" STAGE="${stage}" SERIES="${series}" VERSION="${version}" \
         SDIR="${sdir}" \
         yq -r '
       '"${filter}"' | select(.stage == strenv(STAGE))
@@ -275,7 +281,10 @@ kernel_dryrun_patches() {
     want=$(kernel_patch_sha "${manifest}" "${name}")
     if [[ -n "${want}" ]]; then
       [[ "${want}" =~ ^[0-9a-f]{64}$ ]] \
-        || { echo "ERROR: ${name}: sha256 pin '${want}' is not a 64-hex digest" >&2; exit 1; }
+        || {
+          echo "ERROR: ${name}: sha256 pin '${want}' is not a 64-hex digest" >&2
+          exit 1
+        }
       sha=$(sha256sum "${file}" | cut -d' ' -f1)
       if [[ "${sha}" != "${want}" ]]; then
         echo "patch ${name} sha256 ${sha} != pinned ${want}" >&2
@@ -342,7 +351,10 @@ kernel_apply_patches() {
   # any touch of the tree (all-or-nothing); on failure the last good deb is
   # kept. The set stays loaded in the KERNEL_PATCH_* arrays for the apply.
   kernel_dryrun_patches "${manifest}" "${arch}" "${version}" "${tree}" "${class}" \
-    || { echo "ERROR: the patch set ${manifest} fails the dry-run gate on ${version}" >&2; exit 1; }
+    || {
+      echo "ERROR: the patch set ${manifest} fails the dry-run gate on ${version}" >&2
+      exit 1
+    }
   ((${#KERNEL_PATCH_FILES[@]})) || return 0
 
   local i
@@ -369,10 +381,11 @@ kernel_apply_patches() {
 #   $2... - fragment paths, merged in order (the last one wins)
 #######################################
 kernel_merge_config() {
-  local tree="$1"; shift
+  local tree="$1"
+  shift
   local frag
   for frag in "$@"; do
-    cat "${frag}" >> "${tree}/.config"
+    cat "${frag}" >>"${tree}/.config"
   done
   make -C "${tree}" olddefconfig
 }
@@ -401,8 +414,8 @@ kernel_flavour_kcflags() {
     # baseline: the flavour spans Cortex-A53 AND A72, pinning one CPU
     # would mis-tune the other.
     armv8.2-lse) echo "-mcpu=cortex-a76" ;;
-    armv9-sve2)  echo "-mcpu=neoverse-v2" ;;
-    *)     echo "" ;;
+    armv9-sve2) echo "-mcpu=neoverse-v2" ;;
+    *) echo "" ;;
   esac
 }
 
@@ -479,7 +492,10 @@ kernel_build_module() {
 kernel_module_run_build() {
   local syssrc="${1:?}" workdir="${2:?}" cmd="${3:?}"
   test -s "${syssrc}/.config" \
-    || { echo "ERROR: kernel_module_run_build: ${syssrc} is not a kernel tree (.config missing)" >&2; return 1; }
+    || {
+      echo "ERROR: kernel_module_run_build: ${syssrc} is not a kernel tree (.config missing)" >&2
+      return 1
+    }
   SYSSRC="$(readlink -e "${syssrc}")" SYSOUT="$(readlink -e "${syssrc}")" \
     bash --noprofile --norc -eo pipefail -c "${cmd}"
 }
@@ -512,18 +528,21 @@ kernel_modules_deb() {
   mkdir -p "${out}/DEBIAN" "${out}/lib/modules/${release}/kernel/${layout}"
   for ko in "$@"; do
     test -s "${ko}" \
-      || { echo "ERROR: kernel_modules_deb: ${ko} missing" >&2; exit 1; }
+      || {
+        echo "ERROR: kernel_modules_deb: ${ko} missing" >&2
+        exit 1
+      }
     strip --strip-debug "${ko}"
     cp "${ko}" "${out}/lib/modules/${release}/kernel/${layout}/"
   done
   printf 'Package: %s\nVersion: %s\nArchitecture: %s\nMaintainer: DaemonCores <packaging@daemoncores.org>\nDepends: %s\nDescription: %s\nSection: kernel\nPriority: optional\n' \
     "${pkg}" "${ver}" "${arch}" "${depends}" "$(printf '%b' "${desc}")" \
-    > "${out}/DEBIAN/control"
+    >"${out}/DEBIAN/control"
   printf '#!/bin/sh\nset -e\nif command -v depmod >/dev/null 2>&1; then\n  depmod -a %s\nfi\n' \
-    "${release}" > "${out}/DEBIAN/postinst"
+    "${release}" >"${out}/DEBIAN/postinst"
   chmod 755 "${out}/DEBIAN/postinst"
-  ( cd "${out}" \
-    && find . -type f ! -path './DEBIAN/*' | sed 's|^\./||' >> DEBIAN/md5sums )
+  (cd "${out}" \
+    && find . -type f ! -path './DEBIAN/*' | sed 's|^\./||' >>DEBIAN/md5sums)
   dpkg-deb --build "${out}" "/debs/${pkg}_${ver}_${arch}.deb"
   ls -la "/debs/${pkg}_${ver}_${arch}.deb"
 }
@@ -627,25 +646,25 @@ kernel_pve_prepare() {
   # XanMod setlocalversion patch (0017) drops the git tag suffix, so the
   # release stays 7.0.14-<LOCALVERSION>.
   if [[ -f "${SRCDIR}/.git" ]]; then
-      local gd
-      gd=$(sed 's/^gitdir: *//' "${SRCDIR}/.git")
-      # The relative pointer was written for the ORIGINAL location
-      # (pkg-src/submodules/ubuntu-kernel, base ${builddir}/pkg-src):
-      # ../../.git from there is pkg-src/.git. Map it to its absolute spot;
-      # the module git dir travels with pkg-src, the worktree stays the
-      # moved tree.
-      [[ "${gd:0:1}" == "/" ]] || gd="${builddir}/pkg-src/${gd#../../}"
-      if [[ -d "${gd}" ]]; then
-        echo "gitdir: ${gd}" > "${SRCDIR}/.git"
-        # The module config carries core.worktree pointing at the original
-        # location (check-git needs `rev-parse --show-cdup` empty from the
-        # tree top): repoint it at the moved tree.
-        git --git-dir="${gd}" config core.worktree "${SRCDIR}"
-        git -C "${SRCDIR}" rev-parse --git-dir >/dev/null 2>&1 \
-          || rm -f "${SRCDIR}/.git"   # give up quietly; deb-pkg fails below with the real error
-      else
-        rm -f "${SRCDIR}/.git"
-      fi
+    local gd
+    gd=$(sed 's/^gitdir: *//' "${SRCDIR}/.git")
+    # The relative pointer was written for the ORIGINAL location
+    # (pkg-src/submodules/ubuntu-kernel, base ${builddir}/pkg-src):
+    # ../../.git from there is pkg-src/.git. Map it to its absolute spot;
+    # the module git dir travels with pkg-src, the worktree stays the
+    # moved tree.
+    [[ "${gd:0:1}" == "/" ]] || gd="${builddir}/pkg-src/${gd#../../}"
+    if [[ -d "${gd}" ]]; then
+      echo "gitdir: ${gd}" >"${SRCDIR}/.git"
+      # The module config carries core.worktree pointing at the original
+      # location (check-git needs `rev-parse --show-cdup` empty from the
+      # tree top): repoint it at the moved tree.
+      git --git-dir="${gd}" config core.worktree "${SRCDIR}"
+      git -C "${SRCDIR}" rev-parse --git-dir >/dev/null 2>&1 \
+        || rm -f "${SRCDIR}/.git" # give up quietly; deb-pkg fails below with the real error
+    else
+      rm -f "${SRCDIR}/.git"
+    fi
   fi
   PVE_SEED_CONFIG=""
   if [[ -f "${builddir}/.config.pve-seed" ]]; then

@@ -48,11 +48,26 @@ def parse_fragment(path: Path) -> dict[str, str]:
 
 
 def declared_symbols(tree: Path) -> set[str]:
+    """Symbols a Kconfig file of the kernel tree declares.
+
+    Args:
+        tree: Root of the kernel tree whose Kconfig files are scanned.
+
+    Returns:
+        The names of the symbols declared by the tree's Kconfig files.
+    """
     return _scan_kconfigs(tree)[0]
 
 
 def prompted_symbols(tree: Path) -> set[str]:
-    """Symbols a user can actually set (they carry a prompt)."""
+    """Symbols a user can actually set (they carry a prompt).
+
+    Args:
+        tree: Root of the kernel tree whose Kconfig files are scanned.
+
+    Returns:
+        The names of the symbols that carry a prompt.
+    """
     return _scan_kconfigs(tree)[1]
 
 
@@ -121,6 +136,8 @@ def check(
         declared: Symbols the kernel Kconfig files declare.
         final: Values of the generated ``.config``, or ``None`` to skip that
             comparison.
+        prompts: Symbols that carry a user prompt, or ``None`` to treat every
+            symbol as promptable.
 
     Returns:
         Two lists: one defect line per real problem (build fails) and one

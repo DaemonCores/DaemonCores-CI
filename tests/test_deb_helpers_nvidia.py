@@ -1,17 +1,18 @@
 """NVIDIA driver rolling pin (deb_helpers.sh nvidia_driver_detect).
 
-The owner order 2026-11-09: the linux-modules-nvidia lane resolves its
-driver release the way the kernel lane resolves its stream — auto detect,
-no fixed pin. The helper takes NVIDIA_APT_REPO (the distro subdirectory of
-NVIDIA's CUDA apt repos, default debian13) as the repo argument, parses the
-Packages index of that repository directly, walks the candidates
-NEWEST-FIRST and exports the FIRST Debian-revision-stripped release whose
-open-gpu-kernel-modules tag exists. A preset NVIDIA_DRIVER_VERSION is
-honored verbatim (the pin wins over detection). A lane with no tagged
-candidate fails instead of forcing an untagged release (the 2026-11-04
-paid lesson).
+The owner order 2026-11-09: the linux-modules-nvidia lane resolves its driver
+release the way the kernel lane resolves its stream — auto detect, no fixed pin.
+The helper takes NVIDIA_APT_REPO (the distro subdirectory of NVIDIA's CUDA apt
+repos, default debian13) as the repo argument, parses the Packages index of that
+repository directly, walks the candidates NEWEST-FIRST and exports the FIRST
+Debian-revision-stripped release whose open-gpu-kernel-modules tag exists. A
+preset NVIDIA_DRIVER_VERSION is honored verbatim (the pin wins over detection).
+A lane with no tagged candidate fails instead of forcing an untagged release
+(the 2026-11-04 paid lesson).
 
-The tests are OFFLINE: NVIDIA_REPO_BASE points at a file:// fake repo and
+The tests are OFFLINE: NVIDIA_REPO_BASE points at a
+file://
+fake repo and
 NVIDIA_OPEN_REPO at a local bare git repository seeded with a few tags.
 """
 
@@ -26,9 +27,18 @@ HELPER = REPO / "scripts" / "deb_helpers.sh"
 
 
 def run_detect(script: str, **env_over: str) -> subprocess.CompletedProcess:
-    """Run a snippet with deb_helpers.sh sourced (the same contract the
-    builds get: deb_helpers.sh is imported implicitly once per build by
-    build-deb.sh)."""
+    """Run a snippet with deb_helpers.sh sourced.
+
+    This is the same contract the builds get: deb_helpers.sh is imported
+    implicitly once per build by build-deb.sh.
+
+    Args:
+        script: Bash snippet to run after sourcing the helper.
+        **env_over: Environment variables set on top of the base environment.
+
+    Returns:
+        The finished process, with stdout and stderr as text.
+    """
     env = {
         "PATH": os.environ["PATH"],
         "HOME": os.environ["HOME"],
@@ -45,27 +55,41 @@ def run_detect(script: str, **env_over: str) -> subprocess.CompletedProcess:
 
 
 def make_apt_repo(base: Path, repo_dir: str, versions: list[str]) -> None:
-    """Fake a CUDA apt repo layout: <base>/<repo-dir>/x86_64/Packages.gz
-    carrying one libcuda1 record per version (the Debian-index record
-    shape: Package first, blank-line separated)."""
+    """Fake a CUDA apt repo layout under base.
+
+    The layout is <base>/<repo-dir>/x86_64/Packages.gz carrying one libcuda1
+    record per version (the Debian-index record shape: Package first,
+    blank-line separated).
+
+    Args:
+        base: Directory the fake repo is created under.
+        repo_dir: Name of the repo directory, below base.
+        versions: Versions of libcuda1 to list in the index.
+    """
     d = base / repo_dir / "x86_64"
     d.mkdir(parents=True, exist_ok=True)
-    recs = []
-    for v in versions:
-        recs.append(
-            "\n".join([
-                "Package: libcuda1",
-                f"Version: {v}",
-                "Architecture: amd64",
-                "Multi-Arch: same",
-                "",
-            ])
-        )
+    recs = [
+        "\n".join([
+            "Package: libcuda1",
+            f"Version: {v}",
+            "Architecture: amd64",
+            "Multi-Arch: same",
+            "",
+        ]) for v in versions
+    ]
     (d / "Packages.gz").write_bytes(gzip.compress("\n".join(recs).encode()))
 
 
 def make_tagged_repo(base: Path, tags: list[str]) -> str:
-    """Local bare git repository with the given tags; file:// URL back."""
+    """Local bare git repository with the given tags; file:// URL back.
+
+    Args:
+        base: Directory the repositories are created under.
+        tags: Tag names to create and push.
+
+    Returns:
+        The file:// URL of the bare repository.
+    """
     home = base / "git-home"
     (home / ".git").mkdir(parents=True)
     git_env = {
@@ -115,7 +139,18 @@ def run_roll(
     tmp: Path, repo_dir: str, repo_versions: list[str], tags: list[str],
     **env_over: str
 ) -> subprocess.CompletedProcess:
-    """Whole fixture: fake apt repo + fake tag repo + one helper run."""
+    """Whole fixture: fake apt repo + fake tag repo + one helper run.
+
+    Args:
+        tmp: Directory the fake repositories are created under.
+        repo_dir: Name of the fake apt repo directory, below tmp/repo.
+        repo_versions: Versions of libcuda1 in the fake apt repo.
+        tags: Tag names of the fake tag repository.
+        **env_over: Environment variables set on top of the fixture environment.
+
+    Returns:
+        The finished process of the helper run.
+    """
     base = tmp / "repo"
     make_apt_repo(base, repo_dir, repo_versions)
     nvidia_url = make_tagged_repo(tmp, tags)
@@ -130,10 +165,12 @@ def run_roll(
 
 
 def test_pinned_version_is_honored_verbatim() -> None:
-    """A preset NVIDIA_DRIVER_VERSION wins over detection: exported VERBATIM
-    (Debian revision included — a pin is literal, never re-sorted), with no
-    repo or fetch touched (the URLs below point nowhere)."""
-    with tempfile.TemporaryDirectory() as td:
+    """Honor a preset NVIDIA_DRIVER_VERSION over detection.
+
+    It is exported VERBATIM (Debian revision included — a pin is literal, never
+    re-sorted), with no repo or fetch touched (the URLs below point nowhere).
+    """
+    with tempfile.TemporaryDirectory():
         r = run_detect(
             "nvidia_driver_detect && echo VER=${NVIDIA_DRIVER_VERSION}",
             NVIDIA_DRIVER_VERSION="615.71.09-1",
@@ -146,9 +183,12 @@ def test_pinned_version_is_honored_verbatim() -> None:
 
 
 def test_rolling_takes_the_newest_tagged_candidate() -> None:
-    """Candidates walk newest-first; a release WITHOUT an
-    open-gpu-kernel-modules tag is skipped (never forced) and the first
-    tagged older one wins, its Debian revision stripped."""
+    """Take the newest candidate that carries an open-modules tag.
+
+    Candidates walk newest-first; a release WITHOUT an open-gpu-kernel-modules
+    tag is skipped (never forced) and the first tagged older one wins, its
+    Debian revision stripped.
+    """
     with tempfile.TemporaryDirectory() as td:
         tmp = Path(td)
         r = run_roll(
@@ -163,8 +203,11 @@ def test_rolling_takes_the_newest_tagged_candidate() -> None:
 
 
 def test_nvidia_apt_repo_is_an_argument() -> None:
-    """NVIDIA_APT_REPO (env) selects the distro subdirectory of the repos
-    and the positional argument wins over the env."""
+    """Select the repo distro by argument, falling back to the env.
+
+    NVIDIA_APT_REPO (env) selects the distro subdirectory of the repos and the
+    positional argument wins over the env.
+    """
     with tempfile.TemporaryDirectory() as td:
         tmp = Path(td)
         base = tmp / "repo"
@@ -188,7 +231,8 @@ def test_nvidia_apt_repo_is_an_argument() -> None:
         assert by_env.returncode == 0, by_env.stderr
         assert "VER=640.10.09" in by_env.stdout
         by_arg = run_detect(
-            "nvidia_driver_detect debian13 && echo VER=${NVIDIA_DRIVER_VERSION}",
+            "nvidia_driver_detect debian13 "
+            "&& echo VER=${NVIDIA_DRIVER_VERSION}",
             NVIDIA_APT_REPO="debian10",
             **common,
         )
@@ -207,8 +251,11 @@ def test_default_repo_is_debian13() -> None:
 
 
 def test_unreachable_repo_fails_the_build() -> None:
-    """An unreachable Packages index exits 1: the lane fails and keeps the
-    last-good deb instead of building a guessed version."""
+    """Fail the build when the Packages index is unreachable.
+
+    An unreachable Packages index exits 1: the lane fails and keeps the
+    last-good deb instead of building a guessed version.
+    """
     r = run_detect(
         "nvidia_driver_detect debian404",
         NVIDIA_REPO_BASE="file:///nonexistent-repo",
@@ -219,8 +266,11 @@ def test_unreachable_repo_fails_the_build() -> None:
 
 
 def test_no_tagged_candidate_fails_the_lane() -> None:
-    """Every repo release untagged = abort (exit 1), NEVER a forced untagged
-    build — the all-or-nothing pairing gate."""
+    """Fail the lane when no repo release carries a tag.
+
+    Every repo release untagged = abort (exit 1), NEVER a forced untagged
+    build — the all-or-nothing pairing gate.
+    """
     with tempfile.TemporaryDirectory() as td:
         tmp = Path(td)
         r = run_roll(

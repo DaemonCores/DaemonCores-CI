@@ -1,12 +1,10 @@
 """Shared pytest setup."""
 
-from collections.abc import Iterator
-
 import pytest
 
 
 @pytest.fixture(autouse=True)
-def hermetic_agent_env(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+def hermetic_agent_env(monkeypatch: pytest.MonkeyPatch) -> None:
     """Keep the AI-agent marker out of the code under test.
 
     A developer machine may shadow ``sleep`` (and similar tools) with a shim
@@ -17,9 +15,5 @@ def hermetic_agent_env(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
 
     Args:
         monkeypatch: Pytest environment patcher.
-
-    Yields:
-        Nothing; the variable is restored after the test.
     """
     monkeypatch.delenv('AI_AGENT', raising=False)
-    yield

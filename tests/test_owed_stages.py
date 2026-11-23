@@ -1,14 +1,28 @@
 """Unit tests for ``scripts/owed_stages.py`` (the CI failure memory)."""
 
+import functools
 import sys
-from collections.abc import Iterable
 from pathlib import Path
+from typing import NoReturn
 
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
 
 import owed_stages
+
+
+def _raise(message: str, *args: object) -> NoReturn:
+    """Fail the way the GitHub API does on an outage.
+
+    Args:
+        message: Text of the error.
+        *args: Arguments of the fetch call, ignored.
+
+    Raises:
+        RuntimeError: Always, simulating the API error.
+    """
+    raise RuntimeError(message)
 
 
 def job(name: str, conclusion: str, step: str = '') -> owed_stages.Job:
@@ -86,14 +100,10 @@ def test_unreadable_history_fails_instead_of_reading_clean(
     Args:
         capsys: Output capture.
     """
-
-    def broken(*_: object) -> Iterable[owed_stages.Run]:
-        raise RuntimeError('gh api: HTTP 403')
-
     code = owed_stages.main([
         '--repo', 'o/r', '--workflow', 'w.yml', '--branch', 'main'
     ],
-                            fetch=broken)
+                            fetch=functools.partial(_raise, 'gh api: HTTP 403'))
     assert code == 1
     assert 'HTTP 403' in capsys.readouterr().err
 
@@ -126,14 +136,15 @@ def test_all_if_unknown_forces_every_stage_instead_of_failing(
     """
     url = 'repos/o/r/actions/runs/1/jobs?per_page=100'
 
-    def broken(*_: object) -> Iterable[owed_stages.Run]:
-        raise RuntimeError(f'gh api {url}: stream error: stream ID 1; CANCEL')
-
-    code = owed_stages.main([
-        '--repo', 'o/r', '--workflow', 'w.yml', '--branch', 'main',
-        '--all-if-unknown'
-    ],
-                            fetch=broken)
+    code = owed_stages.main(
+        [
+            '--repo', 'o/r', '--workflow', 'w.yml', '--branch', 'main',
+            '--all-if-unknown'
+        ],
+        fetch=functools.partial(
+            _raise, f'gh api {url}: stream error: stream ID 1; CANCEL'
+        )
+    )
     out = capsys.readouterr()
     assert code == 0
     assert out.out.splitlines() == [f'{s}\t\t\t' for s in owed_stages.STAGES]

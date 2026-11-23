@@ -12,7 +12,7 @@ the patches really applied by the driver builds:
     sets ride the linux-modules-nvidia debs).
 
 demandes.jsonl never named a patchset until the owner DID (05/11 17:0x:
-"les patchs nvidia, je les veux dans les yaml de la CI" — the sweep pool
+"I want the nvidia patches in the CI yaml" (translated) — the sweep pool
 landed): nvidia.js carries the applying subset as sha-pinned entries and
 documents the rest as K-PORT blocks. The 05/11 16:5x GPU-completions
 mandate then entered the PROVEN applying subsets of amd/intel too
@@ -22,10 +22,9 @@ is a documented K-PORT porting lane, never hand-forced.
 
 IA vs GAMING nvidia variants: CachyOS publishes ONE nvidia set per kernel
 series, no per-profile divergent patchset exists upstream — the two
-variants share the manifest verbatim (documented "même set" in nvidia.yml).
+variants share the manifest verbatim (documented as "same set" in nvidia.yml).
 """
 
-import json
 import subprocess
 import tempfile
 from pathlib import Path
@@ -41,9 +40,12 @@ BOOTC_PACKAGES = PRODUCT / "workflows" / "bootc-debs-builder" / "packages.yml"
 
 
 def test_gpu_manifests_present_and_schema() -> None:
-    """The three driver manifests exist in EVERY profile of the product
+    """Check the driver manifests of every profile and their schema.
+
+    The three driver manifests exist in EVERY profile of the product
     repo and carry the canonical schema: a `patches` LIST with name/url/
-    stage entries."""
+    stage entries.
+    """
     for profile in GPU_PROFILES:
         gpu = KERNEL_SRC / "patches" / "gpu" / profile
         assert gpu.is_dir(), profile
@@ -53,14 +55,14 @@ def test_gpu_manifests_present_and_schema() -> None:
             doc = yaml.safe_load(manifest.read_text())
             assert isinstance(doc.get("patches"), list), name
             for entry in doc["patches"]:
-                assert entry.get("name") and entry.get("url")
+                assert entry.get("name")
+                assert entry.get("url")
                 assert entry.get("stage",
                                  "common") in ("common", "amd64", "arm64")
                 sha = entry.get("sha256")
                 if sha is not None:
-                    assert len(sha) == 64 and all(
-                        c in "0123456789abcdef" for c in sha
-                    )
+                    assert len(sha) == 64
+                    assert all(c in "0123456789abcdef" for c in sha)
         # A profile set is EXACTLY the three driver manifests (no stray
         # file rides the product checkout path the builders glob).
         assert {p.name
@@ -69,30 +71,37 @@ def test_gpu_manifests_present_and_schema() -> None:
 
 
 def test_gpu_nvidia_candidates_documented_not_chosen() -> None:
-    """Every set carries its applying subset as sha-pinned entries and
-    documents the non-applying remainder as K-PORT (the 05/11 17:0x nvidia
-    order landed the nvidia pool; the 05/11 16:5x GPU-completions mandate
-    then entered the fuzz-0-proven amd/intel subsets too — entries only on
-    a clean dry-run, the rest a porting lane, never hand-forced)."""
+    """Check each set carries sha-pinned entries and documents K-PORT.
+
+    Every set carries its applying subset as sha-pinned entries and documents
+    the non-applying remainder as K-PORT (the 05/11 17:0x nvidia order landed
+    the nvidia pool; the 05/11 16:5x GPU-completions mandate then entered the
+    fuzz-0-proven amd/intel subsets too — entries only on a clean dry-run, the
+    rest a porting lane, never hand-forced).
+    """
     for profile in GPU_PROFILES:
         for name in ("nvidia.yml", "amd.yml", "intel.yml"):
-            text = (KERNEL_SRC / "patches" / "gpu" / profile / name).read_text()
+            path = KERNEL_SRC / "patches" / "gpu" / profile / name
+            text = path.read_text()
             doc = yaml.safe_load(text)
             if not doc["patches"]:
                 # An EMPTY entered set is legitimate after a pin-bump re-proof
-                # (2026-11-09: the formerly entered release -> 620.70.06 — the formerly
-                # nv-p2p-core failed the pristine fuzz-0 dry-run on the new tag
-                # and was DEMOTED to K-PORT rather than hand-forced; an
+                # (2026-11-09: the formerly entered release -> 620.70.06 —
+                # the formerly nv-p2p-core failed the pristine fuzz-0
+                # dry-run on the new tag and was DEMOTED to K-PORT rather
+                # than hand-forced; an
                 # all-or-nothing gate cannot ride a FAIL). The port-lane proof
                 # documentation must still be in the manifest.
-                assert "K-PORT" in text and "sha256" in text.lower(), name
+                assert "K-PORT" in text, name
+                assert "sha256" in text.lower(), name
                 continue
             assert True, name  # the applying subset is ENTERED
             for entry in doc["patches"]:
                 sha = entry.get("sha256")
-                assert sha and len(sha) == 64 and all(
-                    c in "0123456789abcdef" for c in sha
-                ), entry.get("name")
+                assert sha, entry.get("name")
+                assert len(sha) == 64, entry.get("name")
+                assert all(c in "0123456789abcdef"
+                           for c in sha), entry.get("name")
                 assert entry.get("url"), entry.get("name")
                 assert entry.get("stage",
                                  "common") in ("common",
@@ -103,7 +112,16 @@ def test_gpu_nvidia_candidates_documented_not_chosen() -> None:
             assert "sha256" in text.lower()  # proof documentation in manifest
 
 
-def run_helper(script: str, **env_over) -> subprocess.CompletedProcess:
+def run_helper(script: str, **env_over: str) -> subprocess.CompletedProcess:
+    """Run a script in bash after sourcing the helper with strict mode.
+
+    Args:
+        script: Bash snippet run after sourcing the helper.
+        **env_over: Environment variables set on top of PATH and HOME.
+
+    Returns:
+        The finished process, with stdout and stderr as text.
+    """
     import os
 
     env = {"PATH": os.environ["PATH"], "HOME": os.environ["HOME"], **env_over}
@@ -116,10 +134,13 @@ def run_helper(script: str, **env_over) -> subprocess.CompletedProcess:
 
 
 def test_empty_gpu_set_is_a_noop() -> None:
-    """kernel_apply_patches over an EMPTY gpu manifest exits 0 without
-    touching the tree (no set ships a `patches: []` any more since the
-    05/11 GPU completions, but the no-op contract of an empty manifest
-    stays a helper behaviour the builds rely on)."""
+    """Applying an EMPTY gpu manifest exits 0 without touching the tree.
+
+    kernel_apply_patches over an EMPTY gpu manifest exits 0 without touching the
+    tree (no set ships a `patches: []` any more since the 05/11 GPU completions,
+    but the no-op contract of an empty manifest stays a helper behaviour the
+    builds rely on).
+    """
     with tempfile.TemporaryDirectory() as td:
         tmp = Path(td)
         manifest = tmp / "empty.yml"
@@ -135,12 +156,22 @@ def test_empty_gpu_set_is_a_noop() -> None:
 
 
 def _series_probe_patch(tmp: Path) -> Path:
-    """A tiny patch whose URL embeds {series}: proves the nvidia manifest
-    resolves {series} as the KERNEL series passed by the caller (KVER
-    prefix), not as a series derived from the NVIDIA release number."""
+    """Write a tiny patch whose URL embeds {series}.
+
+    It proves the nvidia manifest resolves {series} as the KERNEL series passed
+    by the caller (KVER prefix), not as a series derived from the NVIDIA release
+    number.
+
+    Args:
+        tmp: Directory the probe files are written under.
+
+    Returns:
+        The path of the probe manifest.
+    """
     patch = tmp / "probe.patch"
     patch.write_text(
-        "--- a/README\n+++ b/README\n@@ -1 +1 @@\n-gpu probe\n+gpu probe patched\n"
+        "--- a/README\n+++ b/README\n@@ -1 +1 @@\n"
+        "-gpu probe\n+gpu probe patched\n"
     )
     (patch.parent / "README").write_text("gpu probe\n")
     manifest = tmp / "probe.yml"
@@ -156,45 +187,51 @@ def _series_probe_patch(tmp: Path) -> Path:
 
 
 def test_patches_series_override_resolves_kernel_series() -> None:
-    """PATCHES_SERIES (exported by the linux-modules-nvidia build from KVER)
-    wins over the computed series of the NVIDIA release version arg."""
-    import os
+    """PATCHES_SERIES overrides the computed series.
 
+    PATCHES_SERIES (exported by the linux-modules-nvidia build from KVER) wins
+    over the computed series of the NVIDIA release version arg.
+    """
     with tempfile.TemporaryDirectory() as td:
         tmp = Path(td)
         manifest = _series_probe_patch(tmp)
         # The NVIDIA release 620.70.06 (current pin) would compute series
         # '620.70' — the override must resolve 7.2 instead, then dry-run +
         # apply.
-        r = run_helper((
+        r = run_helper(
             f'PATCHES_SERIES=7.2 '
             f'kernel_apply_patches "{manifest}" amd64 620.70.06 "{tmp}" && '
             f'grep -q patched {tmp}/README && echo APPLIED'
-        ))
+        )
         assert r.returncode == 0, r.stderr
         assert "APPLIED" in r.stdout
 
 
 def test_gpu_env_var_does_not_leak_between_driver_manifests() -> None:
-    """PATCHES_SERIES is restored by kernel_apply_patches, so a second
-    manifest in the same sourced bash never inherits the previous override."""
+    """The PATCHES_SERIES override does not leak between manifests.
+
+    PATCHES_SERIES is restored by kernel_apply_patches, so a second manifest in
+    the same sourced bash never inherits the previous override.
+    """
     with tempfile.TemporaryDirectory() as td:
         tmp = Path(td)
         manifest = _series_probe_patch(tmp)
-        r = run_helper((
+        r = run_helper(
             f'PATCHES_SERIES=7.2 kernel_apply_patches "{manifest}" amd64 '
             f'620.70.06 "{tmp}" >/dev/null; '
             f'[[ -z "${{PATCHES_SERIES:-}}" ]] && echo RESTORED'
-        ))
+        )
         assert r.returncode == 0, r.stderr + r.stdout
         assert r.stdout.strip() == "RESTORED"
 
 
-def test_sha256_pin_enforced_all_or_nothing(tmp_path=None) -> None:
-    """A pinned patch whose bytes mismatch fails BEFORE any tree touch —
-    the driver sets may pin their upstream bytes like the kernel tarball."""
+def test_sha256_pin_enforced_all_or_nothing() -> None:
+    """A bad sha256 pin fails before the tree is touched.
+
+    A pinned patch whose bytes mismatch fails BEFORE any tree touch — the driver
+    sets may pin their upstream bytes like the kernel tarball.
+    """
     import hashlib
-    import os
 
     tmp = Path(tempfile.mkdtemp())
     patch = tmp / "p.patch"
@@ -210,7 +247,8 @@ def test_sha256_pin_enforced_all_or_nothing(tmp_path=None) -> None:
         f"    sha256: {good}\n"
     )
     r = run_helper(
-        f'kernel_apply_patches "{manifest}" amd64 7.2.15 "{tmp}" && grep -q two {tmp}/READ'
+        f'kernel_apply_patches "{manifest}" amd64 7.2.15 "{tmp}" '
+        f"&& grep -q two {tmp}/READ"
     )
     assert r.returncode == 0, r.stderr
     manifest.write_text(manifest.read_text().replace(good, "0" * 64))
@@ -226,19 +264,31 @@ def test_sha256_pin_enforced_all_or_nothing(tmp_path=None) -> None:
 
 
 def patches_gpu_nvidia_count(text: str) -> int:
-    """Count the kernel_apply_patches invocations on the nvidia.yml in one
-    packages.yml — one entry per repo that ships a kernel-module pair."""
+    """Count the kernel_apply_patches invocations on nvidia.yml.
+
+    Counted in one packages.yml - one entry per repo that ships a kernel-module
+    pair.
+
+    Args:
+        text: Contents of nvidia.yml.
+
+    Returns:
+        The number of invocations found.
+    """
     import re
     return len(re.findall(r'kernel_apply_patches "\$\{GPU_NVIDIA_YML\}"', text))
 
 
 def test_bootc_builds_apply_the_gpu_manifests() -> None:
-    """The real builds apply the sets (all-or-nothing, empty = no-op):
+    """The real builds apply the GPU manifests.
+
+    The real builds apply the sets (all-or-nothing, empty = no-op):
     the debian linux-image loops amd+intel over the kernel tree with the
     per-profile set (vm rides gaming, packages.yml case); the nvidia module
     entry applies its per-set nvidia.yml to the open-gpu-kernel-modules
     tree BEFORE `make modules`; the pve pair lives on the vanilla lane. All
-    paths resolve inside the product checkout's kernel-src."""
+    paths resolve inside the product checkout's kernel-src.
+    """
     text = BOOTC_PACKAGES.read_text()
     assert 'kernel-src/patches/gpu/${GPU_PATCH_PROFILE}/${GPU_DRIVER}.yml' \
         in text
@@ -263,17 +313,21 @@ def test_bootc_builds_apply_the_gpu_manifests() -> None:
     assert applies[0] < makes[0]
     # The per-set nvidia manifests ride the profile directory (no
     # nvidia-ia/nvidia-gaming flat split).
-    assert 'nvidia-ia' not in text and 'nvidia-gaming' not in text
+    assert 'nvidia-ia' not in text
+    assert 'nvidia-gaming' not in text
 
 
 def test_pve_lane_applies_the_gpu_manifest_against_its_tree() -> None:
-    """FINAL architecture (owner 05/11 13:0x): the vanilla lane builds NO
+    """The pve lane applies no lane-local GPU manifest.
+
+    FINAL architecture (owner 05/11 13:0x): the vanilla lane builds NO
     kernel and NO NVIDIA pair any more — the former kernel-pve entry is
     REMOVED, the unified kernel and both module pairs (nvidia open on the
     debian linux-modules-nvidia entry, OpenZFS via the SHARED gate) live on
     the debian side / the shared engine helpers. The vanilla manifest stays
     free of a lane-local GPU patch application: its module publisher rides
-    the SHARED kernel_build_module helper, never inline module logic."""
+    the SHARED kernel_build_module helper, never inline module logic.
+    """
     pve = (
         Path(__file__).resolve().parents[2] / "proxmox-ve-bootc" / "workflows" /
         "bootc-debs-builder" / "packages.yml"

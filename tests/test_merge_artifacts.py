@@ -1,7 +1,8 @@
 """Tests for bootc-debs-end/merge-artifacts.sh."""
+
 import os
-import subprocess
 import shutil
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -50,8 +51,12 @@ def _run(tmp: Path) -> subprocess.CompletedProcess:
 
 
 @pytest.mark.skipif(not shutil.which('dpkg-deb'), reason='needs dpkg-deb')
-def test_same_name_builds_are_not_mixed(tmp_path: Path):
-    """Two builds of one arch-all deb give exactly one intact copy."""
+def test_same_name_builds_are_not_mixed(tmp_path: Path) -> None:
+    """Two builds of one arch-all deb give exactly one intact copy.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+    """
     for arch, payload in (('amd64', b'A' * 5000), ('arm64', b'B' * 5000)):
         d = tmp_path / 'in' / f'debs-p-{arch}'
         d.mkdir(parents=True)
@@ -68,8 +73,12 @@ def test_same_name_builds_are_not_mixed(tmp_path: Path):
 
 
 @pytest.mark.skipif(not shutil.which('dpkg-deb'), reason='needs dpkg-deb')
-def test_corrupt_deb_is_refused(tmp_path: Path):
-    """A deb that does not unpack fails the merge."""
+def test_corrupt_deb_is_refused(tmp_path: Path) -> None:
+    """A deb that does not unpack fails the merge.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+    """
     d = tmp_path / 'in' / 'debs-p-amd64'
     d.mkdir(parents=True)
     _deb(d / 'p_1_all.deb', os.urandom(60000))

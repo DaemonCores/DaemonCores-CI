@@ -132,10 +132,10 @@ def test_command_line_missing_log_is_booting(tmp_path: Path) -> None:
 def test_the_arm64_smoke_stall_is_kernel_side() -> None:
     """Run 45087765493: the kernel never printed the hand-over to /init.
 
-    The whole 900 s serial console of that smoke ends on ``PM: genpd:
-    Disabling unused power domains``; the kernel runs that line before
-    ``Freeing unused kernel memory``. Without this distinction the timeout
-    blamed "the initramfs", which the same kernel disproved locally.
+    The whole 900 s serial console of that smoke ends on ``PM: genpd: Disabling
+    unused power domains``; the kernel runs that line before ``Freeing unused
+    kernel memory``. Without this distinction the timeout blamed "the
+    initramfs", which the same kernel disproved locally.
     """
     log = fixture('arm64-kernel-stall.log')
     assert 'Linux version ' in log

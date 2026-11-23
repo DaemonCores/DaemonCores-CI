@@ -3,8 +3,8 @@
 The two inline steps (``Flag broken build`` / ``Close broken-build issue on
 success``) are extracted from the live workflow and run against a fake GitHub
 Issues API, so the tests pin the outward behaviour the owner demands from the
-CI: one English issue per broken package, no per-run comment noise (the body
-is refreshed instead), and a closed issue with a single comment on recovery.
+CI: one English issue per broken package, no per-run comment noise (the body is
+refreshed instead), and a closed issue with a single comment on recovery.
 """
 
 import os

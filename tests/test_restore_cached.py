@@ -60,7 +60,11 @@ def _restore(tmp: Path, name: str) -> subprocess.CompletedProcess:
 
 
 def test_sound_deb_is_reused(tmp_path: Path) -> None:
-    """A deb that unpacks is restored."""
+    """A deb that unpacks is restored.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+    """
     cache = tmp_path / 'site' / 'debs-cache'
     cache.mkdir(parents=True)
     _deb(cache / 'p_1_all.deb')
@@ -70,7 +74,11 @@ def test_sound_deb_is_reused(tmp_path: Path) -> None:
 
 
 def test_corrupt_deb_is_a_cache_miss(tmp_path: Path) -> None:
-    """A published deb that does not unpack is discarded, forcing a rebuild."""
+    """A published deb that does not unpack is discarded, forcing a rebuild.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+    """
     cache = tmp_path / 'site' / 'debs-cache'
     cache.mkdir(parents=True)
     _deb(cache / 'p_1_all.deb')

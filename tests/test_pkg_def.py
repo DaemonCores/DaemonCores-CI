@@ -1,7 +1,7 @@
-"""Parity test for ``pkg-def/pkg-def.sh`` against the former inline workflow step.
+"""Parity test of ``pkg-def/pkg-def.sh`` and the former inline workflow step.
 
-The step used to live in ``build-one-deb.yml``; both are run on the same
-fixture manifest and must append identical lines to ``GITHUB_OUTPUT``.
+The step used to live in ``build-one-deb.yml``; both are run on the same fixture
+manifest and must append identical lines to ``GITHUB_OUTPUT``.
 """
 
 import shutil
@@ -47,6 +47,9 @@ def old_step() -> str:
 
     Returns:
         The step's ``run`` text at ``OLD_REV``.
+
+    Raises:
+        AssertionError: If the step is not found in the workflow.
     """
     text = subprocess.run([
         'git', 'show', f'{OLD_REV}:.github/workflows/build-one-deb.yml'
@@ -96,14 +99,23 @@ def run(script: Path, tmp: Path, pkg: str) -> str:
 
 @pytest.mark.parametrize('pkg', ['demo', 'plain'])
 def test_matches_inline_step(tmp_path: Path, pkg: str) -> None:
-    """The extracted script writes the same outputs as the old step."""
+    """The extracted script writes the same outputs as the old step.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+        pkg: Package name passed to both scripts.
+    """
     old = tmp_path / 'old.sh'
     old.write_text('set -euo pipefail\n' + old_step())
     assert run(SCRIPT, tmp_path, pkg) == run(old, tmp_path, pkg)
 
 
 def test_signs_flag_and_secret_resolved(tmp_path: Path) -> None:
-    """A kernel-signing build is flagged and its secret env is resolved."""
+    """A kernel-signing build is flagged and its secret env is resolved.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+    """
     out = run(SCRIPT, tmp_path, 'demo')
     assert 'signs=yes' in out
     assert 'GH_TOKEN=tok-123' in out
