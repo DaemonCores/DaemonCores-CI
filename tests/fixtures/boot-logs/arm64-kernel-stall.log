@@ -1,0 +1,119 @@
+UEFI firmware (version 2024.02-2ubuntu0.10 built at 15:40:28 on Sep 23 2026)
+[    0.000000] Linux version 7.2.15 (root@7e6d46d177d4) (gcc (Debian 14.2.0-19) 14.2.0, GNU ld (GNU Binutils for Debian) 2.44) #1 SMP PREEMPT Sat Nov 21 20:22:34 UTC 2026
+[    0.000000] KASLR enabled
+[    0.000000] efi: EFI v2.7 by Ubuntu distribution of EDK II
+[    0.000000] efi: SMBIOS 3.0=0x13fed0000 MEMATTR=0x13eaed018 ACPI 2.0=0x135f30018 INITRD=0x135f4df18 MEMRESERVE=0x135f4df98 
+[    0.000000] ACPI: Early table checksum verification disabled
+[    0.000000] ACPI: RSDP 0x0000000135F30018 000024 (v02 BOCHS )
+[    0.000000] ACPI: XSDT 0x0000000135F3FE98 000064 (v01 BOCHS  BXPC     00000001      01000013)
+[    0.000000] ACPI: FACP 0x0000000135F3FA98 000114 (v06 BOCHS  BXPC     00000001 BXPC 00000001)
+[    0.000000] ACPI: DSDT 0x0000000135F37518 001468 (v02 BOCHS  BXPC     00000001 BXPC 00000001)
+[    0.000000] ACPI: APIC 0x0000000135F3FC18 0000FC (v04 BOCHS  BXPC     00000001 BXPC 00000001)
+[    0.000000] ACPI: PPTT 0x0000000135F3FD98 000060 (v02 BOCHS  BXPC     00000001 BXPC 00000001)
+[    0.000000] ACPI: GTDT 0x0000000135F3D898 000060 (v02 BOCHS  BXPC     00000001 BXPC 00000001)
+[    0.000000] ACPI: MCFG 0x0000000135F3FF98 00003C (v01 BOCHS  BXPC     00000001 BXPC 00000001)
+[    0.000000] ACPI: SPCR 0x0000000135F3E818 000050 (v02 BOCHS  BXPC     00000001 BXPC 00000001)
+[    0.000000] ACPI: DBG2 0x0000000135F3E898 000057 (v00 BOCHS  BXPC     00000001 BXPC 00000001)
+[    0.000000] ACPI: IORT 0x0000000135F3E418 000080 (v03 BOCHS  BXPC     00000001 BXPC 00000001)
+[    0.000000] ACPI: SPCR: console: pl011,mmio32,0x9000000,9600
+[    0.000000] NUMA: Faking a node at [mem 0x0000000040000000-0x000000013fffffff]
+[    0.000000] NODE_DATA(0) allocated [mem 0x13f2146c0-0x13f217fff]
+[    0.000000] cma: Reserved 32 MiB at 0x00000000fe000000
+[    0.000000] psci: probing for conduit method from ACPI.
+[    0.000000] psci: PSCIv1.1 detected in firmware.
+[    0.000000] psci: Using standard PSCI v0.2 function IDs
+[    0.000000] psci: Trusted OS migration not required
+[    0.000000] psci: SMC Calling Convention v1.0
+[    0.000000] Zone ranges:
+[    0.000000]   DMA      [mem 0x0000000040000000-0x00000000ffffffff]
+[    0.000000]   DMA32    empty
+[    0.000000]   Normal   [mem 0x0000000100000000-0x000000013fffffff]
+[    0.000000]   Device   empty
+[    0.000000] Movable zone start for each node
+[    0.000000] Early memory node ranges
+[    0.000000]   node   0: [mem 0x0000000040000000-0x000000013c3effff]
+[    0.000000]   node   0: [mem 0x000000013c3f0000-0x000000013c72ffff]
+[    0.000000]   node   0: [mem 0x000000013c730000-0x000000013fbfffff]
+[    0.000000]   node   0: [mem 0x000000013fc00000-0x000000013ffdffff]
+[    0.000000]   node   0: [mem 0x000000013ffe0000-0x000000013fffffff]
+[    0.000000] Initmem setup node 0 [mem 0x0000000040000000-0x000000013fffffff]
+[    0.000000] percpu: Embedded 10 pages/cpu s112792 r8192 d42856 u163840
+[    0.000000] Detected PIPT I-cache on CPU0
+[    0.000000] CPU features: detected: Address authentication (architected QARMA5 algorithm)
+[    0.000000] CPU features: detected: HCRX_EL2 register
+[    0.000000] CPU features: detected: 52-bit Virtual Addressing (LPA2)
+[    0.000000] CPU features: detected: Spectre-v4
+[    0.000000] CPU features: detected: Spectre-BHB
+[    0.000000] alternatives: applying boot alternatives
+[    0.000000] Kernel command line: inst.stage2=hd:LABEL=Container-Installer-aarch64 inst.ks=hd:LABEL=Container-Installer-aarch64:/osbuild.ks console=tty0 console=ttyS0,115200 inst.text initrd=initrd
+[    0.000000] random: crng init done
+[    0.000000] printk: log buffer data + meta data: 131072 + 557056 = 688128 bytes
+[    0.000000] Dentry cache hash table entries: 524288 (order: 8, 4194304 bytes, linear)
+[    0.000000] Inode-cache hash table entries: 262144 (order: 7, 2097152 bytes, linear)
+[    0.000000] software IO TLB: area num 2.
+[    0.000000] software IO TLB: mapped [mem 0x00000000fa000000-0x00000000fe000000] (64MB)
+[    0.000000] Fallback order for Node 0: 0 
+[    0.000000] Built 1 zonelists, mobility grouping on.  Total pages: 262144
+[    0.000000] Policy zone: Normal
+[    0.000000] mem auto-init: stack:all(zero), heap alloc:on, heap free:off
+[    0.000000] SLUB: HWalign=64, Order=0-3, MinObjects=0, CPUs=2, Nodes=1
+[   34.934126]    8regs           :  1541 MB/sec
+[   34.934757] xor: using function: 8regs (1541 MB/sec)
+[   35.114279] ledtrig-cpu: registered to indicate activity on CPUs
+[   35.596368] ACPI: \_SB_.PCI0.GSI1: Enabled at IRQ 36
+[   35.598070] virtio-pci 0000:00:01.0: enabling device (0000 -> 0003)
+[   35.624764] ACPI: \_SB_.PCI0.GSI2: Enabled at IRQ 37
+[   35.625332] virtio-pci 0000:00:02.0: enabling device (0000 -> 0003)
+[   35.734139] Serial: 8250/16550 driver, 4 ports, IRQ sharing enabled
+[   35.801807] msm_serial: driver initialized
+[   35.812114] SuperH (H)SCI(F) driver initialized
+[   35.814070] STM32 USART driver initialized
+[   35.878415] virtio_blk virtio1: 2/0/0 default/read/poll queues
+[   35.902923] virtio_blk virtio1: [vda] 3624768 512-byte logical blocks (1.86 GB/1.73 GiB)
+[   35.970924] Key type psk registered
+[   36.055897] e1000: Intel(R) PRO/1000 Network Driver
+[   36.056252] e1000: Copyright (c) 1999-2006 Intel Corporation.
+[   36.058050] e1000e: Intel(R) PRO/1000 Network Driver
+[   36.058337] e1000e: Copyright(c) 1999 - 2015 Intel Corporation.
+[   36.060125] igb: Intel(R) Gigabit Ethernet Network Driver
+[   36.060760] igb: Copyright (c) 2007-2014 Intel Corporation.
+[   36.108716] mousedev: PS/2 mouse device common for all mice
+[   36.128962] rtc-efi rtc-efi.0: registered as rtc0
+[   36.131129] rtc-efi rtc-efi.0: setting system clock to 2026-11-23T00:48:01 UTC (1795394881)
+[   36.215883] device-mapper: core: CONFIG_IMA_DISABLE_HTABLE is disabled. Duplicate IMA measurements will not be recorded in the IMA log.
+[   36.217249] device-mapper: uevent: version 1.0.3
+[   36.222790] device-mapper: ioctl: 4.50.0-ioctl (2025-04-28) initialised: dm-devel@lists.linux.dev
+[   36.343227] hw perfevents: enabled with armv8_pmuv3_0 PMU driver, 7 (0,8000003f) counters available
+[   36.409785] NET: Registered PF_INET6 protocol family
+[   36.433344] Segment Routing with IPv6
+[   36.434924] In-situ OAM (IOAM) with IPv6
+[   36.436766] mip6: Mobile IPv6
+[   36.439094] NET: Registered PF_PACKET protocol family
+[   36.441293] Bridge firewalling registered
+[   36.444400] mpls_gso: MPLS GSO support
+[   36.838326] registered taskstats version 1
+[   36.848743] Loading compiled-in X.509 certificates
+[   36.866239] Loaded X.509 cert 'Build time autogenerated kernel key: 2bbf4e9334e4ded4a7c35da4529ba5f3d2a8b4a7'
+[   37.199089] Demotion targets for Node 0: null
+[   37.207895] Key type .fscrypt registered
+[   37.208251] Key type fscrypt-provisioning registered
+[   37.244747] Btrfs loaded, zoned=yes, fsverity=yes
+[   37.247197] Key type big_key registered
+[   37.248305] Key type encrypted registered
+[   37.249162] AppArmor: AppArmor sha256 policy hashing enabled
+[   37.252134] integrity: secureboot mode disabled
+[   37.253182] ima: No TPM chip found, activating TPM-bypass!
+[   37.254059] ima: Allocated hash algorithm: sha256
+[   37.259030] ima: No architecture policies found
+[   37.261330] evm: Initialising EVM extended attributes:
+[   37.262041] evm: security.selinux (disabled)
+[   37.262309] evm: security.SMACK64
+[   37.262791] evm: security.SMACK64EXEC
+[   37.263026] evm: security.SMACK64TRANSMUTE
+[   37.263245] evm: security.SMACK64MMAP
+[   37.263783] evm: security.apparmor
+[   37.264021] evm: security.ima
+[   37.264217] evm: security.capability
+[   37.264723] evm: HMAC attrs: 0x1
+[   37.287027] clk: Disabling unused clocks
+[   37.288168] PM: genpd: Disabling unused power domains

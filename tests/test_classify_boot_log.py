@@ -6,7 +6,9 @@ booting the published live ISOs in QEMU:
 
 * ``amd64-live-login.log``: the amd64 ISO reaching the live-root login,
 * ``amd64-live-booting.log``: the same boot, cut just before the login,
-* ``arm64-initrd-emergency.log``: the arm64 ISO stopping in dracut emergency.
+* ``arm64-initrd-emergency.log``: the arm64 ISO stopping in dracut emergency,
+* ``arm64-kernel-stall.log``: the whole serial console of the arm64 smoke that
+  timed out in run 45087765493, before any ``Freeing unused kernel memory``.
 """
 
 import subprocess
@@ -125,3 +127,56 @@ def test_command_line_missing_log_is_booting(tmp_path: Path) -> None:
         check=True,
     )
     assert out.stdout.strip() == 'booting'
+
+
+def test_the_arm64_smoke_stall_is_kernel_side() -> None:
+    """Run 45087765493: the kernel never printed the hand-over to /init.
+
+    The whole 900 s serial console of that smoke ends on ``PM: genpd:
+    Disabling unused power domains``; the kernel runs that line before
+    ``Freeing unused kernel memory``. Without this distinction the timeout
+    blamed "the initramfs", which the same kernel disproved locally.
+    """
+    log = fixture('arm64-kernel-stall.log')
+    assert 'Linux version ' in log
+    assert 'Freeing unused kernel memory' not in log
+    assert 'Run /init as init process' not in log
+    assert classify_boot_log.classify(log) == 'booting'
+    assert classify_boot_log.stage(log) == 'kernel'
+
+
+def test_a_boot_that_handed_over_is_userspace() -> None:
+    """``Run /init`` means the initramfs started: a stall is in userspace."""
+    assert classify_boot_log.stage(
+        fixture('arm64-initrd-emergency.log')
+    ) == 'userspace'
+
+
+@pytest.mark.parametrize(
+    'name',
+    ['amd64-live-login.log', 'arm64-initrd-emergency.log'],
+)
+def test_a_conclusive_state_is_never_reported_as_a_kernel_stall(
+    name: str,
+) -> None:
+    """A login prompt or an emergency shell proves userspace ran.
+
+    Args:
+        name: Fixture reaching either the login or the emergency shell.
+    """
+    assert classify_boot_log.stage(fixture(name)) == 'userspace'
+
+
+def test_command_line_prints_the_stage() -> None:
+    """``--stage`` answers where a stalled boot stopped."""
+    out = subprocess.run(
+        [
+            sys.executable, '-I',
+            str(SCRIPT), '--stage',
+            str(FIXTURES / 'arm64-kernel-stall.log')
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert out.stdout.strip() == 'kernel'

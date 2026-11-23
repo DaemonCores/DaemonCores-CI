@@ -423,6 +423,19 @@ jobs:
           fi
           rm -f isoex/install.img
 
+          # Inventory of the initrd, printed before the boot: a kernel that
+          # never hands over to /init (run 45087765493, arm64) can only be
+          # explained by what the guest had to unpack, and the job log is all
+          # that survives an artifact-less run. Any of these failing is itself
+          # the defect (an initrd that xz cannot read is one the kernel cannot
+          # unpack either), so the step stops on that message instead of a
+          # silent 900 s timeout.
+          echo "== initrd inventory =="
+          echo "cpio entries: $(wc -l <isoex/initrd.list)"
+          echo "initrd bytes: $(stat -c %s isoex/initrd.img)"
+          echo "initrd sha256: $(sha256sum isoex/initrd.img | cut -d' ' -f1)"
+          xz -l isoex/initrd.img
+
           KARGS="inst.stage2=hd:LABEL=${KLABEL} inst.ks=hd:LABEL=${KLABEL}:/osbuild.ks console=tty0 console=ttyS0,115200 inst.text"
 
           # Hosted runners expose /dev/kvm but deny access to the runner user
@@ -466,7 +479,19 @@ jobs:
             emergency) echo "::error::live ISO boot FAILED: dracut emergency (see serial log above)"; exit 1 ;;
             bootloop) echo "::error::live ISO boot-loops: the kernel banner appeared more than once"; exit 1 ;;
             exited) echo "::error::QEMU exited before the live root came up: firmware/boot failure" >&2; exit 1 ;;
-            *) echo "::error::live ISO never reached the login prompt of the live root in 900 s (stuck in the initramfs?)"; exit 1 ;;
+            *)
+              # Where it stopped, not just that it did: a kernel-side stall
+              # (no hand-over to /init) and an initramfs that started but never
+              # reached the live root have different causes. The classifier
+              # prints "userspace" as soon as the kernel ran /init.
+              STALL="$(python3 -I .ci-tooling/scripts/classify_boot_log.py --stage "${LOG}")"
+              if [ "${STALL}" = "kernel" ]; then
+                echo "::error::live ISO never reached the login prompt of the live root in 900 s: stalled in the KERNEL, before handing over to /init (the initramfs never finished unpacking or starting)"
+              else
+                echo "::error::live ISO never reached the login prompt of the live root in 900 s: stalled in USERSPACE, after /init started (see the initrd unit failures above)"
+              fi
+              exit 1
+              ;;
           esac
           echo "ISO boot smoke test PASSED"
 

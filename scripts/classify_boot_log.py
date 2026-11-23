@@ -1,7 +1,7 @@
 """classify_boot_log.py - state of a live ISO boot from its serial console log.
 
 Usage:
-    python3 classify_boot_log.py LOG
+    python3 classify_boot_log.py [--stage] LOG
 
 Prints one word on stdout, the state of the boot seen in LOG (a missing file
 counts as an empty log):
@@ -10,6 +10,14 @@ counts as an empty log):
 ``bootloop``   the kernel banner appeared more than once: the guest rebooted,
 ``up``         the login prompt of the live root is on the console,
 ``booting``    nothing conclusive yet (the caller decides on a timeout).
+
+With ``--stage`` it prints where a stalled boot stopped instead, which is what
+tells a kernel-side stall (the initramfs never handed over to ``/init``) from
+a userspace stall (the initramfs started but never reached the live root):
+
+``kernel``     the kernel never ran ``/init``: no ``Freeing unused kernel
+               memory``/``Run /init as init process`` in the log,
+``userspace``  the kernel handed over to ``/init``.
 
 The ISO smoke test of ``iso-builder.yml`` polls this while QEMU runs. The
 checks are ordered by gravity: a failure marker wins over a login prompt seen
@@ -30,6 +38,7 @@ KERNEL_BANNER = 'Linux version '
 LOGIN = re.compile(
     r'^[^ \n]+ login:|Debian GNU/Linux .*\(ttyS0\)', re.MULTILINE
 )
+HANDOVER = ('Freeing unused kernel memory', 'Run /init as init process')
 
 
 def classify(log: str) -> str:
@@ -50,8 +59,25 @@ def classify(log: str) -> str:
     return 'booting'
 
 
+def stage(log: str) -> str:
+    """Say which side a stalled boot stopped on.
+
+    Args:
+        log: The serial console text captured so far.
+
+    Returns:
+        ``userspace`` once the kernel ran ``/init`` (or a marker of userspace
+        was seen), ``kernel`` while the kernel has not handed over yet.
+    """
+    if EMERGENCY.search(log) or LOGIN.search(log):
+        return 'userspace'
+    if any(marker in log for marker in HANDOVER):
+        return 'userspace'
+    return 'kernel'
+
+
 def main(argv: list[str] | None = None) -> int:
-    """Print the state of the boot logged in the file given as argument.
+    """Print the state, or the stage, of the boot logged in the file given.
 
     Args:
         argv: Arguments, ``sys.argv[1:]`` when omitted.
@@ -60,12 +86,15 @@ def main(argv: list[str] | None = None) -> int:
         Process exit code: 0, or 2 on a bad command line.
     """
     args = sys.argv[1:] if argv is None else argv
+    want_stage = bool(args) and args[0] == '--stage'
+    if want_stage:
+        args = args[1:]
     if len(args) != 1:
-        print('usage: classify_boot_log.py LOG', file=sys.stderr)
+        print('usage: classify_boot_log.py [--stage] LOG', file=sys.stderr)
         return 2
     path = Path(args[0])
     log = path.read_text(errors='replace') if path.exists() else ''
-    print(classify(log))
+    print(stage(log) if want_stage else classify(log))
     return 0
 
 
