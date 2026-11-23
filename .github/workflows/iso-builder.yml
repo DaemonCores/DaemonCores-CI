@@ -347,7 +347,7 @@ jobs:
           LABEL="Container-Installer"
 
           sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends xorriso
+          sudo apt-get install -y --no-install-recommends xorriso squashfs-tools cpio
           [ "${ARCH}" = "amd64" ] && PKG="qemu-system-x86 ovmf" || PKG="qemu-system-arm qemu-efi-aarch64"
           sudo apt-get install -y --no-install-recommends ${PKG}
           if [ "${ARCH}" = "amd64" ]; then
@@ -369,6 +369,47 @@ jobs:
           xorriso -osirrox on -indev "${ISO}" \
             -extract /images/pxeboot/vmlinuz isoex/vmlinuz \
             -extract /images/pxeboot/initrd.img isoex/initrd.img
+
+          # Content of the initrd: the live generator and the modules the live
+          # path needs. A dracut patch that silently dropped one of them ships
+          # a dead ISO whose boot still fails only at switch-root time.
+          # The initrd is xz-compressed cpio (dracut default here); a stream
+          # that does not decode is itself a failure.
+          if ! xz -dc isoex/initrd.img 2>/dev/null | cpio -it >isoex/initrd.list 2>/dev/null \
+            || [ ! -s isoex/initrd.list ]; then
+            echo "::error::initrd.img is not a readable xz cpio archive"
+            exit 1
+          fi
+          if ! grep -q 'usr/lib/systemd/system-generators/debian-bootc-live-generator' isoex/initrd.list; then
+            echo "::error::initrd lacks debian-bootc-live-generator: the live boot cannot work"
+            exit 1
+          fi
+          # squashfs and loop are either modules shipped in the initrd or
+          # built into the kernel (arm64 builds them in): modules.builtin of
+          # the initrd tells which. Missing from both = no live root.
+          mkdir -p isoex/initrd-tree
+          xz -dc isoex/initrd.img | cpio -id --quiet --no-absolute-filenames \
+            --directory=isoex/initrd-tree 'usr/lib/modules/*/modules.builtin'
+          for need in kernel/fs/squashfs/squashfs.ko kernel/drivers/block/loop.ko; do
+            if ! grep -q "${need}" isoex/initrd.list \
+              && ! grep -qs "^${need}$" isoex/initrd-tree/usr/lib/modules/*/modules.builtin; then
+              echo "::error::${need} is neither in the initrd nor built into its kernel: no live root"
+              exit 1
+            fi
+          done
+
+          # Content of the live root: the installer reads its image catalog
+          # from /etc/bootc-installer/images.json. It was missing and the
+          # installer died with KeyError 'fallback_flatpaks' while this smoke
+          # stayed green (reached login, dead getty@tty1).
+          xorriso -osirrox on -indev "${ISO}" \
+            -extract /images/install.img isoex/install.img >/dev/null 2>&1
+          if ! unsquashfs -l isoex/install.img 2>/dev/null \
+            | grep -q 'etc/bootc-installer/images.json'; then
+            echo "::error::live root lacks /etc/bootc-installer/images.json: the installer cannot start"
+            exit 1
+          fi
+          rm -f isoex/install.img
 
           KARGS="inst.stage2=hd:LABEL=${KLABEL} inst.ks=hd:LABEL=${KLABEL}:/osbuild.ks console=tty0 console=ttyS0,115200 inst.text"
 
@@ -415,6 +456,20 @@ jobs:
             *) echo "::error::live ISO never reached the login prompt of the live root in 900 s (stuck in the initramfs?)"; exit 1 ;;
           esac
           echo "ISO boot smoke test PASSED"
+
+      # A red smoke must be replayable locally: the kernel, the initrd and the
+      # serial log are what the direct boot needs (about 65 MB, not the 1.5 GB ISO).
+      - name: Keep the boot inputs of a failed smoke test
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: iso-smoke-failure-${{ matrix.arch }}
+          path: |
+            isoex/vmlinuz
+            isoex/initrd.img
+            out/boot-test-serial.log
+          if-no-files-found: warn
+          retention-days: 7
 
       # ─── UPLOAD ───────────────────────────────────────────────────────────
 
