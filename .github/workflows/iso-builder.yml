@@ -41,6 +41,16 @@ jobs:
 
       - uses: actions/checkout@v7
 
+      # The boot-log classifier of the smoke test lives in DaemonCores-CI,
+      # not in the caller repository that the checkout above fetched.
+      - name: Fetch the shared tooling
+        uses: actions/checkout@v7
+        with:
+          repository: DaemonCores/DaemonCores-CI
+          ref: main
+          path: .ci-tooling
+          persist-credentials: false
+
       # ─── INSTALL TOOLS ────────────────────────────────────────────────────
 
       - name: Install dependencies
@@ -437,9 +447,10 @@ jobs:
           STATE=timeout
           for _ in $(seq 900); do
             if ! kill -0 "${QPID}" 2>/dev/null; then STATE=exited; break; fi
-            if grep -qE "emergency mode|dracut-emergency|Failed to start initrd-switch-root" "${LOG}" 2>/dev/null; then STATE=emergency; break; fi
-            if [ "$(grep -c "Linux version " "${LOG}" 2>/dev/null)" -gt 1 ]; then STATE=bootloop; break; fi
-            if grep -qE "^[^ ]+ login:|Debian GNU/Linux .*\(ttyS0\)" "${LOG}" 2>/dev/null; then STATE=up; break; fi
+            # emergency / bootloop / up / booting: unit-tested on real logs
+            # (tests/test_classify_boot_log.py in DaemonCores-CI).
+            SEEN="$(python3 -I .ci-tooling/scripts/classify_boot_log.py "${LOG}")"
+            if [ "${SEEN}" != "booting" ]; then STATE="${SEEN}"; break; fi
             sleep 1
           done
           kill "${QPID}" 2>/dev/null || true

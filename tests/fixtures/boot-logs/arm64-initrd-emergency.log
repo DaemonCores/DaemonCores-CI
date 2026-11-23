@@ -1,0 +1,54 @@
+UEFI firmware (version  built at 21:11:28 on Aug 25 2026)
+[2J[001;001H[=3h[2J[001;001H[2J[001;001H[8;056;240t[2J[001;001H[    0.000000] Booting Linux on physical CPU 0x0000000000 [0x000f0510]
+[    0.000000] Linux version 7.2.15-armv8.2-lse1 (root@c80c033b567a) (gcc (Debian 14.2.0-19) 14.2.0, GNU ld (GNU Binutils for Debian) 2.44) #1 SMP PREEMPT Tue Nov 10 21:56:48 UTC 2026
+[    0.000000] KASLR enabled
+[    0.000000] efi: EFI v2.7 by EDK II
+[    0.000000] efi: SMBIOS 3.0=0x47d60000 MEMATTR=0x4490d298 ACPI 2.0=0x47ff3018 INITRD=0x4490cf18 RNG=0x47ff3918 MEMRESERVE=0x4490cf98 
+[    0.000000] random: crng init done
+[    0.000000] ACPI: Early table checksum verification disabled
+[    0.000000] ACPI: RSDP 0x0000000047FF3018 000024 (v02 BOCHS )
+[    0.000000] ACPI: XSDT 0x0000000047FF3F18 000064 (v01 BOCHS  BXPC     00000001      01000013)
+[    0.000000] ACPI: FACP 0x0000000047FF3B18 000114 (v06 BOCHS  BXPC     00000001 BXPC 00000001)
+[    0.000000] ACPI: DSDT 0x0000000047FF1018 001506 (v02 BOCHS  BXPC     00000001 BXPC 00000001)
+[    0.000000] ACPI: APIC 0x0000000047FF3C98 0000FC (v04 BOCHS  BXPC     00000001 BXPC 00000001)
+[    0.000000] ACPI: PPTT 0x0000000047FF3E18 000074 (v02 BOCHS  BXPC     00000001 BXPC 00000001)
+[    0.000000] ACPI: GTDT 0x0000000047FF3098 000068 (v03 BOCHS  BXPC     00000001 BXPC 00000001)
+[    0.000000] ACPI: MCFG 0x0000000047FF3A98 00003C (v01 BOCHS  BXPC     00000001 BXPC 00000001)
+[    0.000000] ACPI: SPCR 0x0000000047FF3818 000050 (v02 BOCHS  BXPC     00000001 BXPC 00000001)
+[    0.000000] ACPI: DBG2 0x0000000047FF3A18 000057 (v00 BOCHS  BXPC     00000001 BXPC 00000001)
+[    0.000000] ACPI: IORT 0x0000000047FF3898 000054 (v05 BOCHS  BXPC     00000001 BXPC 00000001)
+[    0.000000] ACPI: SPCR: console: pl011,mmio32,0x9000000,9600
+[    0.000000] NUMA: Faking a node at [mem 0x0000000040000000-0x000000013fffffff]
+[    0.000000] NODE_DATA(0) allocated [mem 0x13e8ad0c0-0x13e8affff]
+[    0.000000] cma: Reserved 32 MiB at 0x00000000fe000000
+[    0.000000] psci: probing for conduit method from ACPI.
+[    0.000000] psci: PSCIv1.1 detected in firmware.
+[   17.851028] Freeing unused kernel memory: 3712K
+[   17.854544] Run /init as init process
+[   18.226610] systemd[1]: Successfully made /usr/ read-only.
+[   18.235268] systemd[1]: systemd 257.13-1~deb13u1 running in system mode (+PAM +AUDIT +SELINUX +APPARMOR +IMA +IPE +SMACK +SECCOMP +GCRYPT -GNUTLS +OPENSSL +ACL +BLKID +CURL +ELFUTILS +FIDO2 +IDN2 -IDN +IPTC +KMOD +LIBCRYPTSETUP +LIBCRYPTSETUP_PLUGINS +LIBFDISK +PCRE2 +PWQUALITY +P11KIT +QRENCODE +TPM2 +BZIP2 +LZ4 +XZ +ZLIB +ZSTD +BPF_FRAMEWORK +BTF -XKBCOMMON -UTMP +SYSVINIT +LIBARCHIVE)
+[   18.235522] systemd[1]: Detected virtualization qemu.
+[   18.236572] systemd[1]: Detected architecture arm64.
+[   18.236790] systemd[1]: Running in initrd.
+[   18.246504] systemd[1]: No hostname configured, using default hostname.
+[   18.247960] systemd[1]: Hostname set to <localhost>.
+[   18.253037] systemd[1]: Initializing machine ID from random generator.
+[   18.717936] systemd-gpt-auto-generator[73]: EFI loader partition unknown, exiting.
+[   18.718084] systemd-gpt-auto-generator[73]: (The boot loader did not set EFI variable LoaderDevicePartUUID.)
+[   20.398849] systemd-journald[92]: Collecting audit messages is disabled.
+[   21.600105] device-mapper: ioctl: 4.50.0-ioctl (2025-04-28) initialised: dm-devel@lists.linux.dev
+
+
+
+
+Entering emergency mode. Exit the shell to continue.
+Type "journalctl" to view system logs.
+You might want to save "/run/initramfs/rdsosreport.txt" to a USB stick or /boot
+after mounting them and attach it to a bug report.
+
+
+
+Cannot open access to console, the root account is locked.
+See sulogin(8) man page for more details.
+
+Press Enter to continue.
