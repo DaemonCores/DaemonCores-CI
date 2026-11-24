@@ -1,0 +1,221 @@
+name: Security channel
+
+# Rebuilds the security channel from the stable image. A caller schedules it
+# (cron) and passes nothing: the work is conditional and exits early when the
+# Debian security archive has no newer version of a package of the image.
+#
+#   stable@digest --apt-get -s upgrade--> security upgrades (security-detect.sh)
+#   none -> stop; some -> FROM stable@digest + --only-upgrade of those packages
+#   -> boot smoke test -> tags security and security-YYYYMMDD -> cosign
+#
+# It always starts from stable, never from the previous security image, so
+# nothing accumulates (wiki: operations/release-channels-security-source.md).
+
+on:
+  workflow_call:
+    inputs:
+      stable_tag:
+        description: 'Tag of the stable image the rebuild starts from.'
+        type: string
+        required: false
+        default: stable
+
+permissions:
+  contents: read
+
+jobs:
+  detect:
+    name: Detect security upgrades
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
+    outputs:
+      digest: ${{ steps.stable.outputs.digest }}
+      upgrades: ${{ steps.detect.outputs.found }}
+    steps:
+      - name: Fetch the shared tooling
+        uses: actions/checkout@v4
+        with:
+          repository: DaemonCores/DaemonCores-CI
+          ref: main
+          path: .ci-tooling
+          persist-credentials: false
+
+      - name: Log in to GHCR
+        env:
+          GHCR_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          docker login ghcr.io --username "${{ github.actor }}" \
+            --password-stdin <<< "${GHCR_TOKEN}"
+
+      # The digest of the manifest list is the sha256 of its raw bytes.
+      - name: Pin the stable image by digest
+        id: stable
+        env:
+          STABLE_TAG: ${{ inputs.stable_tag }}
+          IMAGE: ghcr.io/${{ github.repository }}
+        run: |
+          set -euo pipefail
+          IMAGE="${IMAGE,,}"
+          digest=$(skopeo inspect --raw "docker://${IMAGE}:${STABLE_TAG}" \
+            | sha256sum | cut -d' ' -f1)
+          echo "digest=sha256:${digest}" >> "${GITHUB_OUTPUT}"
+
+      - name: List the security upgrades
+        id: detect
+        env:
+          DIGEST: ${{ steps.stable.outputs.digest }}
+          IMAGE: ghcr.io/${{ github.repository }}
+        run: |
+          set -euo pipefail
+          IMAGE="${IMAGE,,}"
+          docker run --rm "${IMAGE}@${DIGEST}" bash -c \
+            'apt-get update -qq >/dev/null && apt-get -s upgrade' \
+            | bash .ci-tooling/scripts/security-detect.sh > upgrades.txt
+          cat upgrades.txt
+          if [ -s upgrades.txt ]; then
+            echo "found=true" >> "${GITHUB_OUTPUT}"
+          else
+            echo "found=false" >> "${GITHUB_OUTPUT}"
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: security-upgrades
+          path: upgrades.txt
+
+  rebuild:
+    name: Rebuild ${{ matrix.arch }}
+    needs: detect
+    if: needs.detect.outputs.upgrades == 'true'
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-latest
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Fetch the shared tooling
+        uses: actions/checkout@v4
+        with:
+          repository: DaemonCores/DaemonCores-CI
+          ref: main
+          path: .ci-tooling
+          persist-credentials: false
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: security-upgrades
+
+      - name: Log in to GHCR
+        env:
+          GHCR_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          docker login ghcr.io --username "${{ github.actor }}" \
+            --password-stdin <<< "${GHCR_TOKEN}"
+
+      - name: Build and push the per-arch candidate
+        env:
+          DIGEST: ${{ needs.detect.outputs.digest }}
+          IMAGE: ghcr.io/${{ github.repository }}
+          ARCH: ${{ matrix.arch }}
+        run: |
+          set -euo pipefail
+          IMAGE="${IMAGE,,}"
+          bash .ci-tooling/scripts/security-containerfile.sh "${IMAGE}" "${DIGEST}" \
+            < upgrades.txt > Containerfile.security
+          cat Containerfile.security
+          candidate="${IMAGE}:security-candidate_${ARCH}"
+          docker build --platform "linux/${ARCH}" \
+            --file Containerfile.security --tag "${candidate}" .
+          docker push "${candidate}"
+
+  smoke:
+    name: Boot smoke test
+    needs: [detect, rebuild]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - name: Fetch the shared tooling
+        uses: actions/checkout@v4
+        with:
+          repository: DaemonCores/DaemonCores-CI
+          ref: main
+          path: .ci-tooling
+          persist-credentials: false
+
+      - name: Log in to GHCR
+        env:
+          GHCR_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          docker login ghcr.io --username "${{ github.actor }}" \
+            --password-stdin <<< "${GHCR_TOKEN}"
+
+      - name: Install the tools
+        env:
+          ARCH: amd64
+        run: bash .ci-tooling/scripts/image-ci/prepare.sh
+
+      - name: Boot the candidate
+        env:
+          IMAGE_TEST_STATE: ${{ runner.temp }}/vm-state
+          IMAGE_REF: ghcr.io/${{ github.repository }}:security-candidate_amd64
+        run: |
+          set -euo pipefail
+          image="${IMAGE_REF,,}"
+          sudo -E podman pull "${image}"
+          sudo -E bash .ci-tooling/image-test/image-test.sh prepare
+          sudo -E bash .ci-tooling/image-test/image-test.sh test "${image}"
+
+  promote:
+    name: Promote to the security channel
+    needs: [detect, rebuild, smoke]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+    steps:
+      - name: Log in to GHCR
+        env:
+          GHCR_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          docker login ghcr.io --username "${{ github.actor }}" \
+            --password-stdin <<< "${GHCR_TOKEN}"
+
+      - name: Tag security and security-YYYYMMDD
+        id: tags
+        env:
+          IMAGE: ghcr.io/${{ github.repository }}
+        run: |
+          set -euo pipefail
+          IMAGE="${IMAGE,,}"
+          day=$(date -u +%Y%m%d)
+          for tag in security "security-${day}"; do
+            docker buildx imagetools create --tag "${IMAGE}:${tag}" \
+              "${IMAGE}:security-candidate_amd64" \
+              "${IMAGE}:security-candidate_arm64"
+          done
+          digest=$(skopeo inspect --raw "docker://${IMAGE}:security" \
+            | sha256sum | cut -d' ' -f1)
+          echo "ref=${IMAGE}@sha256:${digest}" >> "${GITHUB_OUTPUT}"
+
+      - name: Sign the security manifest list
+        uses: DaemonCores/DaemonCores-CI/sign-image@main
+        with:
+          refs: ${{ steps.tags.outputs.ref }}
+          private-key: ${{ secrets.COSIGN_PRIVATE_KEY }}
+          password: ${{ secrets.COSIGN_PASSWORD }}
