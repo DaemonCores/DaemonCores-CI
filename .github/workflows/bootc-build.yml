@@ -417,6 +417,29 @@ jobs:
           done
           docker manifest push "${list}"
 
+      # Channel alias (git flow: main = stable): the manifest list is also
+      # pushed as <channel>[-suffix], the movable tag a security rebuild starts
+      # FROM by digest (stable@sha256:...). Same bytes, so the digest signed
+      # below is the digest of the alias.
+      - name: Fetch the shared tooling
+        uses: actions/checkout@v4
+        with:
+          repository: DaemonCores/DaemonCores-CI
+          ref: main
+          path: .ci-tooling
+          persist-credentials: false
+
+      - name: Tag the release channel
+        env:
+          CF_TAG: ${{ matrix.entry.tag }}
+          IMAGE: ghcr.io/${{ github.repository }}
+        run: |
+          set -euo pipefail
+          IMAGE="${IMAGE,,}"
+          channel=$(bash .ci-tooling/scripts/release-channel.sh "${GITHUB_REF_NAME}")
+          alias=$(bash .ci-tooling/scripts/channel-tag.sh "${channel}" "${CF_TAG}")
+          docker buildx imagetools create --tag "${IMAGE}:${alias}" "${IMAGE}:${CF_TAG}"
+
       # Sign the manifest list itself: its digest is the SHA-256 of the raw
       # manifest bytes (not that of a per-arch entry).
       - name: Resolve manifest list digests
