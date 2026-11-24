@@ -210,6 +210,16 @@ jobs:
               # fallback below covers env/debs/image/iso only).
               if owes env; then env=true; fi
               if owes debs; then debs=true; fi
+              # A channel with no live APT repository has no public key to
+              # pin: the debs stage owes its first publication. An unreadable
+              # site counts as unpublished (unknown is never clean).
+              owner="${REPO%%/*}"
+              if channel=$(bash .ci-tooling/scripts/release-channel.sh "$BRANCH" 2>/dev/null) \
+                 && ! bash .ci-tooling/scripts/channel-published.sh \
+                      "https://${owner,,}.github.io/${REPO#*/}" "$channel"; then
+                echo "::warning title=owed stage debs::channel ${channel} has no published APT repository; its first publication is owed"
+                debs=true
+              fi
               if owes image; then image=true; fi
               if owes iso; then iso=true; fi
               if owes img_rpi; then img_rpi=true; fi
