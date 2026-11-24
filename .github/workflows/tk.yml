@@ -65,6 +65,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      # The make check of this repository runs shellcheck and shfmt; the
+      # runner image ships only shellcheck.
+      - name: Install the shell linters of the gate
+        run: |
+          set -eu
+          sudo apt-get update
+          sudo apt-get install -y shellcheck shfmt
       - name: Project gate
         run: |
           set -eu
