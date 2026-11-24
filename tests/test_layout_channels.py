@@ -39,14 +39,17 @@ def _publish(site: Path, channel: str, body: bytes) -> bytes:
     return body
 
 
-def _run(built: Path, channel: str,
-         published: Path) -> subprocess.CompletedProcess[str]:
+def _run(built: Path,
+         channel: str,
+         published: Path,
+         drop: str = '') -> subprocess.CompletedProcess[str]:
     """Run the script.
 
     Args:
         built: Directory with the freshly built repository.
         channel: Channel of this run.
         published: Live site directory.
+        drop: Channels to unpublish.
 
     Returns:
         The completed process.
@@ -55,7 +58,8 @@ def _run(built: Path, channel: str,
         os.environ,
         SITE_DIR=str(built),
         CHANNEL=channel,
-        PAGES_URL=f'file://{published}'
+        PAGES_URL=f'file://{published}',
+        DROP_CHANNELS=drop
     )
     return subprocess.run(['bash', str(SCRIPT)],
                           env=env,
@@ -141,3 +145,19 @@ def test_unknown_channel_is_refused(tmp_path: Path) -> None:
     done = _run(_built(tmp_path), 'nightly', tmp_path / 'live')
     assert done.returncode != 0
     assert "channel 'nightly' is not one of" in done.stderr
+
+
+def test_dropped_channel_is_not_carried(tmp_path: Path) -> None:
+    """A channel listed to drop disappears, the others stay.
+
+    Args:
+        tmp_path: Scratch directory.
+    """
+    live = tmp_path / 'live'
+    _ = _publish(live, 'stable', b'dev-deb')
+    _ = _publish(live, 'security', b'sec-deb')
+    built = _built(tmp_path)
+    done = _run(built, 'edge', live, drop='stable')
+    assert done.returncode == 0, done.stderr
+    assert not (built / 'stable').exists()
+    assert (built / 'security' / 'gpg.key').is_file()

@@ -175,6 +175,8 @@ runs:
       env:
         SITE_DIR: ${{ steps.create-apt-repo.outputs.dir }}
         CHANNEL: ${{ inputs.channel }}
+        # Repository variable listing channels to unpublish (operator action).
+        DROP_CHANNELS: ${{ vars.DROP_CHANNELS }}
       run: bash "${GITHUB_ACTION_PATH}/layout-channels.sh"
 
     - name: Drop the stale github-pages artifact of this run
