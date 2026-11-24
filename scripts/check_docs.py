@@ -117,8 +117,8 @@ def main() -> int:
     parser = argparse.ArgumentParser(
         description=(__doc__ or "").splitlines()[0]
     )
-    parser.add_argument("--root", type=Path, default=Path.cwd())
-    parser.add_argument("--docs", default="docs")
+    _ = parser.add_argument("--root", type=Path, default=Path.cwd())
+    _ = parser.add_argument("--docs", default="docs")
     args = parser.parse_args(namespace=Options())
     root = args.root.resolve()
     docs = root / args.docs

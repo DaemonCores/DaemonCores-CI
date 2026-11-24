@@ -107,7 +107,7 @@ modules configs (the CI step `ccache statistics` prints it for each job).
 - L1 (run 41448445484, commits `2f95bce` CI + `faf5167` debian-bootc): the `-nosign`
   twins are gone. Kernel image builds 4 → 2 (`linux-image` amd64; `linux-image` +
   `linux-image-16k` arm64; no `linux-image-nosign` / `linux-image-16k-nosign` jobs) and the
-  manifest lists are latest, latest-4k, iso, nvidia (`latest-nosign` no longer planned);
+  manifest lists are latest, latest-16k, iso, nvidia (`latest-nosign` no longer planned);
   `grep -ci nosign` over the whole run log is 0. The same tag `latest` booted twice on amd64:
   category `signed` with `module.sig_enforce=1` on the cmdline (the unsigned-module refusal test
   PASSes) and category `unsigned-kernel` with no karg on the identical image. The `both`
@@ -200,7 +200,7 @@ Steps: 1 `content-hash.sh` (hash parity test old vs new against published `hashe
 - Fix (designed, steps 6-8 of the single-job plan): one `build` job per arch running `build-deb/build-all.sh` over `build-deb/plan.py` order; hash decision first, ccache install/restore only when a package really builds; kernel tarball cached (`KERNEL_TARBALL_CACHE`, sha256 verified on every use; done, commit b3fb61d). Expected: a no-change run in about 2 min per arch (ESTIMATED).
 
 ## L18: Containerfile layer order for cache reuse (implemented in debian-bootc, awaiting CI evidence)
-- Rule: put the layers that differ between tags and twins last. Kernel and device modules (they differ per `-nosign`, `-16k`, `-4k`) are now the last heavy layer; the GPU gaming layer, the grub cmdline / service masking, and `ostree-layout` all come before it, so every twin of an image shares them.
+- Rule: put the layers that differ between tags and twins last. Kernel and device modules (they differ per `-nosign`, `-16k`) are now the last heavy layer; the GPU gaming layer, the grub cmdline / service masking, and `ostree-layout` all come before it, so every twin of an image shares them.
 - `-ia` cannot precede the kernel: `linux-modules-nvidia` depends on the exact kernel package. Device modules also pin the kernel (`Depends: daemoncores-kernel-<kver> (= <ver>)`), so modules and kernel stay in one transaction unless `dpkg --force-depends` is used (not done).
 - `install-signature-policy` is last: `IMAGE_REF` differs per tag, so it must not sit above the kernel layer.
 - Removed `rm` lines that duplicated work done elsewhere: the apt lists are wiped by `99-apt-clean` after every apt run, and `ostree-layout` already empties `/tmp`, `/var/tmp`, `/run` and removes `policy-rc.d`.

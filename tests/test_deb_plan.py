@@ -3,6 +3,7 @@
 import json
 import os
 import subprocess
+import textwrap
 from pathlib import Path
 
 from typed_docs import as_list, as_str, load_json
@@ -37,8 +38,8 @@ def _workspace(tmp_path: Path) -> Path:
     base = ws / 'workflows' / 'bootc-debs-builder'
     for name in ('alpha', 'beta', 'gamma'):
         (base / name).mkdir(parents=True)
-        (base / name / 'f').write_text(name)
-    (base / 'packages.yml').write_text(MANIFEST)
+        _ = (base / name / 'f').write_text(name)
+    _ = (base / 'packages.yml').write_text(MANIFEST)
     return ws
 
 
@@ -84,7 +85,7 @@ def _plan(ws: Path, pages: Path) -> tuple[dict[str, str], str]:
         The step outputs and the stderr of the plan.
     """
     out = ws / 'out'
-    out.write_text('')
+    _ = out.write_text('')
     env = {
         **os.environ,
         'MAN': str(ws / 'workflows/bootc-debs-builder/packages.yml'),
@@ -116,7 +117,7 @@ def _publish(pages: Path, entries: dict[str, object]) -> None:
         entries: Content of the document.
     """
     (pages / 'debs-cache').mkdir(parents=True, exist_ok=True)
-    (pages / 'debs-cache' / 'hashes.json').write_text(json.dumps(entries))
+    _ = (pages / 'debs-cache' / 'hashes.json').write_text(json.dumps(entries))
 
 
 def test_a_new_package_is_built_and_initialised(tmp_path: Path) -> None:
@@ -181,9 +182,17 @@ def test_a_block_scalar_build_keeps_its_trailing_newline(
     """
     ws = _workspace(tmp_path)
     manifest = ws / 'workflows/bootc-debs-builder/packages.yml'
-    manifest.write_text(
-        'packages:\n  - name: gamma\n    sources: [gamma]\n'
-        '    build: |\n      echo gamma\n      echo more\n'
+    _ = manifest.write_text(
+        textwrap.dedent(
+            """\
+            packages:
+              - name: gamma
+                sources: [gamma]
+                build: |
+                  echo gamma
+                  echo more
+            """
+        )
     )
     src = 'workflows/bootc-debs-builder/'
     pages = tmp_path / 'pages'
@@ -198,7 +207,7 @@ def test_a_block_scalar_build_keeps_its_trailing_newline(
     )
     env_waves = {'wave0': ['gamma']}
     out = ws / 'out'
-    out.write_text('')
+    _ = out.write_text('')
     env = {
         **os.environ,
         'MAN': str(manifest),
@@ -254,7 +263,7 @@ def test_unreadable_published_state_is_an_error(tmp_path: Path) -> None:
     broken = tmp_path / 'broken'
     broken.mkdir()
     (broken / 'debs-cache').mkdir()
-    (broken / 'debs-cache' / 'hashes.json').write_text('not json')
+    _ = (broken / 'debs-cache' / 'hashes.json').write_text('not json')
     env = {
         **os.environ,
         'MAN': str(ws / 'workflows/bootc-debs-builder/packages.yml'),
@@ -285,11 +294,10 @@ def test_every_planned_package_gets_a_verdict(tmp_path: Path) -> None:
     ws = _workspace(tmp_path)
     base = ws / 'workflows' / 'bootc-debs-builder'
     (base / 'delta').mkdir()
-    (base / 'delta' / 'f').write_text('delta')
+    _ = (base / 'delta' / 'f').write_text('delta')
     with (base / 'packages.yml').open('a') as handle:
-        handle.write(
-            '  - name: Delta\n    sources: [delta]\n'
-            '    build: echo delta\n'
+        _ = handle.write(
+            '  - name: Delta\n    sources: [delta]\n    build: echo delta\n'
         )
     pages = tmp_path / 'pages'
     src = 'workflows/bootc-debs-builder/'
@@ -302,7 +310,7 @@ def test_every_planned_package_gets_a_verdict(tmp_path: Path) -> None:
         }
     )
     out = ws / 'out'
-    out.write_text('')
+    _ = out.write_text('')
     wanted = {'wave0': ['Alpha', 'gamma', 'Delta'], 'wave1': ['beta']}
     env = {
         **os.environ,
@@ -351,7 +359,7 @@ def test_a_published_build_that_is_not_served_is_rebuilt(
     outs, err = _plan(ws, pages)
     assert 'gamma' in json.loads(outs['wave0'])
     assert 'gamma_1_amd64.deb is not served' in err
-    (pages / 'debs-cache' / 'gamma_1_amd64.deb').write_bytes(b'x')
+    _ = (pages / 'debs-cache' / 'gamma_1_amd64.deb').write_bytes(b'x')
     outs, _ = _plan(ws, pages)
     assert 'gamma' in json.loads(outs['skipped'])
 
@@ -378,7 +386,7 @@ def test_fetch_published_only_for_dependencies_not_rebuilt(
             }
         }
     )
-    (pages / 'debs-cache' / 'Alpha_1_amd64.deb').write_bytes(b'old')
+    _ = (pages / 'debs-cache' / 'Alpha_1_amd64.deb').write_bytes(b'old')
     dest = tmp_path / 'prior'
     env = {
         **os.environ, 'MAN':
@@ -397,7 +405,7 @@ def test_fetch_published_only_for_dependencies_not_rebuilt(
     assert done.returncode == 0, done.stderr
     assert (dest / 'Alpha_1_amd64.deb').read_bytes() == b'old'
     (dest / 'Alpha_1_amd64.deb').unlink()
-    (dest / 'Alpha_2_amd64.deb').write_bytes(b'new')
+    _ = (dest / 'Alpha_2_amd64.deb').write_bytes(b'new')
     done = subprocess.run(['bash', str(fetch)],
                           env=env,
                           capture_output=True,

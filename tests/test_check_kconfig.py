@@ -1,6 +1,7 @@
 """Unit tests for ``scripts/check_kconfig.py``."""
 
 import sys
+import textwrap
 from pathlib import Path
 
 import pytest
@@ -21,7 +22,7 @@ def fixture_tree(tmp_path: Path) -> Path:
         The tree root.
     """
     (tmp_path / "drivers").mkdir()
-    (tmp_path / "drivers" / "Kconfig").write_text(
+    _ = (tmp_path / "drivers" / "Kconfig").write_text(
         "menuconfig FOO\n\tbool \"foo\"\n\nconfig BAR\n\ttristate \"bar\"\n"
     )
     return tmp_path
@@ -38,7 +39,7 @@ def _fragment(tmp_path: Path, text: str) -> Path:
         The fragment path.
     """
     path = tmp_path / "fragment"
-    path.write_text(text)
+    _ = path.write_text(text)
     return path
 
 
@@ -48,9 +49,18 @@ def test_parse_fragment_reads_values_and_unset(tmp_path: Path) -> None:
     Args:
         tmp_path: Pytest scratch directory.
     """
+    quoted = '"x"'
     path = _fragment(
-        tmp_path, "# a comment\nCONFIG_A=y\nCONFIG_A=m\n"
-        "# CONFIG_B is not set\nCONFIG_C=\"x\"\n"
+        tmp_path,
+        textwrap.dedent(
+            f"""\
+            # a comment
+            CONFIG_A=y
+            CONFIG_A=m
+            # CONFIG_B is not set
+            CONFIG_C={quoted}
+            """
+        ),
     )
     assert check_kconfig.parse_fragment(path) == {
         "CONFIG_A": "m",
@@ -98,7 +108,7 @@ def test_dropped_option_is_reported(tree: Path, tmp_path: Path) -> None:
     """
     fragment = _fragment(tmp_path, "CONFIG_FOO=y\nCONFIG_BAR=m\n")
     config = tmp_path / ".config"
-    config.write_text("CONFIG_FOO=y\n# CONFIG_BAR is not set\n")
+    _ = config.write_text("CONFIG_FOO=y\n# CONFIG_BAR is not set\n")
     declared, prompts = check_kconfig.declared_symbols(tree), \
         check_kconfig.prompted_symbols(tree)
     defects, advisory = check_kconfig.check(
@@ -122,6 +132,6 @@ def test_honoured_options_pass(tree: Path, tmp_path: Path) -> None:
     """
     fragment = _fragment(tmp_path, "CONFIG_FOO=y\n# CONFIG_BAR is not set\n")
     config = tmp_path / ".config"
-    config.write_text("CONFIG_FOO=y\n# CONFIG_BAR is not set\n")
+    _ = config.write_text("CONFIG_FOO=y\n# CONFIG_BAR is not set\n")
     args = ["--tree", str(tree), "--config", str(config), str(fragment)]
     assert check_kconfig.main(args) == 0

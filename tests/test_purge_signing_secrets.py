@@ -55,8 +55,8 @@ def test_private_key_artifacts_are_purged(tmp_path: Path) -> None:
         tmp_path: clean sweep root built by pytest.
     """
     for name in ('signing_key.pem', 'sb.key', 'mod.pem', 'v7.key'):
-        (tmp_path / name).write_text('PRIVATE')
-    (tmp_path / 'sb.crt').write_text('public cert stays')
+        _ = (tmp_path / name).write_text('PRIVATE')
+    _ = (tmp_path / 'sb.crt').write_text('public cert stays')
     result = run_purge(tmp_path, temp_env())
     assert result.returncode == 0, result.stderr
     for name in ('signing_key.pem', 'sb.key', 'mod.pem', 'v7.key'):

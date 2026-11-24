@@ -74,6 +74,8 @@ extraPaths = ["scripts"]
 typeCheckingMode = "strict"
 reportAny = "error"
 reportExplicitAny = "error"
+reportUnusedCallResult = "error"
+reportImplicitStringConcatenation = "error"
 exclude = [
     "**/node_modules",
     "**/__pycache__",

@@ -32,7 +32,7 @@ def touch(path: Path, text: str) -> None:
         text: Content to write.
     """
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text)
+    _ = path.write_text(text)
 
 
 def make_tree(root: Path) -> Path:

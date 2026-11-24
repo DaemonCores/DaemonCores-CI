@@ -165,13 +165,17 @@ def check(
         elif final is not None:
             if symbol not in final:
                 advisory.append(
-                    f"WARN: {symbol}: not in .config (invisible in this "
-                    "scope/architecture — dropped)"
+                    "".join((
+                        f"WARN: {symbol}: not in .config (invisible in this ",
+                        "scope/architecture — dropped)",
+                    ))
                 )
             elif prompts is not None and symbol not in prompts:
                 advisory.append(
-                    f"WARN: {symbol}: promptless, resolved by olddefconfig "
-                    f"({final[symbol]})"
+                    "".join((
+                        f"WARN: {symbol}: promptless, resolved by ",
+                        f"olddefconfig ({final[symbol]})",
+                    ))
                 )
             else:
                 has = final[symbol]
@@ -181,8 +185,10 @@ def check(
                     )
                 elif has != value:
                     defects.append(
-                        f"{symbol}: wanted {value}, .config has "
-                        f"{has} (unmet dependency?)"
+                        "".join((
+                            f"{symbol}: wanted {value}, .config has ",
+                            f"{has} (unmet dependency?)",
+                        ))
                     )
     return defects, advisory
 
@@ -197,9 +203,9 @@ def main(argv: list[str] | None = None) -> int:
         ``0`` when every option is honoured, ``1`` otherwise.
     """
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--tree", type=Path, required=True)
-    parser.add_argument("--config", type=Path)
-    parser.add_argument("fragments", nargs="+", type=Path)
+    _ = parser.add_argument("--tree", type=Path, required=True)
+    _ = parser.add_argument("--config", type=Path)
+    _ = parser.add_argument("fragments", nargs="+", type=Path)
     args = parser.parse_args(argv)
     tree = cast(Path, args.tree)
     config = cast(Path | None, args.config)

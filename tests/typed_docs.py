@@ -113,8 +113,10 @@ def as_str_mapping(value: object) -> dict[str, object]:
     """
     if not is_str_mapping(value):
         raise TypeError(
-            "expected a mapping with string keys, got"
-            f" {type(value).__name__}"
+            " ".join([
+                "expected a mapping with string keys, got",
+                f"{type(value).__name__}"
+            ])
         )
     return value
 

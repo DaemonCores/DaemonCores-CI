@@ -78,7 +78,7 @@ def make_apt_repo(base: Path, repo_dir: str, versions: list[str]) -> None:
             "",
         ]) for v in versions
     ]
-    (d / "Packages.gz").write_bytes(gzip.compress("\n".join(recs).encode()))
+    _ = (d / "Packages.gz").write_bytes(gzip.compress("\n".join(recs).encode()))
 
 
 def make_tagged_repo(base: Path, tags: list[str]) -> str:
@@ -105,34 +105,35 @@ def make_tagged_repo(base: Path, tags: list[str]) -> str:
     }
     wd = base / "work"
     wd.mkdir()
-    (wd / "f").write_text("x\n")
+    _ = (wd / "f").write_text("x\n")
     for cmd in (
         ["git", "init", "-q", "-b", "main",
          str(wd)],
         ["git", "-C", str(wd), "add", "f"],
         ["git", "-C", str(wd), "commit", "-qm", "x"],
     ):
-        subprocess.run(cmd, check=True, env=git_env)
+        _ = subprocess.run(cmd, check=True, env=git_env)
     bare = base / "modules.git"
-    subprocess.run(["git", "init", "-q", "--bare",
-                    str(bare)],
-                   check=True,
-                   env=git_env)
-    subprocess.run(
+    _ = subprocess.run(["git", "init", "-q", "--bare",
+                        str(bare)],
+                       check=True,
+                       env=git_env)
+    _ = subprocess.run(
         ["git", "-C", str(wd), "push", "-q",
          str(bare), "main"],
         check=True,
         env=git_env,
     )
     for t in tags:
-        subprocess.run(["git", "-C", str(wd), "tag", t],
+        _ = subprocess.run(["git", "-C", str(wd), "tag", t],
+                           check=True,
+                           env=git_env)
+    _ = subprocess.run([
+        "git", "-C", str(wd), "push", "-q",
+        str(bare), "--tags"
+    ],
                        check=True,
                        env=git_env)
-    subprocess.run(["git", "-C",
-                    str(wd), "push", "-q",
-                    str(bare), "--tags"],
-                   check=True,
-                   env=git_env)
     return f"file://{bare}"
 
 
@@ -232,8 +233,10 @@ def test_nvidia_apt_repo_is_an_argument() -> None:
         assert by_env.returncode == 0, by_env.stderr
         assert "VER=640.10.09" in by_env.stdout
         by_arg = run_detect(
-            "nvidia_driver_detect debian13 "
-            "&& echo VER=${NVIDIA_DRIVER_VERSION}",
+            " ".join([
+                "nvidia_driver_detect debian13",
+                "&& echo VER=${NVIDIA_DRIVER_VERSION}"
+            ]),
             NVIDIA_APT_REPO="debian10",
             **common,
         )

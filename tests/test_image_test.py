@@ -10,6 +10,7 @@ import os
 import shutil
 import socket
 import subprocess
+import textwrap
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -28,7 +29,7 @@ boot_timeout: 60
 categories:
   - {name: plain, arch: amd64, suffix: "", secure_boot: 1, reference: true}
   - {name: nosign, arch: amd64, suffix: "-nosign", secure_boot: 1}
-  - {name: k4, arch: amd64, suffix: "-4k", secure_boot: 0}
+  - {name: k16, arch: amd64, suffix: "-16k", secure_boot: 0}
   - {name: enforce, arch: amd64, suffix: "-enf", secure_boot: 1,
      kargs: ["module.sig_enforce=1", "quiet"]}
   - {name: lax, arch: amd64, suffix: "-enf", secure_boot: 1}
@@ -99,8 +100,9 @@ def stubs(tmp_path: Path) -> Path:
     """
     b = tmp_path / "bin"
     b.mkdir()
-    (b / "sudo").write_text('#!/bin/bash\nexec "$@"\n')
-    (b / "ssh").write_text(f'#!/bin/bash\necho "$@" >>"{tmp_path}/ssh.log"\n')
+    _ = (b / "sudo").write_text('#!/bin/bash\nexec "$@"\n')
+    _ = (b /
+         "ssh").write_text(f'#!/bin/bash\necho "$@" >>"{tmp_path}/ssh.log"\n')
     for f in b.iterdir():
         f.chmod(0o755)
     return tmp_path
@@ -117,7 +119,7 @@ def manifest(tmp: Path, text: str = MANIFEST) -> Path:
         The path of the manifest file.
     """
     p = tmp / "tests.yml"
-    p.write_text(text)
+    _ = p.write_text(text)
     return p
 
 
@@ -278,7 +280,7 @@ def test_calibration_seed_used_when_state_file_has_no_entry(
         stubs: Temporary directory holding the stub bin dir.
     """
     seed = stubs / "seed.env"
-    seed.write_text("amd64:signed=19\n")
+    _ = seed.write_text("amd64:signed=19\n")
     r = sh(
         f"""
         BOOT_CALIB_FILE="{stubs}/calib.env"
@@ -499,12 +501,14 @@ def test_state_roundtrip_and_env_wins(stubs: Path) -> None:
     """
     env = {"IMAGE_TEST_STATE": str(stubs / "st")}
     r = sh(
-        'state_init; ARCH=arm64; KVM=0; OVMF_DIR="/a b"; '
-        'TESTS_FILE=/m/t.yml; save_state\n'
-        'ARCH=amd64; KVM=1; OVMF_DIR=; TESTS_FILE=; load_state\n'
-        'echo "${ARCH}|${KVM}|${OVMF_DIR}|${TESTS_FILE}"',
-        env,
-        stubs,
+        '\n'.join([
+            ' '.join([
+                'state_init; ARCH=arm64; KVM=0; OVMF_DIR="/a b";',
+                'TESTS_FILE=/m/t.yml; save_state'
+            ]),
+            'ARCH=amd64; KVM=1; OVMF_DIR=; TESTS_FILE=; load_state',
+            'echo "${ARCH}|${KVM}|${OVMF_DIR}|${TESTS_FILE}"',
+        ]), env, stubs
     )
     assert r.returncode == 0, r.stderr
     assert r.stdout.strip() == "arm64|0|/a b|/m/t.yml"
@@ -547,9 +551,9 @@ def certdir(tmp: Path, name: str, crt: str, mok: dict[str, str]) -> Path:
     """
     d = tmp / name
     (d / "mok.d").mkdir(parents=True)
-    (d / "sb.crt").write_text(crt)
+    _ = (d / "sb.crt").write_text(crt)
     for k, v in mok.items():
-        (d / "mok.d" / k).write_text(v)
+        _ = (d / "mok.d" / k).write_text(v)
     return d
 
 
@@ -597,10 +601,10 @@ def varstore_env(tmp: Path) -> dict[str, str]:
     st = tmp / "st"
     ovmf = tmp / "ovmf"
     ovmf.mkdir()
-    (ovmf / "OVMF_VARS_4M.fd").write_text("blank")
+    _ = (ovmf / "OVMF_VARS_4M.fd").write_text("blank")
     venv = st / "sbtool" / "bin"
     venv.mkdir(parents=True)
-    (venv / "virt-fw-vars").write_text(FAKE_VIRT_FW)
+    _ = (venv / "virt-fw-vars").write_text(FAKE_VIRT_FW)
     (venv / "virt-fw-vars").chmod(0o755)
     return {"IMAGE_TEST_STATE": str(st), "OVMF_DIR": str(ovmf)}
 
@@ -636,11 +640,14 @@ def test_varstore_given_to_vm_is_a_pristine_copy(stubs: Path) -> None:
     env = varstore_env(stubs)
     a = certdir(stubs, "a", "CRT1", {})
     r = sh(
-        'state_init; SB_GUID=g; SB_CERTS=/c\n'
-        f'prepare_sb_varstore "{a}"\n'
-        'echo "BootOrder-leak" >>"${VARS_RUN}"\n'
-        f'prepare_sb_varstore "{a}"\n'
-        'cat "${VARS_RUN}"',
+        textwrap.dedent(
+            f'''\
+            state_init; SB_GUID=g; SB_CERTS=/c
+            prepare_sb_varstore "{a}"
+            echo "BootOrder-leak" >>"${{VARS_RUN}}"
+            prepare_sb_varstore "{a}"
+            cat "${{VARS_RUN}}"'''
+        ),
         env,
         stubs,
     )
@@ -676,7 +683,7 @@ def test_build_skips_private_keys_and_passes_certs(stubs: Path) -> None:
     env = varstore_env(stubs)
     d = certdir(stubs, "a", "CRT1", {})
     pem = stubs / "m.pem"
-    subprocess.run(
+    _ = subprocess.run(
         [
             "openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes", "-subj",
             "/CN=t", "-keyout",
@@ -686,17 +693,24 @@ def test_build_skips_private_keys_and_passes_certs(stubs: Path) -> None:
         check=True,
         capture_output=True,
     )
-    (d / "mok.d" / "pub.pem").write_text(pem.read_text())
-    (d / "mok.d" / "priv.pem").write_text((stubs / "m.key").read_text())
-    (d / "mok.d" / "note.txt").write_text("ignored")
+    _ = (d / "mok.d" / "pub.pem").write_text(pem.read_text())
+    _ = (d / "mok.d" / "priv.pem").write_text((stubs / "m.key").read_text())
+    _ = (d / "mok.d" / "note.txt").write_text("ignored")
     stub = stubs / "st" / "sbtool" / "bin" / "virt-fw-vars"
-    stub.write_text(
-        '#!/bin/bash\nprintf "%s\\n" "$@" >"$(dirname "$0")/args"\n'
-        'while [ $# -gt 0 ]; do [ "$1" = -o ] && : >"$2"; shift; done\n'
+    _ = stub.write_text(
+        textwrap.dedent(
+            '''\
+            #!/bin/bash
+            printf "%s\\n" "$@" >"$(dirname "$0")/args"
+            while [ $# -gt 0 ]; do [ "$1" = -o ] && : >"$2"; shift; done
+            '''
+        )
     )
     r = sh(
-        f'state_init; SB_GUID=g; SB_CERTS=/c; '
-        f'build_sb_vars "{d}" "{stubs}/out.fd"', env, stubs
+        " ".join([
+            'state_init; SB_GUID=g; SB_CERTS=/c;',
+            f'build_sb_vars "{d}" "{stubs}/out.fd"'
+        ]), env, stubs
     )
     assert r.returncode == 0, r.stderr
     args = (stubs / "st" / "sbtool" / "bin" / "args").read_text()
@@ -749,8 +763,15 @@ def test_validate_manifest_checks_reboot_tests(stubs: Path) -> None:
         stubs: Temporary directory holding the stub bin dir.
     """
     m = manifest(
-        stubs, 'tests:\n  - {name: a, run: x, diag: y}\n'
-        'reboot_tests:\n  - {name: b, run: x}\n'
+        stubs,
+        textwrap.dedent(
+            """\
+            tests:
+              - {name: a, run: x, diag: y}
+            reboot_tests:
+              - {name: b, run: x}
+            """
+        )
     )
     r = sh("validate_manifest", {"TESTS_FILE": str(m)}, stubs)
     assert r.returncode == 1
@@ -763,7 +784,7 @@ def test_validate_manifest_checks_reboot_tests(stubs: Path) -> None:
     [
         ("img:latest_amd64", "plain", "1"),
         ("img:latest-nosign_amd64", "nosign", "1"),
-        ("img:extra-4k_amd64", "k4", "0"),
+        ("img:extra-16k_amd64", "k16", "0"),
     ],
 )
 def test_select_category_secure_boot_per_tag(
@@ -779,8 +800,10 @@ def test_select_category_secure_boot_per_tag(
     """
     m = manifest(stubs)
     r = sh(
-        f'IMAGE="{tag}"; select_category >/dev/null; '
-        'echo "${CATEGORY} ${SECURE_BOOT}"',
+        " ".join([
+            f'IMAGE="{tag}"; select_category >/dev/null;',
+            'echo "${CATEGORY} ${SECURE_BOOT}"'
+        ]),
         {
             "TESTS_FILE": str(m),
             "ARCH": "amd64"
@@ -800,8 +823,10 @@ def test_secure_boot_env_overrides_category(stubs: Path) -> None:
     """
     m = manifest(stubs)
     r = sh(
-        'IMAGE="img:x-4k_amd64"; select_category >/dev/null; '
-        'echo "${SECURE_BOOT}"', {
+        " ".join([
+            'IMAGE="img:x-16k_amd64"; select_category >/dev/null;',
+            'echo "${SECURE_BOOT}"'
+        ]), {
             "TESTS_FILE": str(m),
             "SECURE_BOOT": "1"
         }, stubs
@@ -840,10 +865,13 @@ def test_no_secure_boot_category_for_arch(stubs: Path) -> None:
         stubs: Temporary directory holding the stub bin dir.
     """
     m = manifest(
-        stubs, "categories:\n"
-        "  - {name: p, arch: amd64, suffix: '', secure_boot: 0,"
-        " reference: true}\n"
-        "tests:\n  - {name: a, run: x, diag: y}\n"
+        stubs,
+        ''.join([
+            "categories:\n",
+            "  - {name: p, arch: amd64, suffix: '', secure_boot: 0,",
+            " reference: true}\n",
+            "tests:\n  - {name: a, run: x, diag: y}\n",
+        ]),
     )
     r = sh(
         "manifest_needs_secure_boot && echo yes || echo no",
@@ -890,9 +918,11 @@ def test_select_category_from_environment_exports_kargs(
     """
     m = manifest(stubs)
     r = sh(
-        'IMAGE="img:x-enf_amd64"; select_category >/dev/null; '
-        'echo "${CATEGORY}|${INSTALL_KARGS}"; '
-        'bash -c \'echo "exp:${INSTALL_KARGS}"\'',
+        " ".join([
+            'IMAGE="img:x-enf_amd64"; select_category >/dev/null;',
+            'echo "${CATEGORY}|${INSTALL_KARGS}";',
+            'bash -c \'echo "exp:${INSTALL_KARGS}"\''
+        ]),
         {
             "TESTS_FILE": str(m),
             "ARCH": "amd64",
@@ -938,10 +968,12 @@ def test_bad_karg_is_rejected(stubs: Path, karg: str) -> None:
     """
     m = manifest(
         stubs,
-        "categories:\n"
-        "  - {name: p, arch: amd64, suffix: '', secure_boot: 0,"
-        ' reference: true, kargs: ["' + karg + '"]}\n'
-        "tests:\n  - {name: a, run: x, diag: y}\n",
+        ''.join([
+            "categories:\n",
+            "  - {name: p, arch: amd64, suffix: '', secure_boot: 0,",
+            f' reference: true, kargs: ["{karg}"]}}\n',
+            "tests:\n  - {name: a, run: x, diag: y}\n",
+        ]),
     )
     r = sh("validate_manifest", {"TESTS_FILE": str(m)}, stubs)
     assert r.returncode == 1
@@ -957,10 +989,12 @@ def test_kargs_must_be_a_list(stubs: Path) -> None:
     """
     m = manifest(
         stubs,
-        "categories:\n"
-        "  - {name: p, arch: amd64, suffix: '', secure_boot: 0,"
-        " reference: true, kargs: quiet}\n"
-        "tests:\n  - {name: a, run: x, diag: y}\n",
+        ''.join([
+            "categories:\n",
+            "  - {name: p, arch: amd64, suffix: '', secure_boot: 0,",
+            " reference: true, kargs: quiet}\n",
+            "tests:\n  - {name: a, run: x, diag: y}\n",
+        ]),
     )
     r = sh("validate_manifest", {"TESTS_FILE": str(m)}, stubs)
     assert r.returncode == 1
@@ -980,12 +1014,14 @@ def test_duplicate_rule_is_arch_suffix_name(
     """
     m = manifest(
         stubs,
-        "categories:\n"
-        "  - {name: p, arch: amd64, suffix: '', secure_boot: 0,"
-        " reference: true}\n"
-        f"  - {{name: {second_name}, arch: amd64, suffix: '',"
-        " secure_boot: 0}\n"
-        "tests:\n  - {name: a, run: x, diag: y}\n",
+        ''.join([
+            "categories:\n",
+            "  - {name: p, arch: amd64, suffix: '', secure_boot: 0,",
+            " reference: true}\n",
+            f"  - {{name: {second_name}, arch: amd64, suffix: '',",
+            " secure_boot: 0}\n",
+            "tests:\n  - {name: a, run: x, diag: y}\n",
+        ]),
     )
     r = sh("validate_manifest", {"TESTS_FILE": str(m)}, stubs)
     assert (r.returncode == 0) is ok, r.stdout + r.stderr
@@ -1018,7 +1054,7 @@ def test_stop_vm_kills_a_guest_that_ignores_poweroff(stubs: Path) -> None:
     st.mkdir()
     proc = subprocess.Popen(["sleep", "60"])
     try:
-        (st / "qemu.pid").write_text(str(proc.pid))
+        _ = (st / "qemu.pid").write_text(str(proc.pid))
         r = sh(
             "stop_vm", {
                 "IMAGE_TEST_STATE": str(st),
@@ -1071,11 +1107,13 @@ def test_teardown_keeps_logs_and_removes_secrets(stubs: Path) -> None:
     """
     st = stubs / "st"
     r = sh(
-        'state_init; touch "${KEY}" "${KEY}.pub" "${STATE}/PK.key" "${DISK}" '
-        '"${LOGS}/i.serial.log"\n'
-        'mkdir -p "${VARSTORES}/x"; cmd_teardown',
-        {"IMAGE_TEST_STATE": str(st)},
-        stubs,
+        '\n'.join([
+            ' '.join([
+                'state_init; touch "${KEY}" "${KEY}.pub"',
+                '"${STATE}/PK.key" "${DISK}" "${LOGS}/i.serial.log"'
+            ]),
+            'mkdir -p "${VARSTORES}/x"; cmd_teardown',
+        ]), {"IMAGE_TEST_STATE": str(st)}, stubs
     )
     assert r.returncode == 0, r.stderr
     assert (st / "logs" / "i.serial.log").exists()

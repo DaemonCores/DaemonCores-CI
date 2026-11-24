@@ -27,6 +27,7 @@ variants share the manifest verbatim (documented as "same set" in nvidia.yml).
 
 import subprocess
 import tempfile
+import textwrap
 from pathlib import Path
 
 from typed_docs import as_list, as_mapping, as_mappings, as_str, load_yaml
@@ -147,11 +148,13 @@ def test_empty_gpu_set_is_a_noop() -> None:
         tmp = Path(td)
         manifest = tmp / "empty.yml"
         (tmp / "tree").mkdir()
-        (tmp / "tree" / "README").write_text("unpatched\n")
-        manifest.write_text("patches: []\n")
+        _ = (tmp / "tree" / "README").write_text("unpatched\n")
+        _ = manifest.write_text("patches: []\n")
         r = run_helper(
-            f'kernel_apply_patches "{manifest}" amd64 7.2.15 "{tmp}/tree" && '
-            f'grep -q unpatched "{tmp}/tree/README" && echo NOOP'
+            " ".join([
+                f'kernel_apply_patches "{manifest}" amd64 7.2.15 "{tmp}/tree"',
+                f'&& grep -q unpatched "{tmp}/tree/README" && echo NOOP'
+            ])
         )
         assert r.returncode == 0, r.stderr
         assert r.stdout.strip() == "NOOP"
@@ -171,20 +174,31 @@ def _series_probe_patch(tmp: Path) -> Path:
         The path of the probe manifest.
     """
     patch = tmp / "probe.patch"
-    patch.write_text(
-        "--- a/README\n+++ b/README\n@@ -1 +1 @@\n"
-        "-gpu probe\n+gpu probe patched\n"
+    _ = patch.write_text(
+        textwrap.dedent(
+            """\
+            --- a/README
+            +++ b/README
+            @@ -1 +1 @@
+            -gpu probe
+            +gpu probe patched
+            """
+        )
     )
-    (patch.parent / "README").write_text("gpu probe\n")
+    _ = (patch.parent / "README").write_text("gpu probe\n")
     manifest = tmp / "probe.yml"
-    manifest.write_text(
-        "patches:\n"
-        "  - name: probe\n"
-        f"    url: file://{tmp}/series-{{series}}/probe.patch\n"
-        "    stage: common\n"
+    _ = manifest.write_text(
+        textwrap.dedent(
+            f"""\
+            patches:
+              - name: probe
+                url: file://{tmp}/series-{{series}}/probe.patch
+                stage: common
+            """
+        )
     )
     (tmp / "series-7.2").mkdir()
-    patch.rename(tmp / "series-7.2" / "probe.patch")
+    _ = patch.rename(tmp / "series-7.2" / "probe.patch")
     return manifest
 
 
@@ -201,9 +215,11 @@ def test_patches_series_override_resolves_kernel_series() -> None:
         # '620.70' — the override must resolve 7.2 instead, then dry-run +
         # apply.
         r = run_helper(
-            f'PATCHES_SERIES=7.2 '
-            f'kernel_apply_patches "{manifest}" amd64 620.70.06 "{tmp}" && '
-            f'grep -q patched {tmp}/README && echo APPLIED'
+            " ".join([
+                'PATCHES_SERIES=7.2',
+                f'kernel_apply_patches "{manifest}" amd64 620.70.06 "{tmp}" &&',
+                f'grep -q patched {tmp}/README && echo APPLIED'
+            ])
         )
         assert r.returncode == 0, r.stderr
         assert "APPLIED" in r.stdout
@@ -219,9 +235,11 @@ def test_gpu_env_var_does_not_leak_between_driver_manifests() -> None:
         tmp = Path(td)
         manifest = _series_probe_patch(tmp)
         r = run_helper(
-            f'PATCHES_SERIES=7.2 kernel_apply_patches "{manifest}" amd64 '
-            f'620.70.06 "{tmp}" >/dev/null; '
-            f'[[ -z "${{PATCHES_SERIES:-}}" ]] && echo RESTORED'
+            " ".join([
+                f'PATCHES_SERIES=7.2 kernel_apply_patches "{manifest}" amd64',
+                f'620.70.06 "{tmp}" >/dev/null;',
+                '[[ -z "${PATCHES_SERIES:-}" ]] && echo RESTORED'
+            ])
         )
         assert r.returncode == 0, r.stderr + r.stdout
         assert r.stdout.strip() == "RESTORED"
@@ -237,24 +255,30 @@ def test_sha256_pin_enforced_all_or_nothing() -> None:
 
     tmp = Path(tempfile.mkdtemp())
     patch = tmp / "p.patch"
-    patch.write_text("--- a/READ\n+++ b/READ\n@@ -1 +1 @@\n-one\n+two\n")
-    (tmp / "READ").write_text("one\n")
+    _ = patch.write_text("--- a/READ\n+++ b/READ\n@@ -1 +1 @@\n-one\n+two\n")
+    _ = (tmp / "READ").write_text("one\n")
     good = hashlib.sha256(patch.read_bytes()).hexdigest()
     manifest = tmp / "m.yml"
-    manifest.write_text(
-        "patches:\n"
-        "  - name: pinned\n"
-        f"    url: file://{tmp}/p.patch\n"
-        "    stage: common\n"
-        f"    sha256: {good}\n"
+    _ = manifest.write_text(
+        textwrap.dedent(
+            f"""\
+            patches:
+              - name: pinned
+                url: file://{tmp}/p.patch
+                stage: common
+                sha256: {good}
+            """
+        )
     )
     r = run_helper(
-        f'kernel_apply_patches "{manifest}" amd64 7.2.15 "{tmp}" '
-        f"&& grep -q two {tmp}/READ"
+        " ".join([
+            f'kernel_apply_patches "{manifest}" amd64 7.2.15 "{tmp}"',
+            f"&& grep -q two {tmp}/READ"
+        ])
     )
     assert r.returncode == 0, r.stderr
-    manifest.write_text(manifest.read_text().replace(good, "0" * 64))
-    (tmp / "READ").write_text("one\n")
+    _ = manifest.write_text(manifest.read_text().replace(good, "0" * 64))
+    _ = (tmp / "READ").write_text("one\n")
     # kernel_apply_patches exits the SHELL on a bad pin (same contract as
     # every other build failure), so the refusal is asserted as its own run;
     # the tree state after is asserted again in the second run below.

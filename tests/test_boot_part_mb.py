@@ -41,7 +41,7 @@ def test_rejects_missing_or_non_positive_sizes(sizes: list[int]) -> None:
         sizes: Payload sizes that must be rejected.
     """
     with pytest.raises(ValueError, match='need positive file sizes'):
-        boot_part_mb.boot_part_mb(sizes)
+        _ = boot_part_mb.boot_part_mb(sizes)
 
 
 def test_cli_prints_the_size_and_fails_on_garbage(

@@ -22,9 +22,9 @@ def _site(root: Path) -> Path:
     """
     cache = root / 'site' / 'debs-cache'
     cache.mkdir(parents=True)
-    (cache / 'a_1_amd64.deb').write_bytes(b'a')
-    (cache / 'b_1_amd64.deb').write_bytes(b'b')
-    (cache / 'hashes.json').write_text(
+    _ = (cache / 'a_1_amd64.deb').write_bytes(b'a')
+    _ = (cache / 'b_1_amd64.deb').write_bytes(b'b')
+    _ = (cache / 'hashes.json').write_text(
         json.dumps({
             'a-amd64': {
                 'hash': 'ha',
@@ -57,8 +57,8 @@ def test_missing_packages_are_kept(tmp_path: Path) -> None:
     site = _site(tmp_path)
     debs = tmp_path / 'debs'
     (debs / '.meta').mkdir(parents=True)
-    (debs / '.meta' /
-     'a-amd64.json').write_text('{"fresh": true}', encoding='utf-8')
+    _ = (debs / '.meta' /
+         'a-amd64.json').write_text('{"fresh": true}', encoding='utf-8')
     env = dict(os.environ, DEBS_DIR=str(debs), PAGES_URL=f'file://{site}')
     done = subprocess.run(['bash', str(SCRIPT)],
                           env=env,
@@ -109,8 +109,8 @@ def test_deps_hash_survives_the_carry_over(tmp_path: Path) -> None:
     """
     site = tmp_path / 'site'
     (site / 'debs-cache').mkdir(parents=True)
-    (site / 'debs-cache' / 'a_1_amd64.deb').write_bytes(b'a')
-    (site / 'debs-cache' / 'hashes.json').write_text(
+    _ = (site / 'debs-cache' / 'a_1_amd64.deb').write_bytes(b'a')
+    _ = (site / 'debs-cache' / 'hashes.json').write_text(
         json.dumps({
             'a-amd64': {
                 'hash': 'ha',
@@ -143,7 +143,7 @@ def test_an_unreadable_published_state_stops_the_publication(
     """
     site = tmp_path / 'site'
     (site / 'debs-cache').mkdir(parents=True)
-    (site / 'debs-cache' / 'hashes.json').write_text('<html>503</html>')
+    _ = (site / 'debs-cache' / 'hashes.json').write_text('<html>503</html>')
     env = dict(
         os.environ, DEBS_DIR=str(tmp_path / 'debs'), PAGES_URL=f'file://{site}'
     )

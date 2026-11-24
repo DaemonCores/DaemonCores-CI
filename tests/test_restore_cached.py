@@ -3,6 +3,7 @@
 import os
 import shutil
 import subprocess
+import textwrap
 from pathlib import Path
 
 import pytest
@@ -26,16 +27,23 @@ def _deb(path: Path) -> None:
     """
     tree = path.parent / 'tree'
     (tree / 'DEBIAN').mkdir(parents=True)
-    (tree / 'DEBIAN' / 'control').write_text(
-        'Package: p\nVersion: 1\nArchitecture: all\nMaintainer: t <t@t>\n'
-        'Description: t\n',
+    _ = (tree / 'DEBIAN' / 'control').write_text(
+        textwrap.dedent(
+            """\
+            Package: p
+            Version: 1
+            Architecture: all
+            Maintainer: t <t@t>
+            Description: t
+            """
+        ),
         encoding='utf-8'
     )
-    (tree / 'f').write_bytes(os.urandom(60000))
-    subprocess.run(['dpkg-deb', '--build',
-                    str(tree), str(path)],
-                   check=True,
-                   capture_output=True)
+    _ = (tree / 'f').write_bytes(os.urandom(60000))
+    _ = subprocess.run(['dpkg-deb', '--build',
+                        str(tree), str(path)],
+                       check=True,
+                       capture_output=True)
     shutil.rmtree(tree)
 
 
@@ -51,8 +59,10 @@ def _restore(tmp: Path, name: str) -> subprocess.CompletedProcess[str]:
     """
     out = tmp / 'out'
     out.mkdir(exist_ok=True)
-    script = f'. "{LIB}"; DEBS_DIR="{out}"; ' \
-             f'restore_cached "file://{tmp / "site"}" \'["{name}"]\''
+    script = ' '.join([
+        f'. "{LIB}"; DEBS_DIR="{out}";',
+        f'restore_cached "file://{tmp / "site"}" \'["{name}"]\''
+    ])
     return subprocess.run(['bash', '-c', script],
                           capture_output=True,
                           text=True,
@@ -84,7 +94,7 @@ def test_corrupt_deb_is_a_cache_miss(tmp_path: Path) -> None:
     _deb(cache / 'p_1_all.deb')
     data = bytearray((cache / 'p_1_all.deb').read_bytes())
     data[len(data) // 2] ^= 0xFF
-    (cache / 'p_1_all.deb').write_bytes(bytes(data))
+    _ = (cache / 'p_1_all.deb').write_bytes(bytes(data))
     res = _restore(tmp_path, 'p_1_all.deb')
     assert res.returncode == 1
     assert 'does not unpack' in res.stderr

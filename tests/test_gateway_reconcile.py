@@ -5,6 +5,7 @@ inside the ``<!--gateway`` markers, holding a ``routers:`` mapping.
 """
 
 import subprocess
+import textwrap
 from pathlib import Path
 
 SCRIPT = (
@@ -66,8 +67,9 @@ def make_conf(tmp_path: Path, vmid: int, description: str) -> Path:
     """
     d = tmp_path / "conf"
     d.mkdir(exist_ok=True)
-    (d / f"{vmid}.conf"
-     ).write_text("description: " + description.replace("\n", "\\n") + "\n")
+    _ = (
+        d / f"{vmid}.conf"
+    ).write_text("description: " + description.replace("\n", "\\n") + "\n")
     return d
 
 
@@ -107,11 +109,21 @@ def test_skips_broken_router_but_keeps_valid_ones_exit4(tmp_path: Path) -> None:
     conf = make_conf(
         tmp_path,
         122,
-        "<!--gateway\n```yaml\nrouters:\n  broken:\n    rule: Host(`x`)\n"
-        "  good:\n    rule: Host(`y`)\n    service: http://10.0.0.122:80\n"
-        "```\ngateway-->",
+        textwrap.dedent(
+            """\
+            <!--gateway
+            ```yaml
+            routers:
+              broken:
+                rule: Host(`x`)
+              good:
+                rule: Host(`y`)
+                service: http://10.0.0.122:80
+            ```
+            gateway-->"""
+        ),
     )
-    make_conf(tmp_path, 120, BLOC_OK)
+    _ = make_conf(tmp_path, 120, BLOC_OK)
     out = tmp_path / "dynamic.yml"
     r = run(conf, out)
     assert r.returncode == 4, r.stderr
@@ -161,8 +173,12 @@ def test_variant_a_flat_bloc_is_refused(tmp_path: Path) -> None:
     conf = make_conf(
         tmp_path,
         120,
-        "<!--gateway\nforge: rule=Host(`x`); service=http://10.0.0.120:3000\n"
-        "gateway-->",
+        textwrap.dedent(
+            """\
+            <!--gateway
+            forge: rule=Host(`x`); service=http://10.0.0.120:3000
+            gateway-->"""
+        ),
     )
     out = tmp_path / "dynamic.yml"
     r = run(conf, out)
@@ -179,8 +195,15 @@ def test_routers_without_fence_is_refused(tmp_path: Path) -> None:
     conf = make_conf(
         tmp_path,
         140,
-        "<!--gateway\nrouters:\n  forge:\n    rule: Host(`x`)\n"
-        "    service: http://10.0.0.140:3000\ngateway-->",
+        textwrap.dedent(
+            """\
+            <!--gateway
+            routers:
+              forge:
+                rule: Host(`x`)
+                service: http://10.0.0.140:3000
+            gateway-->"""
+        ),
     )
     out = tmp_path / "dynamic.yml"
     r = run(conf, out)
@@ -197,8 +220,16 @@ def test_unparsable_yaml_refused_exit4(tmp_path: Path) -> None:
     conf = make_conf(
         tmp_path,
         120,
-        "<!--gateway\n```yaml\nrouters:\n  forge:\n    rule: {unclosed\n"
-        "```\ngateway-->",
+        textwrap.dedent(
+            """\
+            <!--gateway
+            ```yaml
+            routers:
+              forge:
+                rule: {unclosed
+            ```
+            gateway-->"""
+        ),
     )
     out = tmp_path / "dynamic.yml"
     r = run(conf, out)
@@ -215,10 +246,20 @@ def test_middlewares_list_rendered(tmp_path: Path) -> None:
     conf = make_conf(
         tmp_path,
         130,
-        "<!--gateway\n```yaml\nrouters:\n  mail:\n    rule: Host(`mail.test`)\n"
-        "    service: http://10.0.0.130:3500\n"
-        "    middlewares:\n      - rate-limit\n      - basic-auth\n"
-        "```\ngateway-->",
+        textwrap.dedent(
+            """\
+            <!--gateway
+            ```yaml
+            routers:
+              mail:
+                rule: Host(`mail.test`)
+                service: http://10.0.0.130:3500
+                middlewares:
+                  - rate-limit
+                  - basic-auth
+            ```
+            gateway-->"""
+        ),
     )
     out = tmp_path / "dynamic.yml"
     r = run(conf, out)

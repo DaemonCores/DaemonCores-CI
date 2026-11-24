@@ -35,9 +35,9 @@ def fixture_env(tmp_path: Path) -> tuple[Path, Path, Path]:
     """
     tree = tmp_path / "tree"
     (tree / "kernel" / "sched").mkdir(parents=True)
-    (tree / "kernel" / "sched" / "core.c").write_text("a\n")
+    _ = (tree / "kernel" / "sched" / "core.c").write_text("a\n")
     patch = tmp_path / "p.patch"
-    patch.write_text(PATCH)
+    _ = patch.write_text(PATCH)
     return tree, patch, tmp_path / "lock.json"
 
 
@@ -73,8 +73,8 @@ def test_changed_file_is_refused(
     """
     tree, patch, lock = env
     args = ["--tree", str(tree), "--lock", str(lock), str(patch)]
-    patch_guard.main([*args, "--update"])
-    (tree / "kernel" / "sched" / "core.c").write_text("changed\n")
+    _ = patch_guard.main([*args, "--update"])
+    _ = (tree / "kernel" / "sched" / "core.c").write_text("changed\n")
     assert patch_guard.main(args) == 1
     assert "kernel/sched/core.c: sha256 changed" in capsys.readouterr().out
 
@@ -88,7 +88,7 @@ def test_file_without_reference_is_refused(
         env: Tree, patch and lock path.
     """
     tree, patch, lock = env
-    lock.write_text("{}\n")
+    _ = lock.write_text("{}\n")
     args = ["--tree", str(tree), "--lock", str(lock), str(patch)]
     assert patch_guard.main(args) == 1
 
@@ -102,7 +102,7 @@ def test_update_merges_with_the_existing_lock(
         env: Tree, patch and lock path.
     """
     tree, patch, lock = env
-    lock.write_text('{"other.c": "abc"}\n')
+    _ = lock.write_text('{"other.c": "abc"}\n')
     args = ["--tree", str(tree), "--lock", str(lock), str(patch), "--update"]
     assert patch_guard.main(args) == 0
     keys = {as_str(key) for key in as_mapping(load_json(lock.read_text()))}

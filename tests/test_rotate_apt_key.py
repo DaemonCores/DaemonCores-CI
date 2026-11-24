@@ -33,7 +33,7 @@ def fixture_env(tmp_path: Path) -> dict[str, str]:
     bindir = tmp_path / 'bin'
     bindir.mkdir()
     gh = bindir / 'gh'
-    gh.write_text(GH_STUB)
+    _ = gh.write_text(GH_STUB)
     gh.chmod(gh.stat().st_mode | stat.S_IXUSR)
     return {
         **os.environ,

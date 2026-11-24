@@ -31,7 +31,7 @@ def _run(
     """
     pages = tmp_path / 'pages'
     (pages / 'debs-cache').mkdir(parents=True, exist_ok=True)
-    (pages / 'debs-cache' / 'hashes.json').write_text('{}')
+    _ = (pages / 'debs-cache' / 'hashes.json').write_text('{}')
     debs = tmp_path / f'debs-{run}'
     debs.mkdir()
     out = tmp_path / f'out-{run}'

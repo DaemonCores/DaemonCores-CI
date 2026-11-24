@@ -123,8 +123,8 @@ def main() -> int:
     parser = argparse.ArgumentParser(
         description=(__doc__ or "").splitlines()[0]
     )
-    parser.add_argument("--root", type=Path, default=Path.cwd())
-    parser.add_argument("paths", nargs="*")
+    _ = parser.add_argument("--root", type=Path, default=Path.cwd())
+    _ = parser.add_argument("paths", nargs="*")
     args = parser.parse_args(namespace=Options())
     found = [
         line for f in collect(args.root.resolve(), args.paths)

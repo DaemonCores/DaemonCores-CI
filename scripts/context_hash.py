@@ -97,8 +97,8 @@ def main() -> int:
         Exit status.
     """
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("containerfile", type=Path)
-    parser.add_argument("--root", type=Path, default=Path("."))
+    _ = parser.add_argument("containerfile", type=Path)
+    _ = parser.add_argument("--root", type=Path, default=Path("."))
     args = parser.parse_args()
     containerfile = cast(Path, args.containerfile)
     root = cast(Path, args.root)

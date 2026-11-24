@@ -72,9 +72,10 @@ def check_containerfiles(root: Path) -> list[str]:
                 found.append(f"{containerfile.name}: {source} missing")
             top = pattern.split("/")[0]
             found.extend(
-                f"{containerfile.name}: {source} excluded by "
-                f".dockerignore {ignored}" for ignored in patterns
-                if fnmatch.fnmatch(top, ignored)
+                "".join((
+                    f"{containerfile.name}: {source} excluded by ",
+                    f".dockerignore {ignored}",
+                )) for ignored in patterns if fnmatch.fnmatch(top, ignored)
             )
     return found
 
@@ -146,8 +147,10 @@ def main() -> int:
     parser = argparse.ArgumentParser(
         description=(__doc__ or "").splitlines()[0]
     )
-    parser.add_argument("--root", type=Path, default=Path.cwd())
-    parser.add_argument("--packages", default="workflows/bootc-debs-builder")
+    _ = parser.add_argument("--root", type=Path, default=Path.cwd())
+    _ = parser.add_argument(
+        "--packages", default="workflows/bootc-debs-builder"
+    )
     args = parser.parse_args(namespace=Options())
     root = args.root.resolve()
     found = check_containerfiles(root) + check_packages(root / args.packages)

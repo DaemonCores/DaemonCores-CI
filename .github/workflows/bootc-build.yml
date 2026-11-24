@@ -43,12 +43,13 @@ jobs:
   # are always included; one job per architecture builds all its images. There is one image per tag: automatic
   # updates are a run-time choice (the bootc-fetch-apply-updates.timer, masked
   # through a symlink in /etc), not an image variant.
-  # A Containerfile that carries `LABEL org.daemoncores.arm64-4k-image` ships two
-  # arm64 kernels because the page size is a compile-time choice and one image
-  # holds one kernel. The plain tag is the 16 KB kernel (kernel_suffix `-16k`)
-  # for recent hardware; a second, arm64-only image tagged `<tag>-4k`
-  # (kernel_suffix empty) serves the older devices (Raspberry Pi 3 and 4) whose
-  # cores have no 16 KB granule. Without the LABEL, arm64 builds the 4 KB kernel.
+  # The plain arm64 tag is always the 4 KB kernel (kernel_suffix empty): it
+  # runs on every arm64 board, and the ISO inherits it. A Containerfile that
+  # carries `LABEL org.daemoncores.arm64-16k-image` also ships an opt-in,
+  # arm64-only image tagged `<tag>-16k` (kernel_suffix `-16k`) because the
+  # page size is a compile-time choice and one image holds one kernel: the
+  # 16 KB kernel only boots on cores with a 16 KB granule (Raspberry Pi 5,
+  # RK3588), so it is never the default.
   # Containerfile.base is the shared base every other Containerfile builds on: it is
   # not an image of its own (no matrix entry, never pushed) but it takes part in the
   # global hash. Each build job builds it once, then each image on the cached
@@ -63,7 +64,7 @@ jobs:
   # is built for those architectures only, in the same per-arch job as the
   # others; its manifest list covers the same architectures.
   # A second output, manifest_matrix, lists the unique tags with the `arches`
-  # the manifest list covers (both for a regular tag, arm64 only for a `-4k`
+  # the manifest list covers (both for a regular tag, arm64 only for a `-16k`
   # tag).
   discover:
     name: Discover Containerfiles
@@ -102,7 +103,7 @@ jobs:
             # to the matrix as the primary's twin row (same file, one thin
             # derived layer, no second kernel build), so the per-arch tags are
             # `<primary>_<arch>-<suffix>` and the manifest list is
-            # `<primary>-<suffix>`). This is the tag-mirror of the -4k
+            # `<primary>-<suffix>`). This is the tag-mirror of the -16k
             # mechanism below: discover only re-targets the twin file to its
             # primary.
             twin_ts=""
@@ -116,11 +117,11 @@ jobs:
             else
               tag="${name#Containerfile.}"
             fi
-            # A Containerfile with the 4 KB image LABEL builds the 16 KB kernel on the
-            # plain arm64 tag; otherwise arm64 stays on the 4 KB kernel.
-            has_4k=false
-            if grep -qE '^[[:space:]]*LABEL[[:space:]]+org\.daemoncores\.arm64-4k-image' "$name"; then
-              has_4k=true
+            # A Containerfile with the 16 KB image LABEL also ships an opt-in
+            # arm64-only `-16k` image; the plain arm64 tag stays on the 4 KB kernel.
+            has_16k=false
+            if grep -qE '^[[:space:]]*LABEL[[:space:]]+org\.daemoncores\.arm64-16k-image' "$name"; then
+              has_16k=true
             fi
             if [[ -n "${twin_ts}" ]]; then
               # Twin of the primary: ONE thin per-arch image entry, no manifest
@@ -151,13 +152,9 @@ jobs:
                 continue
               fi
               built_arches=$(printf '%s' "$built_arches" | jq -c --arg a "$arch" '. += [$a]')
-              suffix=""
-              if [[ "$arch" == "arm64" && "$has_4k" == "true" ]]; then
-                suffix="-16k"
-              fi
               matrix=$(printf '%s' "$matrix" | jq -c \
                 --arg file "$name" --arg tag "$tag" --arg arch "$arch" \
-                --arg ks "$suffix" \
+                --arg ks "" \
                 '. += [{file: $file, tag: $tag, arch: $arch, kernel_suffix: $ks, twin_suffix: ""}]')
             done
             if [[ "$built_arches" == '[]' ]]; then
@@ -167,21 +164,21 @@ jobs:
             manifest_matrix=$(printf '%s' "$manifest_matrix" | jq -c \
               --arg tag "$tag" --argjson arches "$built_arches" \
               '. += [{tag: $tag, arches: $arches}]')
-            # The 4 KB arm64 kernel image for the older devices, when the
-            # Containerfile asks for it.
-            if [[ "$has_4k" == "true" ]]; then
+            # The opt-in 16 KB arm64 kernel image, when the Containerfile asks
+            # for it.
+            if [[ "$has_16k" == "true" ]]; then
               matrix=$(printf '%s' "$matrix" | jq -c \
-                --arg file "$name" --arg tag "${tag}-4k" \
-                '. += [{file: $file, tag: $tag, arch: "arm64", kernel_suffix: "", twin_suffix: ""}]')
+                --arg file "$name" --arg tag "${tag}-16k" \
+                '. += [{file: $file, tag: $tag, arch: "arm64", kernel_suffix: "-16k", twin_suffix: ""}]')
               manifest_matrix=$(printf '%s' "$manifest_matrix" | jq -c \
-                --arg tag "${tag}-4k" \
+                --arg tag "${tag}-16k" \
                 '. += [{tag: $tag, arches: ["arm64"]}]')
             fi
             global_inputs+="${name} $(sha256sum "$name" | cut -d' ' -f1)"$'\n'
           done
           global_hash=$(printf '%s' "$global_inputs" | sha256sum | cut -d' ' -f1)
           # Group the entries by architecture, keeping the order of the matrix
-          # (Containerfiles by name, the -4k image right after its parent). The
+          # (Containerfiles by name, the -16k image right after its parent). The
           # runner of an architecture is the native one: no QEMU cross-build.
           arch_matrix=$(printf '%s' "$matrix" | jq -c '
             . as $m
@@ -353,7 +350,7 @@ jobs:
 
   # Promote per-arch images into multi-arch manifest lists. Runs once every
   # build-test-push job (one per architecture) is green.
-  # For each variant tag V (a `-4k` tag covers arm64 only), the manifest job
+  # For each variant tag V (a `-16k` tag covers arm64 only), the manifest job
   # creates :V -> :V_amd64 + :V_arm64, so `podman pull :latest` resolves to the
   # right arch on each host. The canonical amd64 image was also pushed on :latest
   # by build-test-push; this manifest job overwrites that single-arch tag with
@@ -393,7 +390,7 @@ jobs:
           set -euo pipefail
           IMAGE="${IMAGE,,}"
           # The architectures this tag was built for: both for a regular tag,
-          # arm64 only for a `-4k` tag (a 4 KB arm64 kernel image has no amd64 twin).
+          # arm64 only for a `-16k` tag (a 16 KB arm64 kernel image has no amd64 twin).
           read -r -a arches <<<"${ARCHES}"
 
           # Create, annotate and push the manifest list over the per-arch tags
@@ -411,7 +408,7 @@ jobs:
           done
           docker manifest create "${list}" "${refs[@]}"
           for i in "${!refs[@]}"; do
-            # refs[i] parallels arches[i]; a `-4k` tag (arm64 only) has no
+            # refs[i] parallels arches[i]; a `-16k` tag (arm64 only) has no
             # index 1 — indexing by arm64's actual position keeps the
             # annotation unbound-variable-safe under set -u.
             if [ "${arches[$i]}" = "arm64" ]; then

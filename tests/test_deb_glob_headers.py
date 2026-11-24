@@ -9,6 +9,7 @@ now carries several space-separated patterns.
 """
 
 import subprocess
+import textwrap
 from pathlib import Path
 
 from typed_docs import as_list, as_str, as_str_mapping, load_json
@@ -39,17 +40,24 @@ def test_multi_glob_records_every_pattern(tmp_path: Path) -> None:
     ):
         pkg = debs / '_' / name / 'DEBIAN'
         pkg.mkdir(parents=True)
-        (pkg / 'control').write_text(
-            f'Package: {package}\nVersion: 7.2.15-1\nArchitecture: amd64\n'
-            'Maintainer: ci <ci@example.invalid>\nDescription: test\n'
+        _ = (pkg / 'control').write_text(
+            textwrap.dedent(
+                f"""\
+                Package: {package}
+                Version: 7.2.15-1
+                Architecture: amd64
+                Maintainer: ci <ci@example.invalid>
+                Description: test
+                """
+            )
         )
-        subprocess.run([
+        _ = subprocess.run([
             'dpkg-deb', '--build',
             str(pkg.parent),
             str(debs / name)
         ],
-                       check=True,
-                       capture_output=True)
+                           check=True,
+                           capture_output=True)
     out = tmp_path / 'out'
     out.touch()
     env = {
@@ -64,10 +72,10 @@ def test_multi_glob_records_every_pattern(tmp_path: Path) -> None:
         'DEBS_DIR': str(debs),
         'SKIP_BUILD': 'false',
     }
-    subprocess.run(['bash', str(SCRIPT)],
-                   env=env,
-                   capture_output=True,
-                   text=True)
+    _ = subprocess.run(['bash', str(SCRIPT)],
+                       env=env,
+                       capture_output=True,
+                       text=True)
     meta = as_str_mapping(
         load_json(
             (debs / '.meta' / 'linux-image-vm-x64v3-amd64.json').read_text()
@@ -89,17 +97,24 @@ def test_single_glob_still_works(tmp_path: Path) -> None:
     debs.mkdir()
     pkg = debs / '_a' / 'DEBIAN'
     pkg.mkdir(parents=True)
-    (pkg / 'control').write_text(
-        'Package: onlyimage\nVersion: 1\nArchitecture: amd64\n'
-        'Maintainer: ci <ci@example.invalid>\nDescription: test\n'
+    _ = (pkg / 'control').write_text(
+        textwrap.dedent(
+            """\
+            Package: onlyimage
+            Version: 1
+            Architecture: amd64
+            Maintainer: ci <ci@example.invalid>
+            Description: test
+            """
+        )
     )
-    subprocess.run([
+    _ = subprocess.run([
         'dpkg-deb', '--build',
         str(pkg.parent),
         str(debs / 'onlyimage_1_amd64.deb')
     ],
-                   check=True,
-                   capture_output=True)
+                       check=True,
+                       capture_output=True)
     (debs / 'unrelated_1_amd64.deb').touch()
     out = tmp_path / 'out'
     out.touch()
@@ -115,10 +130,10 @@ def test_single_glob_still_works(tmp_path: Path) -> None:
         'DEBS_DIR': str(debs),
         'SKIP_BUILD': 'false',
     }
-    subprocess.run(['bash', str(SCRIPT)],
-                   env=env,
-                   capture_output=True,
-                   text=True)
+    _ = subprocess.run(['bash', str(SCRIPT)],
+                       env=env,
+                       capture_output=True,
+                       text=True)
     meta = as_str_mapping(
         load_json((debs / '.meta' / 'onlyimage-amd64.json').read_text())
     )

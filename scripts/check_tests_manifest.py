@@ -76,8 +76,8 @@ def main() -> int:
     parser = argparse.ArgumentParser(
         description=(__doc__ or "").splitlines()[0]
     )
-    parser.add_argument("--root", type=Path, default=Path.cwd())
-    parser.add_argument("--manifest", default="workflows/tests.yml")
+    _ = parser.add_argument("--root", type=Path, default=Path.cwd())
+    _ = parser.add_argument("--manifest", default="workflows/tests.yml")
     args = parser.parse_args(namespace=Options())
     path = args.root.resolve() / args.manifest
     if not path.is_file():

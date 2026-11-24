@@ -20,7 +20,9 @@ def _plan(tmp_path: Path, packages: list[dict[str, object]]) -> list[str]:
         The package names, in the printed order.
     """
     manifest = tmp_path / 'm.json'
-    manifest.write_text(json.dumps({'packages': packages}), encoding='utf-8')
+    _ = manifest.write_text(
+        json.dumps({'packages': packages}), encoding='utf-8'
+    )
     done = subprocess.run([sys.executable,
                            str(SCRIPT),
                            str(manifest)],

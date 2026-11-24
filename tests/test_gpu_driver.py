@@ -150,8 +150,10 @@ class TestWiring:
         """The pipeline input forwards per arch and defaults to false."""
         text = (WORKFLOWS / 'full-pipeline.yml').read_text()
         assert text.count(
-            "gpu_driver: ${{ inputs.gpu_driver == 'true' && "
-            "'yes' || 'no' }}"
+            " ".join([
+                "gpu_driver: ${{ inputs.gpu_driver == 'true' &&",
+                "'yes' || 'no' }}"
+            ])
         ) == 2
         assert "gpu_driver:\n        type: string\n        default: 'false'" \
             in text

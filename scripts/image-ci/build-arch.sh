@@ -20,7 +20,7 @@
 # Input (environment):
 #   ARCH               target architecture (amd64, arm64)
 #   ENTRIES            JSON array of {file, tag, kernel_suffix, twin_suffix}
-#                      in build order (Containerfiles by name, -4k right
+#                      in build order (Containerfiles by name, -16k right
 #                      after its parent)
 #   GLOBAL_HASH        hash over every Containerfile (discover job)
 #   GITHUB_REPOSITORY  owner/repo, derives the image name and the debs cache
@@ -193,7 +193,7 @@ init_state() {
       continue
     fi
     # --no-cache applies to the first image of a Containerfile only: its
-    # -4k sibling and the twin share the layers before the kernel.
+    # -16k sibling and the twin share the layers before the kernel.
     nocache=no
     if [[ -z "${seen[${file}]:-}" ]]; then
       nocache=yes
@@ -370,9 +370,8 @@ boot_stack() {
     FIRMWARE_PKGS="intel-microcode amd64-microcode firmware-linux-free firmware-linux firmware-misc-nonfree"
     APT_HOLD_PKG="grub-efi-amd64-signed"
   fi
-  # arm64 ships two kernels: the 16 KB one on the plain tag for recent
-  # hardware, the 4 KB one (-4k image) for the older devices. ARM_DEVICES
-  # lists the device module packages built against that kernel.
+  # arm64 ships two kernels: the 4 KB one on the plain tag (it runs on every
+  # arm64 board), the 16 KB one (opt-in -16k image) for recent hardware.
   # ARM_DEVICES lists the device module packages built against that kernel:
   # the 4 KB one for the pre-RK3588 generations (Pi 3/4 — the rpi3 module
   # package carries the Pi Zero 2 W/BCM2710A1 —, RK3399, the sun50i H616/

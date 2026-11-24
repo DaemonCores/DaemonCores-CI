@@ -156,7 +156,7 @@ def run_verdicts(jobs: Iterable[Job], url: str) -> dict[str, Evidence | None]:
             if verdicts.get(stage) is None:
                 verdicts[stage] = Evidence(url, job.name, failed_step(job))
         else:
-            verdicts.setdefault(stage, None)
+            _ = verdicts.setdefault(stage, None)
     return verdicts
 
 
@@ -174,7 +174,7 @@ def owed(runs: Iterable[Run]) -> dict[str, Evidence]:
     settled: dict[str, Evidence | None] = {}
     for url, jobs in runs:
         for stage, verdict in run_verdicts(jobs, url).items():
-            settled.setdefault(stage, verdict)
+            _ = settled.setdefault(stage, verdict)
         if len(settled) == len(STAGES):
             break
     return {s: e for s, e in settled.items() if e is not None}
@@ -225,15 +225,18 @@ def history(repo: str, workflow: str, branch: str, limit: int) -> Iterator[Run]:
         Run: One ``(url, jobs)`` tuple per run.
     """
     runs = gh_json(
-        f'repos/{repo}/actions/workflows/{workflow}/runs'
-        f'?branch={branch}&status=completed&per_page={limit}',
-        '.workflow_runs[] | {id, html_url}'
+        ''.join((
+            f'repos/{repo}/actions/workflows/{workflow}/runs',
+            f'?branch={branch}&status=completed&per_page={limit}',
+        )), '.workflow_runs[] | {id, html_url}'
     )
     for run in runs[:limit]:
         raw = gh_json(
             f'repos/{repo}/actions/runs/{run["id"]}/jobs?per_page=100',
-            '.jobs[] | {name, conclusion: (.conclusion // ""), steps: '
-            '[.steps[]? | {name, conclusion: (.conclusion // "")}]}'
+            ''.join((
+                '.jobs[] | {name, conclusion: (.conclusion // ""), steps: ',
+                '[.steps[]? | {name, conclusion: (.conclusion // "")}]}',
+            ))
         )
         jobs = [
             Job(
@@ -258,15 +261,17 @@ def main(argv: list[str] | None = None, fetch: Fetch = history) -> int:
         Process exit code: 0, or 1 when the history could not be read.
     """
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--repo', required=True)
-    parser.add_argument('--workflow', required=True)
-    parser.add_argument('--branch', required=True)
-    parser.add_argument('--limit', type=int, default=30)
-    parser.add_argument(
+    _ = parser.add_argument('--repo', required=True)
+    _ = parser.add_argument('--workflow', required=True)
+    _ = parser.add_argument('--branch', required=True)
+    _ = parser.add_argument('--limit', type=int, default=30)
+    _ = parser.add_argument(
         '--all-if-unknown',
         action='store_true',
-        help='print every stage when the history cannot be read, instead of '
-        'failing'
+        help=' '.join((
+            'print every stage when the history cannot be read,',
+            'instead of failing',
+        ))
     )
     args = parser.parse_args(argv)
     repo, workflow = cast(str, args.repo), cast(str, args.workflow)
@@ -282,8 +287,10 @@ def main(argv: list[str] | None = None, fetch: Fetch = history) -> int:
         # Failing instead took the whole run down (run 45160784394: the plan
         # job died on a GitHub stream error and every stage was skipped).
         print(
-            f'{err}\n'
-            f'history unreadable: forcing every stage: {", ".join(STAGES)}',
+            ''.join((
+                f'{err}\nhistory unreadable: forcing every stage: ',
+                f'{", ".join(STAGES)}',
+            )),
             file=sys.stderr
         )
         for stage in STAGES:

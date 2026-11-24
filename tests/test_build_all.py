@@ -77,16 +77,18 @@ def _sandbox(tmp_path: Path) -> Path:
     """
     (tmp_path / 'build-deb').mkdir()
     for name in ('build-all.sh', 'plan.py'):
-        shutil.copy(ROOT / 'build-deb' / name, tmp_path / 'build-deb' / name)
+        _ = shutil.copy(
+            ROOT / 'build-deb' / name, tmp_path / 'build-deb' / name
+        )
     for rel, body in (('pkg-def/pkg-def.sh',
                        PKG_DEF), ('upstream-track/track.sh', TRACK),
                       ('build-deb/build-deb.sh', BUILD_DEB)):
         path = tmp_path / rel
         path.parent.mkdir(exist_ok=True)
-        path.write_text(body, encoding='utf-8')
-    (tmp_path / 'm.yml').write_text(MANIFEST, encoding='utf-8')
+        _ = path.write_text(body, encoding='utf-8')
+    _ = (tmp_path / 'm.yml').write_text(MANIFEST, encoding='utf-8')
     (tmp_path / 'debs').mkdir()
-    (tmp_path / 'debs' / 'lib_1.deb').write_bytes(b'lib')
+    _ = (tmp_path / 'debs' / 'lib_1.deb').write_bytes(b'lib')
     return tmp_path
 
 
@@ -158,7 +160,7 @@ def test_dependency_debs_are_handed_to_the_build(tmp_path: Path) -> None:
         tmp_path: Scratch directory.
     """
     root = _sandbox(tmp_path)
-    _run(root)
+    _ = _run(root)
     log = (root / 'log').read_text(encoding='utf-8')
     assert f'app deps={root}/debs/lib_1.deb' in log
     assert 'lib deps=\n' in log
@@ -185,7 +187,7 @@ def test_cleanup_keeps_what_the_build_image_ships(tmp_path: Path) -> None:
     """
     root = _sandbox(tmp_path)
     (root / 'build' / 'rust').mkdir(parents=True)
-    (root / 'build' / 'rust' / 'env').write_text('', encoding='utf-8')
+    _ = (root / 'build' / 'rust' / 'env').write_text('', encoding='utf-8')
     done = _run(root)
     assert 'result app: built' in done.stdout, done.stderr
     assert (root / 'build' / 'rust' / 'env').exists()

@@ -153,7 +153,7 @@ def write_stub(path: Path, body: str) -> None:
         body: Script text.
     """
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(body, encoding='utf-8')
+    _ = path.write_text(body, encoding='utf-8')
     path.chmod(path.stat().st_mode | stat.S_IXUSR)
 
 
@@ -169,7 +169,7 @@ class Sandbox:
         self.root = tmp / 'repo'
         self.root.mkdir()
         self.log = tmp / 'stub.log'
-        self.log.write_text('', encoding='utf-8')
+        _ = self.log.write_text('', encoding='utf-8')
         self.summary = tmp / 'summary.md'
         self.runner_temp = tmp / 'runner'
         self.published = tmp / 'published'
@@ -181,17 +181,17 @@ class Sandbox:
             write_stub(bindir / name, body)
         self.image_test = tmp / 'image-test.sh'
         write_stub(self.image_test, IMAGE_TEST)
-        (self.root / 'Containerfile.base').write_text(BASE_CF)
-        (self.root / 'Containerfile').write_text(MAIN_CF)
-        (self.root / 'Containerfile.iso').write_text(ISO_CF)
+        _ = (self.root / 'Containerfile.base').write_text(BASE_CF)
+        _ = (self.root / 'Containerfile').write_text(MAIN_CF)
+        _ = (self.root / 'Containerfile.iso').write_text(ISO_CF)
         (self.root / 'workflows').mkdir()
-        (self.root / 'workflows' / 'tests.yml').write_text('tests: []\n')
+        _ = (self.root / 'workflows' / 'tests.yml').write_text('tests: []\n')
         git = ['git', '-c', 'user.email=t@t', '-c', 'user.name=t']
-        subprocess.run(['git', 'init', '-q'], cwd=self.root, check=True)
-        subprocess.run(['git', 'add', '-A'], cwd=self.root, check=True)
-        subprocess.run([*git, 'commit', '-q', '-m', 'init'],
-                       cwd=self.root,
-                       check=True)
+        _ = subprocess.run(['git', 'init', '-q'], cwd=self.root, check=True)
+        _ = subprocess.run(['git', 'add', '-A'], cwd=self.root, check=True)
+        _ = subprocess.run([*git, 'commit', '-q', '-m', 'init'],
+                           cwd=self.root,
+                           check=True)
         self.env = dict(
             os.environ,
             PATH=f'{bindir}:{os.environ["PATH"]}',
@@ -207,7 +207,7 @@ class Sandbox:
             IMAGE_TEST=str(self.image_test),
             COSIGN_PUBLIC_KEY='pub'
         )
-        self.env.pop('FORCE_NO_CACHE', None)
+        _ = self.env.pop('FORCE_NO_CACHE', None)
 
     def run(
         self,
@@ -289,7 +289,7 @@ class Sandbox:
             label: Content hash label.
         """
         key = f'{IMAGE}:{tag}_{arch}'.replace('/', '_').replace(':', '_')
-        (self.published / key).write_text(label + '\n')
+        _ = (self.published / key).write_text(label + '\n')
 
 
 def entry(
@@ -384,11 +384,11 @@ def test_hash_is_identical_to_the_former_workflow_step(sb: Sandbox) -> None:
         BOOTC_GPG_SHA256='key',
         GITHUB_OUTPUT=str(out)
     )
-    subprocess.run(['bash', '-c', _old_chash_script()],
-                   cwd=sb.root,
-                   env=env,
-                   check=True,
-                   capture_output=True)
+    _ = subprocess.run(['bash', '-c', _old_chash_script()],
+                       cwd=sb.root,
+                       env=env,
+                       check=True,
+                       capture_output=True)
     old = dict(
         ln.split('=', 1) for ln in out.read_text().splitlines() if '=' in ln
     )
@@ -447,7 +447,7 @@ def test_hash_ignores_a_base_rebuild_with_identical_content(
     Args:
         sb: Sandbox running the harness.
     """
-    (sb.root / 'Containerfile').write_text('FROM scratch\n')
+    _ = (sb.root / 'Containerfile').write_text('FROM scratch\n')
 
     env: dict[str, str] = dict(sb.env, SUDO='sudo', ARCH='amd64')
     first = _image_hash(sb, env)
@@ -469,9 +469,9 @@ def test_hash_follows_the_files_the_containerfile_copies(sb: Sandbox) -> None:
         sb: Sandbox running the harness.
     """
     (sb.root / 'src').mkdir()
-    (sb.root / 'src' / 'a.conf').write_text('one\n')
-    (sb.root / 'other.txt').write_text('x\n')
-    (sb.root / 'Containerfile').write_text('FROM scratch\nCOPY ./src /\n')
+    _ = (sb.root / 'src' / 'a.conf').write_text('one\n')
+    _ = (sb.root / 'other.txt').write_text('x\n')
+    _ = (sb.root / 'Containerfile').write_text('FROM scratch\nCOPY ./src /\n')
     env = dict(
         sb.env,
         SUDO='sudo',
@@ -482,9 +482,9 @@ def test_hash_follows_the_files_the_containerfile_copies(sb: Sandbox) -> None:
     )
 
     before = _image_hash(sb, env)
-    (sb.root / 'other.txt').write_text('y\n')
+    _ = (sb.root / 'other.txt').write_text('y\n')
     assert _image_hash(sb, env) == before
-    (sb.root / 'src' / 'a.conf').write_text('two\n')
+    _ = (sb.root / 'src' / 'a.conf').write_text('two\n')
     assert _image_hash(sb, env) != before
 
 
@@ -527,7 +527,7 @@ def test_hash_phase_skips_unchanged_images(sb: Sandbox) -> None:
     Args:
         sb: Sandbox running the harness.
     """
-    sb.run(LATEST, 'hash')
+    _ = sb.run(LATEST, 'hash')
     latest, twin = sb.row('latest')[6], sb.row('latest-nosign')[6]
     sb.publish('latest', 'amd64', latest)
     sb.publish('latest-nosign', 'amd64', 'stale')
@@ -606,7 +606,7 @@ def test_parent_of_a_derived_image_is_read_from_its_from_line(
     Args:
         sb: Sandbox running the harness.
     """
-    sb.run(LATEST, 'hash')
+    _ = sb.run(LATEST, 'hash')
     assert sb.row('iso')[5] == 'latest'
     assert sb.row('latest')[5] == '-'
 
@@ -637,11 +637,11 @@ def test_build_order_and_no_cache_flags(sb: Sandbox) -> None:
         sb: Sandbox running the harness.
     """
     entries = [
-        entry('latest', suffix='-16k', twin='-16k-nosign'),
-        entry('latest-4k'),
+        entry('latest', twin='-nosign'),
+        entry('latest-16k', suffix='-16k'),
         entry('other', 'Containerfile.other'),
     ]
-    (sb.root / 'Containerfile.other').write_text(MAIN_CF)
+    _ = (sb.root / 'Containerfile.other').write_text(MAIN_CF)
     done = sb.run(entries, 'hash', 'build', arch='arm64', FORCE_NO_CACHE='true')
     assert done.returncode == 0, done.stderr
     builds = sb.calls('podman build')
@@ -650,14 +650,14 @@ def test_build_order_and_no_cache_flags(sb: Sandbox) -> None:
     assert tags[0] == 'localhost/debian-bootc-base'
     assert [t for t in tags if t.endswith('_arm64')] == [
         f'{IMAGE}:latest_arm64', f'{IMAGE}:latest-nosign_arm64',
-        f'{IMAGE}:latest-4k_arm64', f'{IMAGE}:other_arm64'
+        f'{IMAGE}:latest-16k_arm64', f'{IMAGE}:other_arm64'
     ]
     nocache = [('--no-cache' in b) for b in builds]
-    # base, latest, (twin: no), (4k: no), other
+    # base, latest, (twin: no), (16k: no), other
     assert nocache == [True, True, False, False, True]
-    assert 'KERNEL_SUFFIX=-16k-nosign' in builds[2]
-    assert 'ARM_DEVICES=rpi5 rk3588' in builds[1]
-    assert 'ARM_DEVICES=rpi3 rpi4 rk3399 h616 imx8m mt8183 rk3566' in builds[3]
+    assert 'KERNEL_SUFFIX=-nosign' in builds[2]
+    assert 'ARM_DEVICES=rpi3 rpi4 rk3399 h616 imx8m mt8183 rk3566' in builds[1]
+    assert 'ARM_DEVICES=rpi5 rk3588' in builds[3]
     assert '--tag ' + f'{IMAGE}:latest ' not in ' '.join(builds)
 
 
@@ -670,16 +670,16 @@ def test_cache_to_only_on_main_and_canonical_tags_only_on_amd64(
     Args:
         sb: Sandbox running the harness.
     """
-    sb.run([entry('latest')], 'hash', 'build')
+    _ = sb.run([entry('latest')], 'hash', 'build')
     assert not [b for b in sb.calls('podman build') if '--cache-to' in b]
     amd = sb.calls('podman build')[1]
     assert f'--tag {IMAGE}:latest ' in amd + ' '
-    sb.log.write_text('')
-    sb.run([entry('latest')],
-           'hash',
-           'build',
-           arch='arm64',
-           GITHUB_REF='refs/heads/main')
+    _ = sb.log.write_text('')
+    _ = sb.run([entry('latest')],
+               'hash',
+               'build',
+               arch='arm64',
+               GITHUB_REF='refs/heads/main')
     builds = sb.calls('podman build')
     assert all('--cache-to' in b for b in builds)
     assert f'--tag {IMAGE}:latest ' not in builds[1] + ' '
@@ -811,7 +811,7 @@ def test_a_derived_vendor_image_is_built_and_boot_tested_in_the_same_job(
     Args:
         sb: Sandbox running the harness.
     """
-    (sb.root / 'Containerfile.vendor').write_text(ISO_CF)
+    _ = (sb.root / 'Containerfile.vendor').write_text(ISO_CF)
     done = sb.run([entry('latest'), entry('vendor', 'Containerfile.vendor')])
     assert done.returncode == 0, done.stderr
     log = sb.log.read_text()
@@ -853,10 +853,10 @@ def test_a_skipped_parent_lets_the_derived_image_build_on_the_published_one(
     Args:
         sb: Sandbox running the harness.
     """
-    sb.run(LATEST, 'hash')
+    _ = sb.run(LATEST, 'hash')
     sb.publish('latest', 'amd64', sb.row('latest')[6])
     sb.publish('latest-nosign', 'amd64', sb.row('latest-nosign')[6])
-    sb.log.write_text('')
+    _ = sb.log.write_text('')
     done = sb.run(LATEST)
     assert done.returncode == 0, done.stderr
     states = sb.states()
@@ -875,16 +875,16 @@ def test_an_unchanged_derived_image_follows_a_rebuilt_parent(
     Args:
         sb: Sandbox running the harness.
     """
-    sb.run(LATEST, 'hash')
+    _ = sb.run(LATEST, 'hash')
     sb.publish('iso', 'amd64', sb.row('iso')[6])
     done = sb.run(LATEST)
     assert done.returncode == 0, done.stderr
     assert sb.states()['iso'] == 'ok'
     assert [b for b in sb.calls('podman build') if 'Containerfile.iso' in b]
-    sb.log.write_text('')
+    _ = sb.log.write_text('')
     sb.publish('latest', 'amd64', sb.row('latest')[6])
     sb.publish('latest-nosign', 'amd64', sb.row('latest-nosign')[6])
-    sb.run(LATEST)
+    _ = sb.run(LATEST)
     assert sb.states()['iso'] == 'skipped-unchanged'
     assert not sb.calls('podman build')
 
@@ -925,7 +925,7 @@ def test_boot_tests_use_one_prepare_and_one_child_process_per_image(
         sb: Sandbox running the harness.
     """
     entries = [entry('latest', twin='-nosign'), entry('extra')]
-    (sb.root / 'Containerfile.extra').write_text(MAIN_CF)
+    _ = (sb.root / 'Containerfile.extra').write_text(MAIN_CF)
     entries[1]['file'] = 'Containerfile.extra'
     done = sb.run(entries)
     assert done.returncode == 0, done.stderr
@@ -1130,9 +1130,9 @@ def test_unchanged_images_are_reported_not_failed(sb: Sandbox) -> None:
         sb: Sandbox running the harness.
     """
     entries = [entry('latest')]
-    sb.run(entries, 'hash')
+    _ = sb.run(entries, 'hash')
     sb.publish('latest', 'amd64', sb.row('latest')[6])
-    sb.log.write_text('')
+    _ = sb.log.write_text('')
     done = sb.run(entries)
     assert done.returncode == 0, done.stderr
     assert not sb.calls('podman')
@@ -1192,7 +1192,7 @@ def test_the_thin_twin_is_derived_with_the_owner_tags(sb: Sandbox) -> None:
     Args:
         sb: Sandbox running the harness.
     """
-    (sb.root / 'Containerfile.thpalways').write_text(ISO_CF)
+    _ = (sb.root / 'Containerfile.thpalways').write_text(ISO_CF)
     done = sb.run([
         entry('latest'),
         entry('latest', 'Containerfile.thpalways', twin='thpalways')

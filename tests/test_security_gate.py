@@ -10,6 +10,7 @@ import http.server
 import json
 import os
 import subprocess
+import textwrap
 import threading
 import time
 from collections.abc import Callable, Iterator
@@ -148,7 +149,7 @@ def test_osv_open_advisory_holds_the_election(
         election: Election log directory.
     """
     fixture = tmp_path / 'osv.json'
-    fixture.write_text(
+    _ = fixture.write_text(
         json.dumps({
             'vulns': [{
                 'id': 'GHSA-xxxx-yyyy-zzzz'
@@ -173,7 +174,7 @@ def test_osv_empty_response_passes(tmp_path: Path, election: Path) -> None:
         election: Election log directory.
     """
     fixture = tmp_path / 'osv.json'
-    fixture.write_text('{}')
+    _ = fixture.write_text('{}')
     cmd = """gate_osv '{"commit": "1"}'."""
     p = _gate(cmd, election, GATE_OSV_FIXTURE=str(fixture), PKG='r')
     assert p.returncode == 0
@@ -206,16 +207,17 @@ def test_ghsa_published_advisory_holds_the_source(
     api = tmp_path / 'api'
     adv = api / 'repos' / 'acme' / 'tool'
     adv.mkdir(parents=True)
-    (adv / 'security-advisories').write_text(
+    _ = (adv / 'security-advisories').write_text(
         json.dumps([{
             'ghsa_id': 'GHSA-aaaa-bbbb-cccc',
             'state': 'published'
         }])
     )
     p = _gate(
-        "fetch_api() { curl -fsSL "
-        "'file://" + str(adv) + "/security-advisories'; }; "
-        "gate_flux '' acme/tool",
+        ''.join([
+            f"fetch_api() {{ curl -fsSL 'file://{adv}",
+            "/security-advisories'; }; ", "gate_flux '' acme/tool"
+        ]),
         election,
         PKG='r'
     )
@@ -239,7 +241,7 @@ def test_ghsa_hold_is_version_aware(tmp_path: Path, election: Path) -> None:
     api = tmp_path / 'api'
     adv = api / 'repos' / 'acme' / 'tool'
     adv.mkdir(parents=True)
-    (adv / 'security-advisories').write_text(
+    _ = (adv / 'security-advisories').write_text(
         json.dumps([{
             'ghsa_id':
             'GHSA-aaaa-bbbb-cccc',
@@ -287,7 +289,7 @@ def _kev_fixture(tmp_path: Path, linux: bool) -> Path:
             }
         )
     fixture = tmp_path / 'kev.json'
-    fixture.write_text(json.dumps({'vulnerabilities': vulns}))
+    _ = fixture.write_text(json.dumps({'vulnerabilities': vulns}))
     return fixture
 
 
@@ -321,9 +323,11 @@ def test_no_bypass_when_the_feeds_stay_quiet(
         election: Election log directory.
     """
     feed = tmp_path / 'feed.atom'
-    feed.write_text(
-        '<entry><title>CVE-2026-1111: net: x</title>'
-        '<content>severity rating: HIGH</content></entry>'
+    _ = feed.write_text(
+        ''.join([
+            '<entry><title>CVE-2026-1111: net: x</title>',
+            '<content>severity rating: HIGH</content></entry>'
+        ])
     )
     p = _gate(
         'gate_bypass; echo rc:$?',
@@ -345,9 +349,11 @@ def test_cve_announce_critical_cve_bypasses(
         election: Election log directory.
     """
     feed = tmp_path / 'feed.atom'
-    feed.write_text(
-        '<entry><title>CVE-2026-1234: mm: a bad one</title>'
-        '<content>p: kernel CRITICAL severity</content></entry>'
+    _ = feed.write_text(
+        ''.join([
+            '<entry><title>CVE-2026-1234: mm: a bad one</title>',
+            '<content>p: kernel CRITICAL severity</content></entry>'
+        ])
     )
     p = _gate(
         'gate_bypass; echo rc:$?',
@@ -367,10 +373,16 @@ def test_record_materializes_the_selection_log(election: Path) -> None:
     Args:
         election: Election log directory.
     """
-    snippet = "gate_record KERNEL_VER kernel 7.2.15 https://x/linux.tar.xz " \
-              "'aabbcc' '2026-11-01' pass pass\n" \
-              "gate_record bore sibling 0000abcd https://lore/x/raw " \
-              "'ddee' '' bypass pass"
+    snippet = '\n'.join([
+        ' '.join([
+            "gate_record KERNEL_VER kernel 7.2.15",
+            "https://x/linux.tar.xz 'aabbcc' '2026-11-01' pass pass"
+        ]),
+        ' '.join([
+            "gate_record bore sibling 0000abcd https://lore/x/raw",
+            "'ddee' '' bypass pass"
+        ]),
+    ])
     p = _gate(snippet, election, PKG='k')
     assert p.returncode == 0, p.stderr
     record = as_str_mapping(
@@ -416,10 +428,17 @@ def fixture_track(tmp_path: Path) -> Path:
     api = tmp_path / 'api'
     man = api / 'packages.yml'
     man.parent.mkdir(parents=True)
-    man.write_text(
-        'packages:\n  - name: rolling\n    track:\n'
-        '      ROLL_COMMIT:\n        repo: acme/rolling\n'
-        '        head: true\n'
+    _ = man.write_text(
+        textwrap.dedent(
+            """\
+            packages:
+              - name: rolling
+                track:
+                  ROLL_COMMIT:
+                    repo: acme/rolling
+                    head: true
+            """
+        )
     )
     commit = api / 'repos' / 'acme' / 'rolling' / 'commits'
     commit.mkdir(parents=True)
@@ -432,11 +451,11 @@ def fixture_track(tmp_path: Path) -> Path:
         }
     }
     sha = as_str(head_doc['sha'])
-    (commit / 'HEAD').write_text(json.dumps(head_doc))
-    (commit / sha).write_text(json.dumps(head_doc))
+    _ = (commit / 'HEAD').write_text(json.dumps(head_doc))
+    _ = (commit / sha).write_text(json.dumps(head_doc))
     advisories = api / 'repos' / 'acme' / 'rolling' / 'security-advisories'
     advisories.parent.mkdir(parents=True, exist_ok=True)
-    advisories.write_text(json.dumps([]))
+    _ = advisories.write_text(json.dumps([]))
     return api
 
 
@@ -457,8 +476,8 @@ def _track_run(api: Path, date: str, **extra: str) \
     commit = as_str_mapping(body['commit'])
     committer = as_str_mapping(commit['committer'])
     committer['date'] = date
-    head.write_text(json.dumps(body))
-    (head.parent / as_str(body['sha'])).write_text(json.dumps(body))
+    _ = head.write_text(json.dumps(body))
+    _ = (head.parent / as_str(body['sha'])).write_text(json.dumps(body))
     env = {
         'PATH': os.environ['PATH'],
         'MAN': str(api / 'packages.yml'),
@@ -502,7 +521,7 @@ def test_track_holds_an_open_advisory(track: Path) -> None:
     """
     api = track
     adv = api / 'repos' / 'acme' / 'rolling' / 'security-advisories'
-    adv.write_text(
+    _ = adv.write_text(
         json.dumps([{
             'ghsa_id': 'GHSA-dddd-eeee-ffff',
             'state': 'published'
@@ -545,7 +564,7 @@ def test_write_meta_merges_the_election_record(tmp_path: Path) -> None:
         tmp_path: Pytest scratch directory.
     """
     record = tmp_path / 'election-pkg.json'
-    record.write_text(
+    _ = record.write_text(
         json.dumps({
             'package': 'pkg',
             'entries': [{
@@ -644,7 +663,7 @@ def test_sbom_aggregates_and_a_moved_id_lands_in_the_changelog(
             'flux': 'pass'
         }]
     }
-    (debs / 'linux-image-amd64.json').write_text(
+    _ = (debs / 'linux-image-amd64.json').write_text(
         json.dumps({
             'hash': 'x',
             'skipped': False,
@@ -652,7 +671,7 @@ def test_sbom_aggregates_and_a_moved_id_lands_in_the_changelog(
             'election': first
         })
     )
-    (debs / 'plain-pkg.json').write_text(
+    _ = (debs / 'plain-pkg.json').write_text(
         json.dumps({
             'hash': 'x',
             'skipped': False,
@@ -732,7 +751,7 @@ def test_sbom_first_publish_lists_every_record(tmp_path: Path) -> None:
             'flux': 'pass'
         }]
     }
-    (debs / 'k-amd64.json').write_text(
+    _ = (debs / 'k-amd64.json').write_text(
         json.dumps({
             'hash': 'x',
             'skipped': False,
@@ -770,9 +789,17 @@ def _release_api(tmp_path: Path, young: str, old: str) -> Path:
     """
     api = tmp_path / 'api'
     api.mkdir()
-    (api / 'packages.yml').write_text(
-        'packages:\n  - name: tool\n    track:\n'
-        '      TOOL_VER:\n        repo: acme/tool\n        strip-v: true\n'
+    _ = (api / 'packages.yml').write_text(
+        textwrap.dedent(
+            """\
+            packages:
+              - name: tool
+                track:
+                  TOOL_VER:
+                    repo: acme/tool
+                    strip-v: true
+            """
+        )
     )
     base = api / 'repos' / 'acme' / 'tool'
     base.mkdir(parents=True)
@@ -791,9 +818,9 @@ def _release_api(tmp_path: Path, young: str, old: str) -> Path:
         'assets': []
     }
     (base / 'releases').mkdir()
-    (base / 'releases' / 'latest').write_text(json.dumps(new))
-    (base / 'releases.list').write_text(json.dumps([new, prev]))
-    (base / 'security-advisories').write_text('[]')
+    _ = (base / 'releases' / 'latest').write_text(json.dumps(new))
+    _ = (base / 'releases.list').write_text(json.dumps([new, prev]))
+    _ = (base / 'security-advisories').write_text('[]')
     return api
 
 
@@ -824,7 +851,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header('Content-Length', str(len(body)))
         self.end_headers()
-        self.wfile.write(body)
+        _ = self.wfile.write(body)
 
     def log_message(self, *args: object, **kwargs: object) -> None:
         """Silence the default request log.

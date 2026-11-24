@@ -92,21 +92,21 @@ def run(script: Path, tmp: Path, pkg: str) -> str:
         The content of the output file.
     """
     manifest = tmp / 'manifest.yml'
-    manifest.write_text(MANIFEST)
+    _ = manifest.write_text(MANIFEST)
     out = tmp / f'{script.stem}-{pkg}.out'
-    out.write_text('')
-    subprocess.run(['bash', str(script)],
-                   env={
-                       'PATH': f'{_yq_dir()}:/usr/bin:/bin',
-                       'MAN': str(manifest),
-                       'PKG': pkg,
-                       'ARCH': 'amd64',
-                       'GITHUB_OUTPUT': str(out),
-                       'SECRETVAL_GITHUB_TOKEN': 'tok-123'
-                   },
-                   check=True,
-                   capture_output=True,
-                   text=True)
+    _ = out.write_text('')
+    _ = subprocess.run(['bash', str(script)],
+                       env={
+                           'PATH': f'{_yq_dir()}:/usr/bin:/bin',
+                           'MAN': str(manifest),
+                           'PKG': pkg,
+                           'ARCH': 'amd64',
+                           'GITHUB_OUTPUT': str(out),
+                           'SECRETVAL_GITHUB_TOKEN': 'tok-123'
+                       },
+                       check=True,
+                       capture_output=True,
+                       text=True)
     return out.read_text()
 
 
@@ -119,7 +119,7 @@ def test_matches_inline_step(tmp_path: Path, pkg: str) -> None:
         pkg: Package name passed to both scripts.
     """
     old = tmp_path / 'old.sh'
-    old.write_text('set -euo pipefail\n' + old_step())
+    _ = old.write_text('set -euo pipefail\n' + old_step())
     assert run(SCRIPT, tmp_path, pkg) == run(old, tmp_path, pkg)
 
 

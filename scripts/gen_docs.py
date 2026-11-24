@@ -141,8 +141,8 @@ def main() -> int:
     parser = argparse.ArgumentParser(
         description=(__doc__ or "").splitlines()[0]
     )
-    parser.add_argument("--root", type=Path, default=Path.cwd())
-    parser.add_argument("--check", action="store_true")
+    _ = parser.add_argument("--root", type=Path, default=Path.cwd())
+    _ = parser.add_argument("--check", action="store_true")
     args = parser.parse_args(namespace=Options())
     root = args.root.resolve()
     check = args.check
@@ -153,8 +153,10 @@ def main() -> int:
     docs_dir = out_dir.parent
     if docs_dir.is_symlink() and not docs_dir.exists():
         print(
-            f"{docs_dir} does not resolve in this checkout "
-            f"(wiki not checked out): reference check skipped",
+            "".join((
+                f"{docs_dir} does not resolve in this checkout ",
+                "(wiki not checked out): reference check skipped",
+            )),
             file=sys.stderr,
         )
         return 0
@@ -183,7 +185,7 @@ def main() -> int:
         stale = True
         if not check:
             out_dir.mkdir(parents=True, exist_ok=True)
-            target.write_text(new, encoding="utf-8")
+            _ = target.write_text(new, encoding="utf-8")
     if check and stale:
         print("docs/reference is out of date: run `make docs`", file=sys.stderr)
         return 1

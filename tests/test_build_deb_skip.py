@@ -2,6 +2,7 @@
 
 import json
 import subprocess
+import textwrap
 from pathlib import Path
 
 from typed_docs import as_str_mapping, load_json
@@ -24,19 +25,26 @@ def _pages(tmp_path: Path) -> Path:
     pages = tmp_path / 'pages'
     pkg = tmp_path / 'pkg' / 'DEBIAN'
     pkg.mkdir(parents=True)
-    (pkg / 'control').write_text(
-        'Package: kernel\nVersion: 7.2.14-1\nArchitecture: amd64\n'
-        'Maintainer: ci <ci@example.invalid>\nDescription: test\n'
+    _ = (pkg / 'control').write_text(
+        textwrap.dedent(
+            """\
+            Package: kernel
+            Version: 7.2.14-1
+            Architecture: amd64
+            Maintainer: ci <ci@example.invalid>
+            Description: test
+            """
+        )
     )
     (pages / 'debs-cache').mkdir(parents=True)
-    subprocess.run([
+    _ = subprocess.run([
         'dpkg-deb', '--build',
         str(pkg.parent),
         str(pages / 'debs-cache' / DEB)
     ],
-                   check=True,
-                   capture_output=True)
-    (pages / 'debs-cache' / 'hashes.json').write_text(
+                       check=True,
+                       capture_output=True)
+    _ = (pages / 'debs-cache' / 'hashes.json').write_text(
         json.dumps({'kernel-amd64': {
             'hash': PRIOR_HASH,
             'debs': [DEB]
@@ -120,7 +128,7 @@ def test_skip_without_prior_deb_fails_before_building(tmp_path: Path) -> None:
     marker = tmp_path / 'ran'
     pages = tmp_path / 'pages'
     (pages / 'debs-cache').mkdir(parents=True)
-    (pages / 'debs-cache' / 'hashes.json').write_text('{}')
+    _ = (pages / 'debs-cache' / 'hashes.json').write_text('{}')
     out = tmp_path / 'out'
     out.touch()
     debs = tmp_path / 'debs'

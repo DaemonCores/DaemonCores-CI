@@ -120,13 +120,16 @@ def _write_series_fixture(tmp: Path) -> Path:
         The path of the manifest.
     """
     manifest = tmp / "series.yml"
-    manifest.write_text(
-        "patches:\n"
-        "  - name: x86-cflags\n"
-        f"    url: file://{tmp}/{{seriesdir}}/{{topic}}/0001-x86-cflags.patch\n"
-        "    topic: topic\n"
-        "    stage: common\n"
-        "    license: GPL-2.0-only\n"
+    _ = manifest.write_text(
+        ''.join([
+            "patches:\n",
+            "  - name: x86-cflags\n",
+            f"    url: file://{tmp}/{{seriesdir}}/{{topic}}/",
+            "0001-x86-cflags.patch\n",
+            "    topic: topic\n",
+            "    stage: common\n",
+            "    license: GPL-2.0-only\n",
+        ])
     )
     for seriesdir in (
         "eol/linux-7.0.y-xanmod",
@@ -134,7 +137,7 @@ def _write_series_fixture(tmp: Path) -> Path:
     ):
         sdir = tmp / seriesdir / "topic"
         sdir.mkdir(parents=True)
-        (
+        _ = (
             sdir / "0001-x86-cflags.patch"
         ).write_text("--- a/README\n+++ b/README\n@@ -1 +1 @@\n-x\n+patched\n")
     return manifest
@@ -208,7 +211,7 @@ def _make_cdn(tmp_path: Path, version: str) -> tuple[Path, Path, str]:
     cdn.mkdir(parents=True)
     src = tmp_path / f"linux-{version}"
     src.mkdir()
-    (src / "Makefile").write_text("x\n")
+    _ = (src / "Makefile").write_text("x\n")
     tarball = cdn / f"linux-{version}.tar.xz"
     with tarfile.open(tarball, "w:xz") as t:
         t.add(src, arcname=f"linux-{version}")
@@ -265,7 +268,7 @@ def test_tarball_cache_corrupted_is_redownloaded(tmp_path: Path) -> None:
     cdn, tarball, want = _make_cdn(tmp_path, version)
     cache = tmp_path / "cache"
     cache.mkdir()
-    (cache / tarball.name).write_text("corrupted")
+    _ = (cache / tarball.name).write_text("corrupted")
     r = _fetch(cdn, version, want, cache)
     assert r.returncode == 0, r.stderr
     assert "downloading again" in r.stderr

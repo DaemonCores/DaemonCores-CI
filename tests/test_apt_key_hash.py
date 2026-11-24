@@ -62,9 +62,9 @@ def _public_of(secret: str) -> str:
                               capture_output=True,
                               text=True).stdout
     finally:
-        subprocess.run(['gpgconf', '--kill', 'gpg-agent'],
-                       env=genv,
-                       check=False)
+        _ = subprocess.run(['gpgconf', '--kill', 'gpg-agent'],
+                           env=genv,
+                           check=False)
         shutil.rmtree(home, ignore_errors=True)
 
 
@@ -80,7 +80,7 @@ def fixture_secret(tmp_path_factory: pytest.TempPathFactory) -> str:
     """
     base = tmp_path_factory.mktemp('rotate')
     gh = base / 'gh'
-    gh.write_text(GH_STUB)
+    _ = gh.write_text(GH_STUB)
     gh.chmod(gh.stat().st_mode | stat.S_IXUSR)
     env = {
         **os.environ,
@@ -128,7 +128,7 @@ def test_hash_of_the_served_key(secret: str, tmp_path: Path) -> None:
         tmp_path: Pytest scratch directory.
     """
     served = tmp_path / 'gpg.key'
-    served.write_text(_public_of(secret))
+    _ = served.write_text(_public_of(secret))
     result = _run(secret, served.as_uri())
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip() == hashlib.sha256(served.read_bytes()
@@ -146,7 +146,7 @@ def test_a_stale_published_key_is_refused(secret: str, tmp_path: Path) -> None:
     other = tmp_path / 'other'
     other.mkdir()
     gh = other / 'gh'
-    gh.write_text(GH_STUB)
+    _ = gh.write_text(GH_STUB)
     gh.chmod(gh.stat().st_mode | stat.S_IXUSR)
     env = {
         **os.environ,
@@ -159,7 +159,7 @@ def test_a_stale_published_key_is_refused(secret: str, tmp_path: Path) -> None:
                           env=env,
                           timeout=120).returncode == 0
     served = tmp_path / 'gpg.key'
-    served.write_text(_public_of((other / 'stdin').read_text()))
+    _ = served.write_text(_public_of((other / 'stdin').read_text()))
     result = _run(secret, served.as_uri())
     assert result.returncode != 0
     assert result.stdout == ''

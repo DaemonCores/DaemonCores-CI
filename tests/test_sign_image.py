@@ -26,7 +26,7 @@ def run(tmp_path: Path,
     bindir.mkdir(exist_ok=True)
     log = tmp_path / "calls.log"
     stub = bindir / "cosign"
-    stub.write_text(f'#!/bin/sh\necho "$@" >> "{log}"\n')
+    _ = stub.write_text(f'#!/bin/sh\necho "$@" >> "{log}"\n')
     stub.chmod(stub.stat().st_mode | stat.S_IXUSR)
     env = {
         "PATH": f"{bindir}:{os.environ['PATH']}",

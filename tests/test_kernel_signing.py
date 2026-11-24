@@ -28,7 +28,7 @@ def tree(tmp_path: Path) -> Path:
     """
     (tmp_path / 'scripts').mkdir()
     stub = tmp_path / 'scripts' / 'config'
-    stub.write_text(CONFIG_STUB)
+    _ = stub.write_text(CONFIG_STUB)
     stub.chmod(0o755)
     return tmp_path
 
@@ -145,7 +145,7 @@ def test_verify_detects_a_dropped_option(tree: Path) -> None:
     Args:
         tree: Fake kernel tree.
     """
-    (tree / '.config').write_text('CONFIG_MODULE_SIG=y\n')
+    _ = (tree / '.config').write_text('CONFIG_MODULE_SIG=y\n')
     failed = call(tree, 'kernel_signing_verify', MODULE_SIGNING_ACTIVE='yes')
     assert failed.returncode == 1
     assert 'CONFIG_MODULE_SIG_FORCE' in failed.stderr
@@ -160,12 +160,12 @@ def test_verify_requires_module_sig_and_matching_force(tree: Path) -> None:
     Args:
         tree: Fake kernel tree.
     """
-    (tree / '.config').write_text('# CONFIG_MODULE_SIG is not set\n')
+    _ = (tree / '.config').write_text('# CONFIG_MODULE_SIG is not set\n')
     off = call(tree, 'kernel_signing_verify', MODULE_SIGNING_ACTIVE='no')
     assert off.returncode == 1
     assert 'CONFIG_MODULE_SIG is off' in off.stderr
-    (tree /
-     '.config').write_text('CONFIG_MODULE_SIG=y\nCONFIG_MODULE_SIG_FORCE=y\n')
+    _ = (tree / '.config'
+         ).write_text('CONFIG_MODULE_SIG=y\nCONFIG_MODULE_SIG_FORCE=y\n')
     forced = call(tree, 'kernel_signing_verify', MODULE_SIGNING_ACTIVE='no')
     assert forced.returncode == 1
     assert 'must not enforce' in forced.stderr
@@ -176,6 +176,6 @@ def test_verify_requires_module_sig_and_matching_force(tree: Path) -> None:
         KERNEL_SIGNING_ENFORCE='no'
     )
     assert nosign.returncode == 1
-    (tree / '.config').write_text('CONFIG_MODULE_SIG=y\n')
+    _ = (tree / '.config').write_text('CONFIG_MODULE_SIG=y\n')
     clean = call(tree, 'kernel_signing_verify', MODULE_SIGNING_ACTIVE='no')
     assert clean.returncode == 0, clean.stderr

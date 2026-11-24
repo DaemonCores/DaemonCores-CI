@@ -132,8 +132,10 @@ def test_output_line_carries_the_evidence(
         capsys: Output capture.
     """
     history = [('u', [job('Build ISO / x', 'failure', 'Smoke')])]
-    owed_stages.main(['--repo', 'o/r', '--workflow', 'w.yml', '--branch', 'm'],
-                     fetch=functools.partial(_fixed_history, history))
+    _ = owed_stages.main([
+        '--repo', 'o/r', '--workflow', 'w.yml', '--branch', 'm'
+    ],
+                         fetch=functools.partial(_fixed_history, history))
     assert capsys.readouterr().out == 'iso\tu\trun / Build ISO / x\tSmoke\n'
 
 

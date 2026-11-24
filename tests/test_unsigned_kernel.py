@@ -147,15 +147,16 @@ def _discover(
         The images of every architecture (flattened) and the manifest matrix.
     """
     generic = (
-        'LABEL org.daemoncores.arm64-4k-image="true"\n'
+        'LABEL org.daemoncores.arm64-16k-image="true"\n'
         'LABEL org.daemoncores.unsigned-kernel-image="true"\n'
     )
-    (tmp_path / 'Containerfile').write_text('FROM debian:trixie\n' + generic)
-    (tmp_path / 'Containerfile.board').write_text('FROM debian:trixie\n')
-    (tmp_path / 'Containerfile.iso'
-     ).write_text('FROM ghcr.io/daemoncores/debian-bootc:latest_amd64\n')
+    _ = (tmp_path /
+         'Containerfile').write_text('FROM debian:trixie\n' + generic)
+    _ = (tmp_path / 'Containerfile.board').write_text('FROM debian:trixie\n')
+    _ = (tmp_path / 'Containerfile.iso'
+         ).write_text('FROM ghcr.io/daemoncores/debian-bootc:latest_amd64\n')
     for name, content in (extra or {}).items():
-        (tmp_path / name).write_text(content)
+        _ = (tmp_path / name).write_text(content)
     out = tmp_path / 'out'
     env = dict(
         os.environ,
@@ -163,11 +164,11 @@ def _discover(
         GITHUB_REPOSITORY='DaemonCores/debian-bootc',
         NOSIGN_IMAGES='true' if nosign else 'false'
     )
-    subprocess.run(['bash', '-c', _discover_script()],
-                   cwd=tmp_path,
-                   env=env,
-                   check=True,
-                   capture_output=True)
+    _ = subprocess.run(['bash', '-c', _discover_script()],
+                       cwd=tmp_path,
+                       env=env,
+                       check=True,
+                       capture_output=True)
     lines: dict[str, str] = {}
     for line in out.read_text().splitlines():
         if '=' in line:
@@ -206,7 +207,7 @@ def test_there_is_one_image_per_tag_and_arch(tmp_path: Path) -> None:
 def test_images_are_grouped_by_architecture_in_build_order(
     tmp_path: Path
 ) -> None:
-    """One group per arch on its native runner, the -4k image after its parent.
+    """One group per arch on its native runner, opt-in -16k after its parent.
 
     Args:
         tmp_path: Scratch repository root.
@@ -217,7 +218,7 @@ def test_images_are_grouped_by_architecture_in_build_order(
                                  ('arm64', 'ubuntu-24.04-arm')]
     amd64, arm64 = ([e['tag'] for e in g['entries']] for g in groups)
     assert amd64 == ['latest', 'board', 'iso']
-    assert arm64 == ['latest', 'latest-4k', 'board', 'iso']
+    assert arm64 == ['latest', 'latest-16k', 'board', 'iso']
     assert all(e['arch'] == g['arch'] for g in groups for e in g['entries'])
 
 
@@ -239,7 +240,7 @@ def test_twin_only_for_the_generic_images(tmp_path: Path) -> None:
     assert twin_suffix == {
         ('latest', 'amd64'): '',
         ('latest', 'arm64'): '',
-        ('latest-4k', 'arm64'): '',
+        ('latest-16k', 'arm64'): '',
         ('board', 'amd64'): '',
         ('board', 'arm64'): '',
         ('iso', 'amd64'): '',
@@ -247,13 +248,20 @@ def test_twin_only_for_the_generic_images(tmp_path: Path) -> None:
     }
     manifest = {as_str(e['tag']): e['arches'] for e in result['manifest']}
     assert manifest['latest'] == ['amd64', 'arm64']
-    assert manifest['latest-4k'] == ['arm64']
+    assert manifest['latest-16k'] == ['arm64']
     assert manifest['board'] == ['amd64', 'arm64']
-    plain = {
-        e['kernel_suffix']
-        for e in result['wave1'] if e['tag'] == 'latest-4k'
+    suffixes = {(e['tag'], e['arch']): e['kernel_suffix']
+                for e in result['wave1']}
+    assert suffixes[('latest-16k', 'arm64')] == '-16k'
+    assert {
+        tag: suffix
+        for (tag, arch), suffix in suffixes.items()
+        if arch == 'arm64' and tag != 'latest-16k'
+    } == {
+        'latest': '',
+        'board': '',
+        'iso': ''
     }
-    assert plain == {''}
 
 
 @needs_jq
@@ -357,8 +365,10 @@ def test_arches_label_limits_an_image_to_its_architectures(
         nosign=True,
         extra={
             'Containerfile.vendor':
-            'FROM ghcr.io/daemoncores/debian-bootc:latest_amd64\n'
-            'LABEL org.daemoncores.arches="amd64"\n'
+            ''.join([
+                'FROM ghcr.io/daemoncores/debian-bootc:latest_amd64\n',
+                'LABEL org.daemoncores.arches="amd64"\n',
+            ])
         }
     )
     amd64, arm64 = ([e['tag'] for e in g['entries']] for g in result['groups'])
@@ -378,7 +388,7 @@ def test_arches_label_with_no_known_architecture_fails(tmp_path: Path) -> None:
         tmp_path: Scratch repository root.
     """
     with pytest.raises(subprocess.CalledProcessError):
-        _discover(
+        _ = _discover(
             tmp_path,
             nosign=False,
             extra={

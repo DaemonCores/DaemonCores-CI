@@ -7,6 +7,8 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 
+import textwrap
+
 import check_build_context
 import check_docs
 import check_docstrings
@@ -34,7 +36,7 @@ def _write(path: Path, text: str) -> Path:
         The created path.
     """
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text, encoding="utf-8")
+    _ = path.write_text(text, encoding="utf-8")
     return path
 
 
@@ -46,9 +48,23 @@ def test_docstrings_accept_a_complete_file(tmp_path: Path) -> None:
     """
     source = _write(
         tmp_path / "ok.py",
-        '"""Mod."""\n\n\ndef f(x: int) -> int:\n'
-        '    """Double.\n\n    Args:\n        x: Value.\n\n'
-        '    Returns:\n        Twice x.\n    """\n    return 2 * x\n',
+        textwrap.dedent(
+            '''\
+            """Mod."""
+
+
+            def f(x: int) -> int:
+                """Double.
+
+                Args:
+                    x: Value.
+
+                Returns:
+                    Twice x.
+                """
+                return 2 * x
+            '''
+        ),
     )
     assert check_docstrings.problems(source) == []
 
@@ -61,8 +77,20 @@ def test_docstrings_flag_missing_sections(tmp_path: Path) -> None:
     """
     source = _write(
         tmp_path / "bad.py",
-        '"""Mod."""\n\n\ndef f(x: int) -> int:\n    """Double."""\n'
-        "    return 2 * x\n\n\ndef g() -> None:\n    pass\n",
+        textwrap.dedent(
+            '''\
+            """Mod."""
+
+
+            def f(x: int) -> int:
+                """Double."""
+                return 2 * x
+
+
+            def g() -> None:
+                pass
+            '''
+        ),
     )
     found = "\n".join(check_docstrings.problems(source))
     assert "Args: section missing" in found
@@ -78,9 +106,9 @@ def test_docstrings_collect_defaults_to_scripts_and_tests(
     Args:
         tmp_path: Scratch repository.
     """
-    _write(tmp_path / "scripts/a.py", '"""A."""\n')
-    _write(tmp_path / "tests/b.py", '"""B."""\n')
-    _write(tmp_path / "other/c.py", '"""C."""\n')
+    _ = _write(tmp_path / "scripts/a.py", '"""A."""\n')
+    _ = _write(tmp_path / "tests/b.py", '"""B."""\n')
+    _ = _write(tmp_path / "other/c.py", '"""C."""\n')
     names = [p.name for p in check_docstrings.collect(tmp_path, [])]
     assert names == ["a.py", "b.py"]
 
@@ -138,12 +166,12 @@ def test_build_context_flags_missing_copy_and_ignored_source(
     Args:
         tmp_path: Scratch repository.
     """
-    _write(
+    _ = _write(
         tmp_path / "Containerfile",
         "FROM scratch\nCOPY ./src /src\nCOPY ./gone /gone\n",
     )
     (tmp_path / "src").mkdir()
-    _write(tmp_path / ".dockerignore", "# c\nsrc/\n")
+    _ = _write(tmp_path / ".dockerignore", "# c\nsrc/\n")
     found = "\n".join(check_build_context.check_containerfiles(tmp_path))
     assert "./gone missing" in found
     assert "./src excluded by .dockerignore src" in found
@@ -155,12 +183,19 @@ def test_packages_flag_incoherent_manifest(tmp_path: Path) -> None:
     Args:
         tmp_path: Scratch package builder directory.
     """
-    _write(
+    _ = _write(
         tmp_path / "packages.yml",
-        "packages:\n"
-        "  - name: a\n    deps: [ghost]\n    sources: [nope]\n"
-        "    build: |\n      . lib/x.sh\n"
-        "  - name: b\n",
+        textwrap.dedent(
+            """\
+            packages:
+              - name: a
+                deps: [ghost]
+                sources: [nope]
+                build: |
+                  . lib/x.sh
+              - name: b
+            """
+        ),
     )
     found = "\n".join(check_build_context.check_packages(tmp_path))
     assert "a depends on unknown ghost" in found
@@ -175,14 +210,18 @@ def test_docs_flag_stale_citations_and_links(tmp_path: Path) -> None:
     Args:
         tmp_path: Scratch repository.
     """
-    _write(tmp_path / "code.txt", "one\n\nthree\n")
-    _write(
+    _ = _write(tmp_path / "code.txt", "one\n\nthree\n")
+    _ = _write(
         tmp_path / "docs/page.md",
-        "ok [src: file: code.txt:1]\n"
-        "blank [src: file: code.txt:2]\n"
-        "far [src: file: code.txt:9]\n"
-        "gone [src: file: nothing.txt:1]\n"
-        "[dead](missing.md) [live](page.md) [web](https://x.y) [wiki](Home)\n",
+        textwrap.dedent(
+            """\
+            ok [src: file: code.txt:1]
+            blank [src: file: code.txt:2]
+            far [src: file: code.txt:9]
+            gone [src: file: nothing.txt:1]
+            [dead](missing.md) [live](page.md) [web](https://x.y) [wiki](Home)
+            """
+        ),
     )
     found = "\n".join(
         check_docs.check_page(tmp_path, tmp_path / "docs/page.md")
@@ -202,7 +241,7 @@ def test_docs_skip_kronn_backups(tmp_path: Path) -> None:
     Args:
         tmp_path: Scratch repository.
     """
-    _write(tmp_path / "docs/a.md", "x\n")
-    _write(tmp_path / "docs/.kronn-citation-originals/b.md", "x\n")
+    _ = _write(tmp_path / "docs/a.md", "x\n")
+    _ = _write(tmp_path / "docs/.kronn-citation-originals/b.md", "x\n")
     names = [p.name for p in check_docs.pages(tmp_path / "docs")]
     assert names == ["a.md"]

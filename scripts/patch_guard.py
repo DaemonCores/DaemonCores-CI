@@ -105,15 +105,15 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="sha256 guard of the kernel files the patches touch",
     )
-    parser.add_argument("--tree", type=Path, required=True)
-    parser.add_argument(
+    _ = parser.add_argument("--tree", type=Path, required=True)
+    _ = parser.add_argument(
         "--lock",
         type=Path,
         required=True,
         help="build-LOCAL lock path (never a repository path)",
     )
-    parser.add_argument("--update", action="store_true")
-    parser.add_argument("patches", nargs="+", type=Path)
+    _ = parser.add_argument("--update", action="store_true")
+    _ = parser.add_argument("patches", nargs="+", type=Path)
     args = parser.parse_args(argv)
     tree = cast(Path, args.tree)
     lock_path = cast(Path, args.lock)
@@ -129,7 +129,7 @@ def main(argv: list[str] | None = None) -> int:
         )
         merged.update(current)
         lock_path.parent.mkdir(parents=True, exist_ok=True)
-        lock_path.write_text(
+        _ = lock_path.write_text(
             json.dumps(merged, indent=2, sort_keys=True) + "\n"
         )
         return 0

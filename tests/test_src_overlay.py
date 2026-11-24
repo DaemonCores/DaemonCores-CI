@@ -1,6 +1,7 @@
 """Contract tests for ``deb_src_overlay`` (overlay on an upstream tree)."""
 
 import subprocess
+import textwrap
 from pathlib import Path
 
 SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
@@ -18,8 +19,10 @@ def run(overlay: Path, tree: Path) -> subprocess.CompletedProcess[str]:
     """
     return subprocess.run(
         [
-            "bash", "-c", f'. "{SCRIPTS}/deb_helpers.sh"; '
-            f'deb_src_overlay "{overlay}" "{tree}"'
+            "bash", "-c", " ".join([
+                f'. "{SCRIPTS}/deb_helpers.sh";',
+                f'deb_src_overlay "{overlay}" "{tree}"'
+            ])
         ],
         env={
             "CI_SCRIPTS": str(SCRIPTS),
@@ -40,7 +43,7 @@ def make_tree(root: Path) -> Path:
         The root directory.
     """
     (root / "src").mkdir(parents=True)
-    (root / "src/a.txt").write_text("one\ntwo\n")
+    _ = (root / "src/a.txt").write_text("one\ntwo\n")
     return root
 
 
@@ -57,11 +60,19 @@ def make_overlay(root: Path) -> Path:
         The overlay directory.
     """
     (root / "src").mkdir(parents=True)
-    (root / "src/a.txt.patch").write_text(
-        "--- a/src/a.txt\n+++ b/src/a.txt\n"
-        "@@ -1,2 +1,2 @@\n one\n-two\n+three\n"
+    _ = (root / "src/a.txt.patch").write_text(
+        textwrap.dedent(
+            """\
+            --- a/src/a.txt
+            +++ b/src/a.txt
+            @@ -1,2 +1,2 @@
+             one
+            -two
+            +three
+            """
+        )
     )
-    (root / "src/new.txt").write_text("fresh\n")
+    _ = (root / "src/new.txt").write_text("fresh\n")
     return root
 
 
@@ -105,7 +116,7 @@ def test_patch_drift_is_all_or_nothing(tmp_path: Path) -> None:
         tmp_path: Pytest temporary directory.
     """
     tree = make_tree(tmp_path / "tree")
-    (tree / "src/a.txt").write_text("one\nTWO\n")
+    _ = (tree / "src/a.txt").write_text("one\nTWO\n")
     result = run(make_overlay(tmp_path / "ovl"), tree)
     assert result.returncode == 3
     assert not (tree / "src/new.txt").exists()
@@ -123,8 +134,10 @@ def run_apply(overlay: Path, tree: Path) -> subprocess.CompletedProcess[str]:
     """
     return subprocess.run(
         [
-            "bash", "-c", f'. "{SCRIPTS}/deb_helpers.sh"; '
-            f'deb_overlay_apply "{overlay}" "{tree}"'
+            "bash", "-c", " ".join([
+                f'. "{SCRIPTS}/deb_helpers.sh";',
+                f'deb_overlay_apply "{overlay}" "{tree}"'
+            ])
         ],
         env={
             "CI_SCRIPTS": str(SCRIPTS),
@@ -146,11 +159,11 @@ def test_delete_marker_removes_the_file_whatever_its_content(
     for content in ("one\n", "a completely different revision\n"):
         tree = tmp_path / f"tree-{len(content)}"
         (tree / "etc").mkdir(parents=True)
-        (tree / "etc/hook").write_text(content)
-        (tree / "etc/keep").write_text("keep\n")
+        _ = (tree / "etc/hook").write_text(content)
+        _ = (tree / "etc/keep").write_text("keep\n")
         ovl = tmp_path / f"ovl-{len(content)}"
         (ovl / "etc").mkdir(parents=True)
-        (ovl / "etc/hook.delete").write_text("")
+        _ = (ovl / "etc/hook.delete").write_text("")
         result = run_apply(ovl, tree)
         assert result.returncode == 0, result.stderr
         assert not (tree / "etc/hook").exists()
@@ -168,8 +181,8 @@ def test_delete_marker_on_missing_file_is_drift(tmp_path: Path) -> None:
     (tree / "etc").mkdir(parents=True)
     ovl = tmp_path / "ovl"
     (ovl / "etc").mkdir(parents=True)
-    (ovl / "etc/hook.delete").write_text("")
-    (ovl / "etc/new").write_text("x\n")
+    _ = (ovl / "etc/hook.delete").write_text("")
+    _ = (ovl / "etc/new").write_text("x\n")
     result = run_apply(ovl, tree)
     assert result.returncode == 3
     assert not (tree / "etc/new").exists()

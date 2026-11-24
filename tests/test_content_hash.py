@@ -40,8 +40,8 @@ def fixture_env(tmp_path: Path) -> dict[str, str]:
     """
     src = tmp_path / 'src'
     (src / 'sub').mkdir(parents=True)
-    (src / 'a.txt').write_text('alpha\n')
-    (src / 'sub' / 'b.txt').write_text('beta\n')
+    _ = (src / 'a.txt').write_text('alpha\n')
+    _ = (src / 'sub' / 'b.txt').write_text('beta\n')
     return {
         'PATH': '/usr/bin:/bin',
         'PACKAGE': 'demo',
@@ -64,12 +64,12 @@ def run_hash(prelude: str, env: dict[str, str]) -> str:
     Returns:
         The hash printed on stdout.
     """
-    script = (
-        prelude + '\nif declare -F merge_extra_env >/dev/null; '
-        'then merge_extra_env; else '
-        'EXTRA_ENV="${EXTRA_ENV}${EXTRA_ENV:+$\'\\n\'}${EXTRA_ENV_CI}"; '
-        'fi\ncontent_hash 2>/dev/null\n'
-    )
+    script = prelude + ''.join([
+        '\nif declare -F merge_extra_env >/dev/null; ',
+        'then merge_extra_env; else ',
+        'EXTRA_ENV="${EXTRA_ENV}${EXTRA_ENV:+$\'\\n\'}${EXTRA_ENV_CI}"; ',
+        'fi\ncontent_hash 2>/dev/null\n',
+    ])
     return subprocess.run(['bash', '-c', script],
                           env=env,
                           check=True,
@@ -117,11 +117,11 @@ def test_hash_follows_the_shared_build_scripts(
         tmp_path: Pytest temporary directory, holding the test helper script.
     """
     helper = tmp_path / 'helper.sh'
-    helper.write_text('echo one\n')
+    _ = helper.write_text('echo one\n')
     fixture_env['CI_HELPER_SCRIPTS'] = str(helper)
     first = run_hash(f'. {LIB}', fixture_env)
     assert run_hash(f'. {LIB}', fixture_env) == first
-    helper.write_text('echo two\n')
+    _ = helper.write_text('echo two\n')
     assert run_hash(f'. {LIB}', fixture_env) != first
     fixture_env['CI_HELPER_SCRIPTS'] = ''
     assert run_hash(f'. {LIB}', fixture_env) != first

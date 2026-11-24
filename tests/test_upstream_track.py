@@ -8,6 +8,7 @@ import hashlib
 import json
 import os
 import subprocess
+import textwrap
 from pathlib import Path
 
 import pytest
@@ -70,7 +71,7 @@ def _release(root: Path, repo: str, tag: str, assets: dict[str, str]) -> None:
             'digest': digest
         } for name, digest in assets.items()]
     }
-    (path / 'latest').write_text(json.dumps(body))
+    _ = (path / 'latest').write_text(json.dumps(body))
 
 
 @pytest.fixture(name='api')
@@ -83,7 +84,7 @@ def fixture_api(tmp_path: Path) -> Path:
     Returns:
         The API tree root.
     """
-    (tmp_path / 'packages.yml').write_text(MANIFEST)
+    _ = (tmp_path / 'packages.yml').write_text(MANIFEST)
     _release(
         tmp_path, 'acme/tool', 'v2.0', {'tool-2.0.tar.xz': f'sha256:{DIGEST}'}
     )
@@ -160,7 +161,7 @@ def test_resolve_replaces_a_base_value(api: Path) -> None:
     Args:
         api: API tree fixture.
     """
-    _run(api, 'resolve', PKG='lib', BASE_ENV='LIB_VER=old\nOTHER=1')
+    _ = _run(api, 'resolve', PKG='lib', BASE_ENV='LIB_VER=old\nOTHER=1')
     assert _env_output(api) == ['OTHER=1', 'LIB_VER=2026.4']
 
 
@@ -200,7 +201,7 @@ def _published(api: Path, debs: dict[str, list[str]]) -> str:
     """
     cache = api / 'pages' / 'debs-cache'
     cache.mkdir(parents=True)
-    (cache / 'hashes.json').write_text(
+    _ = (cache / 'hashes.json').write_text(
         json.dumps({
             k: {
                 'hash': 'h',
@@ -253,7 +254,7 @@ def test_resolve_follows_branch_head(api: Path) -> None:
     """
     path = api / 'repos' / 'acme' / 'rolling' / 'commits'
     path.mkdir(parents=True)
-    (path / 'HEAD').write_text(json.dumps({'sha': 'c' * 40}))
+    _ = (path / 'HEAD').write_text(json.dumps({'sha': 'c' * 40}))
     result = _run(api, 'resolve', PKG='rolling', BASE_ENV='A=1')
     assert result.returncode == 0, result.stderr
     assert _env_output(api) == ['A=1', f'ROLL_COMMIT={"c" * 40}']
@@ -288,10 +289,10 @@ def _kernel_org(api: Path, version: str, sums: str) -> None:
         version: Version of the stable release.
         sums: Content of ``sha256sums.asc``.
     """
-    (api / 'packages.yml').write_text(KERNEL_MANIFEST)
+    _ = (api / 'packages.yml').write_text(KERNEL_MANIFEST)
     cdn = api / 'cdn'
     cdn.mkdir(exist_ok=True)
-    (cdn / 'sha256sums.asc').write_text(sums)
+    _ = (cdn / 'sha256sums.asc').write_text(sums)
     releases = [{
         'moniker': 'mainline',
         'version': '9.9-rc1',
@@ -301,7 +302,7 @@ def _kernel_org(api: Path, version: str, sums: str) -> None:
         'version': version,
         'source': f'file://{cdn}/linux-{version}.tar.xz'
     }]
-    (api / 'releases.json').write_text(json.dumps({'releases': releases}))
+    _ = (api / 'releases.json').write_text(json.dumps({'releases': releases}))
 
 
 def test_resolve_follows_kernel_org_stream(api: Path) -> None:
@@ -378,7 +379,7 @@ def _kernel_with_patches(api: Path, available: set[str]) -> None:
         api: API tree root.
         available: Series (e.g. ``7.2``) whose patch file exists.
     """
-    _kernel_election(
+    _ = _kernel_election(
         api,
         [
             ('7.2.11', '7.2' in available),
@@ -421,7 +422,9 @@ def _bore_patch(api: Path, version: str, applies: bool) -> None:
     patch = api / version / 'bore.patch'
     patch.parent.mkdir(parents=True, exist_ok=True)
     context = ' feature' if applies else ' absent'
-    patch.write_text(f'--- a/k\n+++ b/k\n@@ -1 +1,2 @@\n{context}\n+elected\n')
+    _ = patch.write_text(
+        f'--- a/k\n+++ b/k\n@@ -1 +1,2 @@\n{context}\n+elected\n'
+    )
 
 
 def _kernel_point(api: Path, cdn: Path, version: str,
@@ -442,17 +445,17 @@ def _kernel_point(api: Path, cdn: Path, version: str,
     """
     staging = api / f'linux-{version}'
     staging.mkdir(exist_ok=True)
-    (staging / 'k').write_text('feature\n')
+    _ = (staging / 'k').write_text('feature\n')
     tarball = cdn / f'linux-{version}.tar.xz'
-    subprocess.run([
+    _ = subprocess.run([
         'tar', '-cJf',
         str(tarball), '-C',
         str(api), f'linux-{version}'
     ],
-                   check=True)
+                       check=True)
     digest = hashlib.sha256(tarball.read_bytes()).hexdigest()
     with (cdn / 'sha256sums.asc').open('a') as sums:
-        sums.write(f'{digest}  linux-{version}.tar.xz\n')
+        _ = sums.write(f'{digest}  linux-{version}.tar.xz\n')
     _bore_patch(api, version, applies)
     return {version: digest}
 
@@ -471,7 +474,7 @@ def _kernel_election(api: Path, entries: list[tuple[str,
     Returns:
         The tarball digests by version.
     """
-    (api / 'packages.yml').write_text(
+    _ = (api / 'packages.yml').write_text(
         KERNEL_MANIFEST.replace(
             'kernel-org: stable',
             'kernel-org: stable\n        require-patches: patches.yml'
@@ -482,18 +485,22 @@ def _kernel_election(api: Path, entries: list[tuple[str,
     digests: dict[str, str] = {}
     for version, applies in entries:
         digests.update(_kernel_point(api, cdn, version, applies))
-    (api / 'patches.yml').write_text(
-        'patches:\n'
-        '  - name: bore\n'
-        '    stage: common\n'
-        f'    url: file://{api}/{{version}}/bore.patch\n'
+    _ = (api / 'patches.yml').write_text(
+        textwrap.dedent(
+            f"""\
+            patches:
+              - name: bore
+                stage: common
+                url: file://{api}/{{version}}/bore.patch
+            """
+        )
     )
     releases = [{
         'moniker': 'stable',
         'version': version,
         'source': f'file://{cdn}/linux-{version}.tar.xz'
     } for version, _ in entries]
-    (api / 'releases.json').write_text(json.dumps({'releases': releases}))
+    _ = (api / 'releases.json').write_text(json.dumps({'releases': releases}))
     return digests
 
 
@@ -544,11 +551,14 @@ def test_resolve_walks_an_old_point_release_of_a_failing_series(
     digests.update(_kernel_point(api, api / 'cdn', '7.3.2', True))
     repo = api / 'stable.git'
     git = ['git', '-C', str(repo), '-c', 'user.name=t', '-c', 'user.email=t@t']
-    subprocess.run(['git', 'init', '-q', '-b', 'main', str(repo)], check=True)
-    subprocess.run([*git, 'commit', '-q', '--allow-empty', '-m', 'seed'],
-                   check=True)
+    _ = subprocess.run(['git', 'init', '-q', '-b', 'main',
+                        str(repo)],
+                       check=True)
+    _ = subprocess.run([*git, 'commit', '-q', '--allow-empty', '-m', 'seed'],
+                       check=True)
     for tag in ('7.3.3', '7.3.2'):
-        subprocess.run([*git, 'tag', '-m', f'v{tag}', f'v{tag}'], check=True)
+        _ = subprocess.run([*git, 'tag', '-m', f'v{tag}', f'v{tag}'],
+                           check=True)
     result = _run(
         api,
         'resolve',
@@ -575,7 +585,7 @@ def _kernel_with_engine(api: Path, available: set[str]) -> None:
         api: API tree root (receiving the kernel-src patch set).
         available: Series whose bore sibling exists.
     """
-    (api / 'packages.yml').write_text(
+    _ = (api / 'packages.yml').write_text(
         KERNEL_MANIFEST.replace(
             'kernel-org: stable',
             'kernel-org: stable\n        require-patches: engine'
@@ -583,7 +593,7 @@ def _kernel_with_engine(api: Path, available: set[str]) -> None:
     )
     cdn = api / 'cdn'
     cdn.mkdir(exist_ok=True)
-    (cdn / 'sha256sums.asc').write_text(
+    _ = (cdn / 'sha256sums.asc').write_text(
         f'{DIGEST}  linux-7.3.1.tar.xz\n{DIGEST}  linux-7.2.11.tar.xz\n'
     )
     # Owner 11/11 (R-871b): the election set resolves from the PRODUCT
@@ -592,26 +602,26 @@ def _kernel_with_engine(api: Path, available: set[str]) -> None:
     patches.mkdir(parents=True)
     cdn = api / 'cdn'
     cdn.mkdir(exist_ok=True)
-    (cdn / 'sha256sums.asc').write_text('')
+    _ = (cdn / 'sha256sums.asc').write_text('')
     for series, version in (('7.3', '7.3.1'), ('7.2', '7.2.11')):
         # REAL tarball: the dry-run judge extracts it (hermetic fixtures,
         # no cache leak from other runs).
         staging = api / f'linux-{version}'
         staging.mkdir(exist_ok=True)
-        (staging / 'k').write_text('feature\n')
+        _ = (staging / 'k').write_text('feature\n')
         tarball = cdn / f'linux-{version}.tar.xz'
-        subprocess.run([
+        _ = subprocess.run([
             'tar', '-cJf',
             str(tarball), '-C',
             str(api), f'linux-{version}'
         ],
-                       check=True)
+                           check=True)
         digest = hashlib.sha256(tarball.read_bytes()).hexdigest()
         with (cdn / 'sha256sums.asc').open('a') as sums:
-            sums.write(f'{digest}  linux-{version}.tar.xz\n')
+            _ = sums.write(f'{digest}  linux-{version}.tar.xz\n')
         sdir = api / f'linux-{series}.y-xanmod'
         (sdir / 'topic').mkdir(parents=True, exist_ok=True)
-        (sdir / 'topic' / '0001-xanmod-bore.patch').write_text(
+        _ = (sdir / 'topic' / '0001-xanmod-bore.patch').write_text(
             '--- a/k\n+++ b/k\n@@ -1 +1,2 @@\n' + (
                 ' feature\n+elected\n' if series in
                 available else ' absent\n+elected\n'
@@ -624,13 +634,13 @@ def _kernel_with_engine(api: Path, available: set[str]) -> None:
         f'    url: file://{api}/{{seriesdir}}/topic/0001-xanmod-bore.patch\n'
         '    topic: topic\n'
     )
-    (patches / 'kernel.yml').write_text(manifest)
+    _ = (patches / 'kernel.yml').write_text(manifest)
     # The election set also names pve.yml + the kernel-tree gpu sets: empty
     # sets are a no-op of the dry-run judge (the empty-manifest contract).
     for name in ('pve.yml', 'gpu/amd.yml', 'gpu/intel.yml'):
         dest = patches / name
         dest.parent.mkdir(exist_ok=True)
-        dest.write_text('patches: []\n')
+        _ = dest.write_text('patches: []\n')
     releases = [{
         'moniker': 'stable',
         'version': '7.3.1',
@@ -640,7 +650,7 @@ def _kernel_with_engine(api: Path, available: set[str]) -> None:
         'version': '7.2.11',
         'source': f'file://{cdn}/linux-7.2.11.tar.xz'
     }]
-    (api / 'releases.json').write_text(json.dumps({'releases': releases}))
+    _ = (api / 'releases.json').write_text(json.dumps({'releases': releases}))
 
 
 def test_resolve_engine_mode_falls_back_to_the_covered_series(
@@ -679,8 +689,8 @@ def test_resolve_skips_a_kernel_whose_digest_is_not_published(
         api: API tree fixture.
     """
     _kernel_with_patches(api, {'7.2', '7.1'})
-    (api / 'cdn' /
-     'sha256sums.asc').write_text(f'{DIGEST}  linux-7.1.20.tar.xz\n')
+    _ = (api / 'cdn' /
+         'sha256sums.asc').write_text(f'{DIGEST}  linux-7.1.20.tar.xz\n')
     result = _run(
         api,
         'resolve',
@@ -702,7 +712,7 @@ def test_resolve_skips_when_no_kernel_digest_is_published(api: Path) -> None:
         api: API tree fixture.
     """
     _kernel_with_patches(api, {'7.2', '7.1'})
-    (api / 'cdn' / 'sha256sums.asc').write_text('')
+    _ = (api / 'cdn' / 'sha256sums.asc').write_text('')
     result = _run(
         api,
         'resolve',
@@ -773,7 +783,9 @@ def test_resolve_finds_the_patches_next_to_the_source_manifest(
     _kernel_with_patches(api, {'7.1'})
     expanded = tmp_path / 'expanded'
     expanded.mkdir()
-    (expanded / 'packages.yml').write_text((api / 'packages.yml').read_text())
+    _ = (expanded / 'packages.yml').write_text(
+        (api / 'packages.yml').read_text()
+    )
     result = _run(
         api,
         'resolve',
@@ -834,9 +846,9 @@ def _variant_api(tmp_path: Path, debs: dict[str, list[str]]) -> Path:
     Returns:
         The API tree root.
     """
-    tmp_path.joinpath('packages.yml').write_text(VARIANT_MANIFEST)
+    _ = tmp_path.joinpath('packages.yml').write_text(VARIANT_MANIFEST)
     _release(tmp_path, 'acme/fam', 'v8.0.0', {})
-    _published(tmp_path, debs)
+    _ = _published(tmp_path, debs)
     return tmp_path
 
 
@@ -846,7 +858,7 @@ def test_check_expands_the_variant_cache_keys(api: Path) -> None:
     Args:
         api: API tree fixture.
     """
-    _variant_api(
+    _ = _variant_api(
         api, {
             'fam-a-x64-amd64': ['fam-a-x64_8.0.0_amd64.deb'],
             'fam-c-any-amd64': ['fam-c-any_8.0.0_amd64.deb'],
@@ -864,7 +876,7 @@ def test_check_one_variant_missing_is_behind(api: Path) -> None:
     Args:
         api: API tree fixture.
     """
-    _variant_api(
+    _ = _variant_api(
         api, {
             'fam-a-x64-amd64': ['fam-a-x64_8.0.0_amd64.deb'],
             'fam-c-any-amd64': ['fam-c-any_4.0.0_amd64.deb']
@@ -872,8 +884,9 @@ def test_check_one_variant_missing_is_behind(api: Path) -> None:
     )
     result = _run(api, 'check', PAGES_URL=f'file://{api}/pages', STRICT='true')
     assert result.returncode == 1
-    assert 'family FAM_VER: upstream v8.0.0 is not published' \
-        ' (fam-c-any-amd64)' in result.stdout
+    assert ' '.join([
+        'family FAM_VER: upstream v8.0.0 is not published', '(fam-c-any-amd64)'
+    ]) in result.stdout
 
 
 def test_check_skips_the_other_architecture(api: Path) -> None:
@@ -882,7 +895,7 @@ def test_check_skips_the_other_architecture(api: Path) -> None:
     Args:
         api: API tree fixture.
     """
-    _variant_api(api, {'fam-b-arm-arm64': ['fam-b-arm_8.0.0_arm64.deb']})
+    _ = _variant_api(api, {'fam-b-arm-arm64': ['fam-b-arm_8.0.0_arm64.deb']})
     result = _run(
         api,
         'check',

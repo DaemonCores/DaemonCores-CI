@@ -25,9 +25,9 @@ def run_waves(tmp_path: Path,
         The wave outputs, keyed by output name.
     """
     manifest = tmp_path / "pkgs.json"
-    manifest.write_text(json.dumps({"packages": packages}))
+    _ = manifest.write_text(json.dumps({"packages": packages}))
     out = tmp_path / "output"
-    subprocess.run(
+    _ = subprocess.run(
         [sys.executable, str(SCRIPT),
          str(manifest)],
         check=True,
@@ -109,7 +109,7 @@ def test_a_chain_deeper_than_the_wave_jobs_is_an_error(tmp_path: Path) -> None:
         "deps": [f"p{i - 1}"]
     } for i in range(1, 5)]
     manifest = tmp_path / "pkgs.json"
-    manifest.write_text(json.dumps({"packages": chain}))
+    _ = manifest.write_text(json.dumps({"packages": chain}))
     done = subprocess.run([sys.executable,
                            str(SCRIPT),
                            str(manifest)],

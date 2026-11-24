@@ -16,7 +16,7 @@ def test_shell_header_extracts_comment_block(tmp_path: Path) -> None:
         tmp_path: Scratch directory holding the sample script.
     """
     script = tmp_path / "s.sh"
-    script.write_text(
+    _ = script.write_text(
         "#!/bin/bash\n#\n# name - purpose\n# more\nset -e\n# x\n",
         encoding="utf-8"
     )
@@ -39,12 +39,12 @@ def test_root_option_documents_another_repository(tmp_path: Path) -> None:
     Args:
         tmp_path: Scratch repository with a Makefile and one script.
     """
-    (
+    _ = (
         tmp_path / "Makefile"
     ).write_text("PYTHON_SRCS := m.py\nSHELL_SRCS := s.sh\nPOSTINST_SRCS :=\n")
-    (tmp_path / "m.py").write_text('"""Module doc."""\n')
-    (tmp_path /
-     "s.sh").write_text("#!/bin/bash\n#\n# s - does things\nset -e\n")
+    _ = (tmp_path / "m.py").write_text('"""Module doc."""\n')
+    _ = (tmp_path /
+         "s.sh").write_text("#!/bin/bash\n#\n# s - does things\nset -e\n")
     sys.argv = ["gen_docs.py", "--root", str(tmp_path)]
     assert gen_docs.main() == 0
     assert (tmp_path / "docs/reference/Reference-Python.md").is_file()
@@ -60,9 +60,9 @@ def test_dangling_docs_symlink_skips_the_reference_check(
     Args:
         tmp_path: Scratch repository with a docs symlink pointing nowhere.
     """
-    (tmp_path / "Makefile"
-     ).write_text("PYTHON_SRCS := m.py\nSHELL_SRCS :=\nPOSTINST_SRCS :=\n")
-    (tmp_path / "m.py").write_text('"""Module doc."""\n')
+    _ = (tmp_path / "Makefile"
+         ).write_text("PYTHON_SRCS := m.py\nSHELL_SRCS :=\nPOSTINST_SRCS :=\n")
+    _ = (tmp_path / "m.py").write_text('"""Module doc."""\n')
     (tmp_path / "docs").symlink_to(tmp_path / "absent-wiki")
     sys.argv = ["gen_docs.py", "--root", str(tmp_path), "--check"]
     errs = io.StringIO()

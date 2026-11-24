@@ -100,7 +100,7 @@ class FakeIssuesApi:
                 self.send_header("content-type", "application/json")
                 self.send_header("content-length", str(len(body)))
                 self.end_headers()
-                self.wfile.write(body)
+                _ = self.wfile.write(body)
 
             def log_message(self, *args: object, **kwargs: object) -> None:
                 """Silence the default request log.

@@ -3,6 +3,7 @@
 import os
 import shutil
 import subprocess
+import textwrap
 from pathlib import Path
 
 import pytest
@@ -20,16 +21,23 @@ def _deb(path: Path, payload: bytes) -> None:
     """
     root = path.parent / (path.name + '.tree')
     (root / 'DEBIAN').mkdir(parents=True)
-    (root / 'DEBIAN' / 'control').write_text(
-        'Package: p\nVersion: 1\nArchitecture: all\nMaintainer: t <t@t>\n'
-        'Description: t\n',
+    _ = (root / 'DEBIAN' / 'control').write_text(
+        textwrap.dedent(
+            """\
+            Package: p
+            Version: 1
+            Architecture: all
+            Maintainer: t <t@t>
+            Description: t
+            """
+        ),
         encoding='utf-8'
     )
-    (root / 'f').write_bytes(payload)
-    subprocess.run(['dpkg-deb', '--build',
-                    str(root), str(path)],
-                   check=True,
-                   capture_output=True)
+    _ = (root / 'f').write_bytes(payload)
+    _ = subprocess.run(['dpkg-deb', '--build',
+                        str(root), str(path)],
+                       check=True,
+                       capture_output=True)
     shutil.rmtree(root)
 
 
@@ -61,7 +69,7 @@ def test_same_name_builds_are_not_mixed(tmp_path: Path) -> None:
         d = tmp_path / 'in' / f'debs-p-{arch}'
         d.mkdir(parents=True)
         _deb(d / 'p_1_all.deb', payload)
-        (d / f'{arch}.json').write_text('{}', encoding='utf-8')
+        _ = (d / f'{arch}.json').write_text('{}', encoding='utf-8')
     res = _run(tmp_path)
     assert res.returncode == 0, res.stderr
     assert 'duplicate p_1_all.deb' in res.stdout
@@ -84,7 +92,7 @@ def test_corrupt_deb_is_refused(tmp_path: Path) -> None:
     _deb(d / 'p_1_all.deb', os.urandom(60000))
     data = bytearray((d / 'p_1_all.deb').read_bytes())
     data[len(data) // 2] ^= 0xFF
-    (d / 'p_1_all.deb').write_bytes(bytes(data))
+    _ = (d / 'p_1_all.deb').write_bytes(bytes(data))
     res = _run(tmp_path)
     assert res.returncode != 0
     assert 'does not unpack' in res.stderr

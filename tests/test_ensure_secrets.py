@@ -45,7 +45,7 @@ def fixture_env(tmp_path: Path) -> dict[str, str]:
     bindir.mkdir()
     for name, body in (('gh', GH_STUB), ('cosign', COSIGN_STUB)):
         stub = bindir / name
-        stub.write_text(body)
+        _ = stub.write_text(body)
         stub.chmod(stub.stat().st_mode | stat.S_IXUSR)
     secrets = tmp_path / 'secrets'
     secrets.mkdir()
