@@ -140,9 +140,17 @@ jobs:
           docker push "${candidate}"
 
   smoke:
-    name: Boot smoke test
+    name: Boot smoke test ${{ matrix.arch }}
     needs: [detect, rebuild]
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-latest
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
     permissions:
       contents: read
       packages: read
@@ -165,13 +173,14 @@ jobs:
 
       - name: Install the tools
         env:
-          ARCH: amd64
+          ARCH: ${{ matrix.arch }}
         run: bash .ci-tooling/scripts/image-ci/prepare.sh
 
       - name: Boot the candidate
         env:
           IMAGE_TEST_STATE: ${{ runner.temp }}/vm-state
-          IMAGE_REF: ghcr.io/${{ github.repository }}:security-candidate_amd64
+          IMAGE_REF: ghcr.io/${{ github.repository }}:security-candidate_${{ matrix.arch }}
+          ARCH: ${{ matrix.arch }}
         run: |
           set -euo pipefail
           image="${IMAGE_REF,,}"

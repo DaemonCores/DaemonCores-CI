@@ -36,6 +36,28 @@ def test_promotion_waits_for_boot_and_rebuild() -> None:
     assert {'detect', 'rebuild', 'smoke'} <= needs
 
 
+def _archs(name: str) -> set[str]:
+    """Architectures of a job matrix.
+
+    Args:
+        name: Job id.
+
+    Returns:
+        The values of the `arch` key of the matrix entries.
+    """
+    strategy = as_str_mapping(_job(name)['strategy'])
+    matrix = as_str_mapping(strategy['matrix'])
+    return {
+        as_str(as_str_mapping(entry)['arch'])
+        for entry in as_list(matrix['include'])
+    }
+
+
+def test_smoke_boots_every_built_arch() -> None:
+    """Each architecture the rebuild produces is booted before promotion."""
+    assert _archs('smoke') == _archs('rebuild')
+
+
 def test_promote_can_publish_release() -> None:
     """The changelog release needs the contents write permission."""
     perms = as_str_mapping(_job('promote')['permissions'])
