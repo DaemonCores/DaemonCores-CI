@@ -472,21 +472,23 @@ jobs:
       sha256: ${{ steps.hash.outputs.sha256 }}
       url: ${{ steps.url.outputs.url }}
     steps:
-      - id: url
-        shell: bash
-        run: |
-          set -euo pipefail
-          owner="${GITHUB_REPOSITORY%%/*}"
-          repo="${GITHUB_REPOSITORY#*/}"
-          echo "url=https://${owner,,}.github.io/${repo}" >>"$GITHUB_OUTPUT"
       - name: Fetch the shared tooling
-        if: ${{ env.HAS_APT == 'true' }}
         uses: actions/checkout@v7
         with:
           repository: DaemonCores/DaemonCores-CI
           ref: main
           path: .ci-tooling
           persist-credentials: false
+      # Each channel is its own APT repository under the one Pages site.
+      - id: url
+        shell: bash
+        run: |
+          set -euo pipefail
+          owner="${GITHUB_REPOSITORY%%/*}"
+          repo="${GITHUB_REPOSITORY#*/}"
+          channel=$(bash .ci-tooling/scripts/release-channel.sh)
+          site="https://${owner,,}.github.io/${repo}"
+          echo "url=${site}/${channel}" >>"$GITHUB_OUTPUT"
       - id: hash
         if: ${{ env.HAS_APT == 'true' }}
         shell: bash
