@@ -46,7 +46,7 @@ The reusable `full-pipeline.yml` workflow coordinates the following stages:
 | `img-builder.yml` | Produces opt-in raw disk images for supported targets. |
 | `docs-wiki-sync.yml` | Copies `docs/*.md` into a repository wiki (obsolete for DaemonCores repos whose `docs/` is a wiki symlink). |
 | `upstream-check.yml` | Fails when a package tracking an upstream release does not ship that release in the published APT repository (the latest release did not build). |
-| `release.yml` | Publishes a GitHub release from Conventional Commits: `channel: edge` makes a pre-release `vX.Y.Z-edge.N` per releasable push, `channel: stable` makes `vX.Y.Z` and only runs when triggered manually. |
+| `release.yml` | Publishes a GitHub release from Conventional Commits: `channel: edge` makes a pre-release `vX.Y.Z-edge.N` per releasable push, `channel: stable` makes `vX.Y.Z` and only runs when triggered manually or by a green pipeline run of the stable branch. |
 | `lint.yml` | Provisions the lint toolchain (checksum-pinned hadolint) and runs the caller's `make admission check docs-check`. |
 | `rotate-apt-key.yml` | Rotates the APT signing key (`APT_GPG_KEY`) from CI and restarts the caller's pipeline, which republishes the repository. Nothing is committed: the key pin is derived at build time. Needs `PIPELINE_PAT`. |
 

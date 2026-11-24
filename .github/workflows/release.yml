@@ -5,9 +5,10 @@ name: Release
 # channel=edge    publishes a GitHub pre-release `<prefix><next>-edge.<n>` for
 #                 the evaluated commit (`ref`).  The caller decides when: an
 #                 edge tag must only mark a commit whose full pipeline is green.
-# channel=stable  publishes `<prefix><next>` with generated notes.  It only runs
-#                 for a manual trigger (workflow_dispatch) so a stable release
-#                 is always a human decision, never a timer.
+# channel=stable  publishes `<prefix><next>` with generated notes.  It runs for
+#                 a manual trigger (workflow_dispatch) or for a green pipeline
+#                 run of the stable branch (workflow_run); never for a timer or
+#                 a push, so a stable release always follows a green CI.
 #
 # Nothing is published when the commits since the last stable tag contain no
 # fix, perf, revert, feat or breaking change.  Triggers belong in the caller.
@@ -76,10 +77,13 @@ jobs:
               flags=(--prerelease --notes "Automatic edge build of ${TARGET}.")
               ;;
             stable)
-              if [ "$EVENT" != workflow_dispatch ]; then
-                echo "::error::A stable release must be triggered manually."
-                exit 1
-              fi
+              case "$EVENT" in
+                workflow_dispatch|workflow_run) ;;
+                *)
+                  echo "::error::A stable release needs a manual trigger or a green pipeline run."
+                  exit 1
+                  ;;
+              esac
               tag="${PREFIX}${NEXT}"
               flags=(--generate-notes --latest)
               ;;
