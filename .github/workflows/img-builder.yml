@@ -22,7 +22,7 @@ name: img-builder
 # The partitioning + install logic lives in scripts/build-img.sh (a dedicated
 # shell script, like scripts/inject-iso.sh) so heredocs and indentation stay
 # unambiguous. This workflow only prepares the runner, pulls the image, runs
-# the script, and uploads the .img to the install-iso release.
+# the script, and uploads the .img to the release of the version.
 #
 # This workflow is PREPARATORY: it is wired into the pipeline but gated behind
 # the opt-in checkbox. It does not change any existing job.
@@ -164,44 +164,30 @@ jobs:
           zstd -T0 -19 -f "out/${IMG_FILE}" -o "out/${IMG_FILE}.zst"
 
       # ─── UPLOAD ────────────────────────────────────────────────────────────
-      # Upload the .img to the same release the ISO builder uses (install-iso).
-      # The .img and the ISO are alternative install media for the same product,
-      # so they belong in the same release. --clobber replaces a prior upload of
-      # the same filename (e.g. a re-run of the manual dispatch).
-      - name: Create or update release
+      # The .img joins the release of the version, with the ISO: a draft of this
+      # commit that the release workflow promotes once the pipeline is green.
+      - name: Fetch the shared tooling
+        uses: actions/checkout@v4
+        with:
+          repository: DaemonCores/DaemonCores-CI
+          ref: main
+          path: .ci-tooling
+          persist-credentials: false
+      - name: Open the draft release of this commit
+        id: draft
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          set -euo pipefail
-          title="Install media — $(date -u +%Y-%m-%d)"
-          notes="ISO and flashable .img disk images for ${GITHUB_REPOSITORY}."
-          if gh release view install-iso \
-               --repo "${GITHUB_REPOSITORY}" \
-               --json name >/dev/null 2>&1; then
-            gh release edit install-iso \
-              --repo    "${GITHUB_REPOSITORY}" \
-              --title   "$title" \
-              --notes   "$notes" \
-              --target  "${GITHUB_SHA}" \
-              --latest=false
-          else
-            gh release create install-iso \
-              --repo    "${GITHUB_REPOSITORY}" \
-              --title   "$title" \
-              --notes   "$notes" \
-              --target  "${GITHUB_SHA}" \
-              --latest=false
-          fi
+          echo "id=$(bash .ci-tooling/scripts/release-media.sh draft "${GITHUB_SHA}")" >>"$GITHUB_OUTPUT"
 
       - name: Upload .img to release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           IMG_FILE: ${{ steps.names.outputs.img_file }}
+          DRAFT_ID: ${{ steps.draft.outputs.id }}
         run: |
           set -euo pipefail
-          gh release upload install-iso \
-            --repo "${GITHUB_REPOSITORY}" \
-            "out/${IMG_FILE}.zst" --clobber
+          bash .ci-tooling/scripts/release-media.sh upload "${DRAFT_ID}" "out/${IMG_FILE}.zst"
 
       # ── Phone boot.img (gallium/arm64 only) ────────────────────────────────
       # The gallium arm64 (phone) target packs an Android boot.img separately
@@ -214,6 +200,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           IMG_FILE: ${{ steps.names.outputs.img_file }}
+          DRAFT_ID: ${{ steps.draft.outputs.id }}
         run: |
           set -euo pipefail
           BOOT_IMG="out/boot-${IMG_FILE%.img}.img"
@@ -221,6 +208,4 @@ jobs:
             echo "::error::Expected phone boot.img not found at ${BOOT_IMG}" >&2
             exit 1
           fi
-          gh release upload install-iso \
-            --repo "${GITHUB_REPOSITORY}" \
-            "${BOOT_IMG}" --clobber
+          bash .ci-tooling/scripts/release-media.sh upload "${DRAFT_ID}" "${BOOT_IMG}"

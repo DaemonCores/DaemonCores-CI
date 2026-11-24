@@ -82,31 +82,21 @@ jobs:
 
       # ─── RELEASE ──────────────────────────────────────────────────────────
 
-      - name: Create or update release
+      - name: Fetch the shared tooling
+        uses: actions/checkout@v4
+        with:
+          repository: DaemonCores/DaemonCores-CI
+          ref: main
+          path: .ci-tooling
+          persist-credentials: false
+      # The media join the release of the version: a draft of this commit
+      # that the release workflow promotes once the pipeline is green.
+      - name: Open the draft release of this commit
+        id: draft
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          NAME="${{ steps.names.outputs.name }}"
-          DISPLAY="${{ steps.names.outputs.display_name }}"
-          title="Install ISO — $(date -u +%Y-%m-%d)"
-          notes="Live graphical installer ISO for ${DISPLAY}. Boots directly into the bootc-installer GTK4 wizard."
-          if gh release view install-iso \
-               --repo "${{ github.repository }}" \
-               --json name >/dev/null 2>&1; then
-            gh release edit install-iso \
-              --repo    "${{ github.repository }}" \
-              --title   "$title" \
-              --notes   "$notes" \
-              --target  "${{ github.sha }}" \
-              --latest=false
-          else
-            gh release create install-iso \
-              --repo    "${{ github.repository }}" \
-              --title   "$title" \
-              --notes   "$notes" \
-              --target  "${{ github.sha }}" \
-              --latest=false
-          fi
+          echo "id=$(bash .ci-tooling/scripts/release-media.sh draft "${GITHUB_SHA}")" >>"$GITHUB_OUTPUT"
 
       # ─── PULL IMAGES ──────────────────────────────────────────────────────
 
@@ -530,21 +520,10 @@ jobs:
       - name: Upload ISO to release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DRAFT_ID: ${{ steps.draft.outputs.id }}
         run: |
           set -euo pipefail
-          # A previously interrupted multipart upload can leave a pending
-          # asset with the same name that gh release upload --clobber cannot
-          # replace (HTTP 422 already_exists, run 41565502790 amd64): delete
-          # the stale asset by name first.
-          RELEASE_ID=$(gh api "repos/${{ github.repository }}/releases/tags/install-iso" --jq .id)
           ASSET_NAME=$(basename "${ISO_FINAL}")
-          for ext in "" ".sha256"; do
-            ASSET_ID=$(gh api "repos/${{ github.repository }}/releases/${RELEASE_ID}/assets" \
-              --jq ".[] | select(.name == \"${ASSET_NAME}${ext}\") | .id" || true)
-            if [ -n "${ASSET_ID}" ]; then
-              gh api -X DELETE "repos/${{ github.repository }}/releases/assets/${ASSET_ID}" >/dev/null
-            fi
-          done
           # GitHub release assets cap at 2 GiB (HTTP 422 above it: runs
           # 41565502790, 41567748715 on the 2.2G amd64 offline ISO).
           # Oversized ISOs are uploaded as split parts (ISO_PARTS, cat to
@@ -561,7 +540,5 @@ jobs:
             rm -rf parts && mkdir parts
             ISO_ASSETS=$(ls "${ISO_FINAL}" "${ISO_FINAL}.sha256")
           fi
-          gh release upload install-iso \
-            --repo "${{ github.repository }}" \
-            ${ISO_ASSETS} \
-            --clobber
+          # shellcheck disable=SC2086 # word splitting of the asset list is intended
+          bash .ci-tooling/scripts/release-media.sh upload "${DRAFT_ID}" ${ISO_ASSETS}

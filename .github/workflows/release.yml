@@ -74,7 +74,6 @@ jobs:
           case "$CHANNEL" in
             edge)
               tag="${PREFIX}${EDGE}"
-              flags=(--prerelease --notes "Automatic edge build of ${TARGET}.")
               ;;
             stable)
               case "$EVENT" in
@@ -85,7 +84,6 @@ jobs:
                   ;;
               esac
               tag="${PREFIX}${NEXT}"
-              flags=(--generate-notes --latest)
               ;;
             *)
               echo "::error::Unknown channel '${CHANNEL}'."
@@ -96,4 +94,4 @@ jobs:
             echo "::notice::${tag} already exists."
             exit 0
           fi
-          gh release create "$tag" --target "$TARGET" --title "$tag" "${flags[@]}"
+          bash .ci-tooling/scripts/release-media.sh publish "$TARGET" "$tag" "$CHANNEL"
