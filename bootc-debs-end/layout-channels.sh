@@ -13,6 +13,8 @@
 #   SITE_DIR   directory holding the freshly built repository (required)
 #   CHANNEL    channel this run publishes (required, one of CHANNELS)
 #   CHANNELS   all channels (default: edge stable security)
+#   DROP_CHANNELS  channels to unpublish: not carried over, so the next
+#              deployment removes them from the site (default: none)
 #   SUITE      APT suite (default: trixie)
 #   PAGES_URL  base URL of the published site (default derived from
 #              GITHUB_REPOSITORY)
@@ -23,6 +25,7 @@ here="$(dirname "${BASH_SOURCE[0]}")"
 CHANNEL="${CHANNEL:-$(bash "${here}/../scripts/release-channel.sh")}"
 CHANNELS="${CHANNELS:-edge stable security}"
 SUITE="${SUITE:-trixie}"
+DROP_CHANNELS="${DROP_CHANNELS:-}"
 ROOT_KEEP=(debs-cache sbom.json CHANGELOG.md)
 
 # shellcheck source=build-deb/content-hash.sh
@@ -109,7 +112,12 @@ main() {
   fi
   place_own_channel
   for ch in ${CHANNELS}; do
-    [[ "${ch}" == "${CHANNEL}" ]] || carry_channel "${ch}"
+    [[ "${ch}" != "${CHANNEL}" ]] || continue
+    if [[ " ${DROP_CHANNELS} " == *" ${ch} "* ]]; then
+      echo "layout: channel ${ch} dropped from the site"
+      continue
+    fi
+    carry_channel "${ch}"
   done
 }
 
