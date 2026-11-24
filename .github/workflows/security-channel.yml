@@ -184,10 +184,22 @@ jobs:
     needs: [detect, rebuild, smoke]
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      contents: write
       packages: write
       id-token: write
     steps:
+      - name: Fetch the shared tooling
+        uses: actions/checkout@v4
+        with:
+          repository: DaemonCores/DaemonCores-CI
+          ref: main
+          path: .ci-tooling
+          persist-credentials: false
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: security-upgrades
+
       - name: Log in to GHCR
         env:
           GHCR_TOKEN: ${{ github.token }}
@@ -219,3 +231,15 @@ jobs:
           refs: ${{ steps.tags.outputs.ref }}
           private-key: ${{ secrets.COSIGN_PRIVATE_KEY }}
           password: ${{ secrets.COSIGN_PASSWORD }}
+
+      - name: Publish the changelog
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          day=$(date -u +%Y%m%d)
+          bash .ci-tooling/scripts/security-changelog.sh "${day}" \
+            < upgrades.txt > notes.md
+          gh release create "security-${day}" --title "Security update ${day}" \
+            --notes-file notes.md --prerelease --target "${GITHUB_SHA}"
