@@ -241,5 +241,11 @@ jobs:
           day=$(date -u +%Y%m%d)
           bash .ci-tooling/scripts/security-changelog.sh "${day}" \
             < upgrades.txt > notes.md
+          IMAGE="ghcr.io/${GH_REPO,,}"
+          # amd64 only: the runner cannot execute the arm64 image.
+          docker run --rm --entrypoint dpkg-query \
+            "${IMAGE}:security-candidate_amd64" \
+            -W -f '${binary:Package} ${Version}\n' > packages-amd64.txt
           gh release create "security-${day}" --title "Security update ${day}" \
-            --notes-file notes.md --prerelease --target "${GITHUB_SHA}"
+            --notes-file notes.md --prerelease --target "${GITHUB_SHA}" \
+            packages-amd64.txt
