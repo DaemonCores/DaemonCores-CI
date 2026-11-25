@@ -38,9 +38,9 @@ while read -r pkg old new; do
   seen=$(awk -v p="${pkg}" -v v="${new}" '$1 == p && $2 == v {print $3; exit}' "${ledger}")
   if [[ -z "${seen}" ]]; then
     seen="${now}"
-    echo "${pkg} ${new} ${seen}" >> "${ledger}"
+    echo "${pkg} ${new} ${seen}" >>"${ledger}"
   fi
-  if grep -qxF -- "${pkg}" <<< "${urgent}" \
+  if grep -qxF -- "${pkg}" <<<"${urgent}" \
     || ((now - seen >= hours * 3600)); then
     echo "${pkg} ${old} ${new}"
   fi

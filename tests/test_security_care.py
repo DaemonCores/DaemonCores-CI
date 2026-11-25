@@ -40,7 +40,11 @@ def _run(upgrades: str,
 
 
 def test_new_version_waits_for_the_care_delay(tmp_path: Path) -> None:
-    """A version seen for the first time is held back and recorded."""
+    """A version seen for the first time is held back and recorded.
+
+    Args:
+        tmp_path: Pytest temporary directory holding the ledger.
+    """
     ledger = tmp_path / "ledger"
     out = _run("curl 8.14.1-2 8.14.1-2+deb13u1\n", ledger, 1000).stdout
     assert out == ""
@@ -48,16 +52,24 @@ def test_new_version_waits_for_the_care_delay(tmp_path: Path) -> None:
 
 
 def test_version_is_adopted_once_old_enough(tmp_path: Path) -> None:
-    """After the delay the version goes through, unchanged."""
+    """After the delay the version goes through, unchanged.
+
+    Args:
+        tmp_path: Pytest temporary directory holding the ledger.
+    """
     ledger = tmp_path / "ledger"
-    ledger.write_text("curl 8.14.1-2+deb13u1 1000\n")
+    _ = ledger.write_text("curl 8.14.1-2+deb13u1 1000\n")
     line = "curl 8.14.1-2 8.14.1-2+deb13u1\n"
     assert _run(line, ledger, 1000 + DELAY * HOUR - 1).stdout == ""
     assert _run(line, ledger, 1000 + DELAY * HOUR).stdout == line
 
 
 def test_urgent_package_skips_the_delay(tmp_path: Path) -> None:
-    """A package named by the critical feed is adopted at once."""
+    """A package named by the critical feed is adopted at once.
+
+    Args:
+        tmp_path: Pytest temporary directory holding the ledger.
+    """
     ledger = tmp_path / "ledger"
     line = "curl 8.14.1-2 8.14.1-2+deb13u1\n"
     assert _run(line, ledger, 1000, urgent="curl\n").stdout == line
