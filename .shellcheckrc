@@ -1,0 +1,4 @@
+# Follow sourced files, resolved from the script directory, for every caller
+# (make check, tk gate, editors). No rule is disabled here.
+external-sources=true
+source-path=SCRIPTDIR
