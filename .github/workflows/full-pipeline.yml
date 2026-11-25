@@ -628,6 +628,8 @@ jobs:
           # The only job that deploys: packages the plan skipped have no
           # artifact, they must be carried over from the live site.
           carry_over: true
+          # Operator switch (repository variable): channels to unpublish.
+          drop_channels: ${{ vars.DROP_CHANNELS }}
 
   # Aggregate any_rebuilt from both arches: a rebuild on either arch forces a
   # no-cache image rebuild. workflow_call outputs from reusable workflows are
