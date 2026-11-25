@@ -6,9 +6,8 @@ import subprocess
 from pathlib import Path
 
 SCRIPT = (
-    Path(__file__).resolve().parent.parent
-    / "bootc-debs-end"
-    / "layout-channels.sh"
+    Path(__file__).resolve().parent.parent / "bootc-debs-end" /
+    "layout-channels.sh"
 )
 
 
@@ -42,9 +41,10 @@ def _publish(site: Path, channel: str, body: bytes) -> bytes:
     return body
 
 
-def _run(
-    built: Path, channel: str, published: Path, drop: str = ""
-) -> subprocess.CompletedProcess[str]:
+def _run(built: Path,
+         channel: str,
+         published: Path,
+         drop: str = "") -> subprocess.CompletedProcess[str]:
     """Run the script.
 
     Args:
@@ -104,12 +104,10 @@ def test_own_channel_moves_and_siblings_are_carried(tmp_path: Path) -> None:
     assert (built / "stable" / "gpg.key").read_text() == "new"
     assert (built / "debs-cache").is_dir()
     assert (built / "sbom.json").is_file()
-    assert (
-        built / "edge" / "pool" / "main" / "a.deb"
-    ).read_bytes() == b"edge-deb"
-    assert (
-        built / "security" / "pool" / "main" / "a.deb"
-    ).read_bytes() == b"sec-deb"
+    assert (built / "edge" / "pool" / "main" /
+            "a.deb").read_bytes() == b"edge-deb"
+    assert (built / "security" / "pool" / "main" /
+            "a.deb").read_bytes() == b"sec-deb"
     assert (built / "edge" / "dists" / "trixie" / "InRelease").is_file()
 
 

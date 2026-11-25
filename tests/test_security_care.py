@@ -9,9 +9,10 @@ HOUR = 3600
 DELAY = 24
 
 
-def _run(
-    upgrades: str, ledger: Path, now: int, urgent: str = ""
-) -> subprocess.CompletedProcess[str]:
+def _run(upgrades: str,
+         ledger: Path,
+         now: int,
+         urgent: str = "") -> subprocess.CompletedProcess[str]:
     """Run the care delay on a list of upgrades.
 
     Args:
@@ -24,12 +25,17 @@ def _run(
         The completed process; stdout holds the adopted upgrades.
     """
     return subprocess.run(
-        ["bash", str(SCRIPT), str(ledger), str(DELAY), str(now)],
+        ["bash", str(SCRIPT),
+         str(ledger), str(DELAY),
+         str(now)],
         input=upgrades,
         capture_output=True,
         text=True,
         check=True,
-        env={"PATH": "/usr/bin:/bin", "SECURITY_URGENT": urgent},
+        env={
+            "PATH": "/usr/bin:/bin",
+            "SECURITY_URGENT": urgent
+        },
     )
 
 
