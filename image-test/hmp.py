@@ -3,13 +3,21 @@
 
 usage: hmp.py SOCKET COMMAND...
 """
+
 import re
 import socket
 import sys
 
 
 def read_reply(sock: socket.socket) -> str:
-    """Read from the monitor until the (qemu) prompt and strip escapes."""
+    """Read from the monitor until the (qemu) prompt and strip escapes.
+
+    Args:
+        sock: Connected QEMU monitor socket.
+
+    Returns:
+        The decoded reply with line-editor escapes removed.
+    """
     out = b""
     try:
         while not out.rstrip().endswith(b"(qemu)"):
@@ -30,7 +38,7 @@ def main() -> None:
     sock = socket.socket(socket.AF_UNIX)
     sock.settimeout(5)
     sock.connect(path)
-    read_reply(sock)
+    _ = read_reply(sock)
     for command in commands:
         sock.sendall(command.encode() + b"\n")
         print("> " + command)

@@ -139,7 +139,11 @@ btrfs qgroup limit 2G "${T}/var/log" >/dev/null 2>&1 || true
 if [ "${ARCH:-amd64}" = "arm64" ]; then
   CONSOLE_KARGS=(--karg console=tty0 --karg console=ttyAMA0)
 else
-  CONSOLE_KARGS=(--karg console=tty0 --karg console=ttyS0,115200)
+  # The comma belongs to the kernel console syntax (device,baud): keep it in
+  # one karg, held in a variable so no reader mistakes it for an array
+  # separator.
+  serial_karg='console=ttyS0,115200'
+  CONSOLE_KARGS=(--karg console=tty0 --karg "${serial_karg}")
 fi
 
 # Extra kernel arguments of the manifest category (validated by the harness):
@@ -207,7 +211,7 @@ echo "=== deployed boot config ==="
 echo "--- ${T}/boot loader files ---"
 find "${T}/boot" -maxdepth 4 -type f -print -exec sh -c 'echo "===== $1 ====="; cat "$1" 2>/dev/null | head -40' _ {} \; 2>/dev/null | grep -v '^Binary file' | head -200
 echo "--- deployment etc/kernel/cmdline + usr/lib/kernel/cmdline ---"
-deploy=$(ls -d "${T}"/ostree/deploy/*/deploy/[0-9a-f]*.0 2>/dev/null | head -1)
+deploy=$(find "${T}/ostree/deploy" -mindepth 3 -maxdepth 3 -type d -name '[0-9a-f]*.0' -print -quit 2>/dev/null)
 if [ -n "${deploy}" ]; then
   for f in etc/kernel/cmdline usr/lib/kernel/cmdline usr/share/kernel/cmdline; do
     if [ -f "${deploy}/${f}" ]; then echo "--- ${f} ---"; cat "${deploy}/${f}"; else echo "--- ${f}: ABSENT ---"; fi
@@ -224,9 +228,9 @@ echo "=== end deployed boot config ==="
 # the same commit again gives the VM a rollback target without network access.
 # The commit hash comes from the deploy directory name (<hash>.0) — reliable
 # because bootc install always produces exactly one deployment.
-stateroot=$(ls "${T}/ostree/deploy/" 2>/dev/null | head -1)
+stateroot=$(find "${T}/ostree/deploy" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' 2>/dev/null | head -1)
 stateroot="${stateroot:-default}"
-deployed_dir=$(ls -d "${T}/ostree/deploy/${stateroot}/deploy/"*.0 2>/dev/null | head -1)
+deployed_dir=$(find "${T}/ostree/deploy/${stateroot}/deploy" -mindepth 1 -maxdepth 1 -type d -name '*.0' -print -quit 2>/dev/null)
 if [ -n "${deployed_dir}" ]; then
   deployed_rev="${deployed_dir##*/}"
   deployed_rev="${deployed_rev%.0}"

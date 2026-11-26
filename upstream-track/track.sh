@@ -190,7 +190,9 @@ patch_urls() {
       echo "kernel patch manifest not found: ${patches}/kernel.yml" >&2
       return 1
     }
-    yq '.patches[] | . as $p | $p.url | sub("{topic}"; ($p.topic // ""))' \
+    # The yq expression is double-quoted with every $p escaped, so the
+    # shell hands it over untouched and shellcheck has nothing to silence.
+    yq ".patches[] | . as \$p | \$p.url | sub(\"{topic}\"; (\$p.topic // \"\"))" \
       "${patches}/kernel.yml"
   else
     local manifest

@@ -15,12 +15,26 @@ Usage:
 
 import json
 import sys
-from typing import Any
+from typing import NotRequired, TypedDict, cast
 
 KERNEL_MARKER = 'kernel_signing_setup'
 
 
-def build_order(packages: list[dict[str, Any]]) -> list[str]:
+class PackageEntry(TypedDict):
+    """One package entry of an expanded manifest.
+
+    Attributes:
+        name: Package name.
+        deps: Names of the packages it depends on.
+        build: Build script text of the package.
+    """
+
+    name: str
+    deps: NotRequired[list[str]]
+    build: NotRequired[str]
+
+
+def build_order(packages: list[PackageEntry]) -> list[str]:
     """Return the package names in build order.
 
     Args:
@@ -51,12 +65,19 @@ def build_order(packages: list[dict[str, Any]]) -> list[str]:
 
 
 def main(argv: list[str]) -> int:
-    """Read the manifest JSON named by argv[1] and print the order."""
+    """Read the manifest JSON named by argv[1] and print the order.
+
+    Args:
+        argv: Command-line arguments; argv[1] is the manifest path.
+
+    Returns:
+        Process exit code: 0 on success, 2 on a usage error.
+    """
     if len(argv) != 2:
         print(__doc__, file=sys.stderr)
         return 2
     with open(argv[1], encoding='utf-8') as handle:
-        packages = json.load(handle)['packages']
+        packages = cast("list[PackageEntry]", json.load(handle)['packages'])
     print('\n'.join(build_order(packages)))
     return 0
 

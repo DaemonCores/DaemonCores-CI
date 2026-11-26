@@ -5,7 +5,9 @@ name: Security channel
 # Debian security archive has no newer version of a package of the image.
 #
 #   stable@digest --apt-get -s upgrade--> security upgrades (security-detect.sh)
-#   none -> stop; some -> FROM stable@digest + --only-upgrade of those packages
+#   -> adoption (security-adopt.sh): advisory gate (OSV), CISA KEV bypass,
+#      care delay on the exact version (ledger kept in the Actions cache)
+#   none adopted -> stop; some -> FROM stable@digest + the exact versions pinned
 #   -> boot smoke test -> tags security and security-YYYYMMDD -> cosign
 #
 # It always starts from stable, never from the previous security image, so
@@ -19,6 +21,11 @@ on:
         type: string
         required: false
         default: stable
+      care_hours:
+        description: 'Hours an exact new version waits before adoption (CISA KEV listed fixes skip it).'
+        type: number
+        required: false
+        default: 24
 
 permissions:
   contents: read
@@ -30,6 +37,7 @@ jobs:
     permissions:
       contents: read
       packages: read
+      issues: write
     outputs:
       digest: ${{ steps.stable.outputs.digest }}
       upgrades: ${{ steps.detect.outputs.found }}
@@ -73,8 +81,35 @@ jobs:
           IMAGE="${IMAGE,,}"
           docker run --rm "${IMAGE}@${DIGEST}" bash -c \
             'apt-get update -qq >/dev/null && apt-get -s upgrade' \
-            | bash .ci-tooling/scripts/security-detect.sh > upgrades.txt
-          cat upgrades.txt
+            | bash .ci-tooling/scripts/security-detect.sh > candidates.txt
+          cat candidates.txt
+          docker run --rm "${IMAGE}@${DIGEST}" bash -c \
+            '. /etc/os-release && echo "${ID^}:${VERSION_ID}"' > ecosystem.txt
+          docker run --rm --entrypoint dpkg-query "${IMAGE}@${DIGEST}" \
+            -W -f '${binary:Package} ${source:Package}\n' > srcmap.txt
+
+      # A lost cache only restarts the care delay: the safe direction.
+      - name: Restore the care ledger
+        uses: actions/cache@v4
+        with:
+          path: care-ledger.txt
+          key: security-care-${{ github.run_id }}
+          restore-keys: security-care-
+
+      - name: Adopt the upgrades that pass the gates
+        id: adopt
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          CARE_HOURS: ${{ inputs.care_hours }}
+        run: |
+          set -euo pipefail
+          touch care-ledger.txt
+          bash .ci-tooling/scripts/security-adopt.sh "$(cat ecosystem.txt)" \
+            srcmap.txt care-ledger.txt "${CARE_HOURS}" adoption \
+            < candidates.txt > upgrades.txt
+          cat adoption/report.md
+          cp adoption/report.md report.md
           if [ -s upgrades.txt ]; then
             echo "found=true" >> "${GITHUB_OUTPUT}"
           else
@@ -84,7 +119,10 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: security-upgrades
-          path: upgrades.txt
+          path: |
+            upgrades.txt
+            candidates.txt
+            report.md
 
   rebuild:
     name: Rebuild ${{ matrix.arch }}
@@ -250,6 +288,7 @@ jobs:
           day=$(date -u +%Y%m%d)
           bash .ci-tooling/scripts/security-changelog.sh "${day}" \
             < upgrades.txt > notes.md
+          cat report.md >> notes.md
           IMAGE="ghcr.io/${GH_REPO,,}"
           # amd64 only: the runner cannot execute the arm64 image.
           docker run --rm --entrypoint dpkg-query \

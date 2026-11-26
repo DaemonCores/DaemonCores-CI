@@ -38,6 +38,9 @@ def fixture_env(tmp_path: Path) -> dict[str, str]:
     return {
         **os.environ,
         'PATH': f'{bindir}:{os.environ["PATH"]}',
+        # The runner exports GITHUB_REPOSITORY: unset it so the default case
+        # (no --repo) is deterministic; the --repo test sets it explicitly.
+        'GITHUB_REPOSITORY': '',
         'GH_ARGS': str(tmp_path / 'gh.args'),
         'GH_STDIN': str(tmp_path / 'gh.stdin'),
     }

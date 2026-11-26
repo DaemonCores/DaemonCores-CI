@@ -56,7 +56,10 @@ arg-type-hints-in-docstring = false
 check-return-types = false
 require-return-section-when-returning-nothing = false
 allow-init-docstring = true
-exclude = '\.git|\.tox'
+# The tool environments of the gate and the vendored tk CLI are not project
+# code: the gate itself already excludes them from yapf and bandit, so the docs
+# stage skips them too instead of failing on a virtualenv or on tk itself.
+exclude = '\.git|\.tox|\.venv|\.?venv/|node_modules|\.tk'
 
 [tool.mypy]
 # scripts/ is the import root of the shared checks.

@@ -14,6 +14,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
+from historical import pre_extraction_rev
 from typed_docs import (
     as_list,
     as_mapping,
@@ -27,7 +28,6 @@ from typed_docs import (
 ROOT = Path(__file__).resolve().parents[1]
 CI = ROOT / 'scripts' / 'image-ci'
 WORKFLOW = ROOT / '.github' / 'workflows' / 'bootc-build.yml'
-OLD_REV = '28dd042'
 JQ_WORKS = shutil.which('jq') is not None and subprocess.run(
     ['jq', '-n', '1'], capture_output=True, check=False
 ).returncode == 0
@@ -341,8 +341,9 @@ def _old_chash_script() -> str:
     Returns:
         The shell text, GitHub expressions replaced by their values.
     """
+    rev = pre_extraction_rev('scripts/image-ci/build-arch.sh')
     text = subprocess.run([
-        'git', 'show', f'{OLD_REV}:.github/workflows/bootc-build.yml'
+        'git', 'show', f'{rev}:.github/workflows/bootc-build.yml'
     ],
                           cwd=ROOT,
                           check=True,
@@ -1215,3 +1216,21 @@ def test_the_thin_twin_is_derived_with_the_owner_tags(sb: Sandbox) -> None:
     log = sb.log.read_text()
     assert log.index('image-test test'
                      ) < log.rindex(f'{IMAGE}:latest_amd64-thpalways')
+
+
+@needs_jq
+def test_looking_up_an_absent_tag_raises(sb: Sandbox) -> None:
+    """The state lookup names the tag it could not find.
+
+    Args:
+        sb: Sandbox running the harness.
+    """
+    _ = sb.run([entry('latest')], 'hash')
+    with pytest.raises(KeyError, match='absent'):
+        _ = sb.row('absent')
+
+
+def test_a_build_command_without_a_tag_is_rejected() -> None:
+    """The tag extractor refuses a command line that carries no ``--tag``."""
+    with pytest.raises(AssertionError, match='no --tag option'):
+        _ = _tag_of('podman build -f Containerfile .')

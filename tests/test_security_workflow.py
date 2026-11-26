@@ -62,3 +62,20 @@ def test_promote_can_publish_release() -> None:
     """The changelog release needs the contents write permission."""
     perms = as_str_mapping(_job('promote')['permissions'])
     assert perms['contents'] == 'write'
+
+
+def test_detection_goes_through_the_adoption_pipeline() -> None:
+    """Candidates are adopted by the gates and the care delay, ledger cached."""
+    text = WORKFLOW.read_text()
+    assert 'security-adopt.sh' in text
+    assert 'care_hours' in text
+    steps = [as_str_mapping(step) for step in as_list(_job('detect')['steps'])]
+    caches = [
+        step for step in steps
+        if as_str(step.get('uses', '')).startswith('actions/cache@')
+    ]
+    assert len(caches) == 1
+    cache_with = as_str_mapping(caches[0]['with'])
+    assert as_str(cache_with['restore-keys']).startswith('security-care-')
+    perms = as_str_mapping(_job('detect')['permissions'])
+    assert perms['issues'] == 'write'

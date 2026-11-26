@@ -6,6 +6,26 @@ import os
 import re
 import sys
 import tempfile
+from typing import TypedDict, cast
+
+
+class RouterEntry(TypedDict):
+    """One rendered Traefik router.
+
+    Attributes:
+        rule: Traefik rule expression.
+        service: Backend service URL.
+        entrypoints: Entrypoint names the router listens on.
+        middlewares: Middleware names applied to the router.
+        tls: Whether TLS is enabled for the router.
+    """
+
+    rule: str
+    service: str
+    entrypoints: list[str]
+    middlewares: list[str]
+    tls: bool
+
 
 GW_OUT = sys.argv[1]
 BLOC = re.compile(r"<!--gateway\b(.*?)\n\s*gateway-->", re.S)
@@ -31,7 +51,7 @@ def warn(vid: str, msg: str) -> None:
     print(f"::warning::gateway NOTES CT {vid}: {msg}", file=sys.stderr)
 
 
-def parse_bloc(bloc: str, vmid: str) -> tuple[dict[str, dict], bool]:
+def parse_bloc(bloc: str, vmid: str) -> tuple[dict[str, RouterEntry], bool]:
     """Parse the fenced-YAML variant B bloc -> (routers, bad?).
 
     Args:
@@ -45,45 +65,57 @@ def parse_bloc(bloc: str, vmid: str) -> tuple[dict[str, dict], bool]:
     m = FENCE.search(bloc)
     if not m:
         warn(
-            vmid,
-            "no ```yaml fenced block inside the gateway markers; bloc skipped "
+            vmid, "no ```yaml fenced block inside the gateway markers; " +
+            "bloc skipped " +
             "(variant B requires routers: in a fenced yaml block)"
         )
         return {}, True
     try:
-        data = yaml.safe_load(m.group(1))
+        data = cast("object", yaml.safe_load(m.group(1)))
     except yaml.YAMLError as e:
         warn(
             vmid,
             f"unparsable YAML in the gateway fenced block, bloc skipped: {e}"
         )
         return {}, True
-    routers_root = data.get("routers") if isinstance(data, dict) else None
-    if not isinstance(routers_root, dict) or not routers_root:
+    routers_root = (
+        cast("dict[str, object]", data).get("routers")
+        if isinstance(data, dict) else None
+    )
+    root = (
+        cast("dict[str, object]", routers_root)
+        if isinstance(routers_root, dict) else None
+    )
+    if not root:
         warn(
             vmid, "no `routers:` mapping found in the fenced YAML; bloc skipped"
         )
         return {}, True
-    routers = {}
+    routers: dict[str, RouterEntry] = {}
     bad = False
-    for name, spec in routers_root.items():
-        if not isinstance(spec, dict
-                          ) or not spec.get("rule") or not spec.get("service"):
+    for name, spec_obj in root.items():
+        spec = (
+            cast("dict[str, object]", spec_obj)
+            if isinstance(spec_obj, dict) else None
+        )
+        if not spec or not spec.get("rule") or not spec.get("service"):
             warn(vmid, f"router {name!r}: missing rule/service; router skipped")
             bad = True
             continue
-        eps = spec.get("entrypoints", "websecure")
-        if isinstance(eps, str):
-            eps = [e for e in eps.split("+") if e]
-        elif eps is None:
+        eps_obj = spec.get("entrypoints", "websecure")
+        eps: list[str]
+        if isinstance(eps_obj, str):
+            eps = [e for e in eps_obj.split("+") if e]
+        elif eps_obj is None:
             eps = []
         else:
-            eps = [str(e) for e in eps]
-        mws = spec.get("middlewares") or ""
-        if isinstance(mws, str):
-            mws = [w for w in mws.split("+") if w]
+            eps = [str(e) for e in cast("list[object]", eps_obj)]
+        mws_obj = spec.get("middlewares") or ""
+        mws: list[str]
+        if isinstance(mws_obj, str):
+            mws = [w for w in mws_obj.split("+") if w]
         else:
-            mws = [str(w) for w in mws]
+            mws = [str(w) for w in cast("list[object]", mws_obj)]
         tls = spec.get("tls", "")
         if isinstance(tls, bool):
             tbool = tls
@@ -114,7 +146,7 @@ def quote(s: str) -> str:
                                            '\\"').replace("\n", "\\n") + '"'
 
 
-def render(routers: dict[str, dict]) -> str:
+def render(routers: dict[str, RouterEntry]) -> str:
     """Render the routers mapping as the Traefik dynamic YAML text.
 
     Args:
@@ -150,11 +182,10 @@ def render(routers: dict[str, dict]) -> str:
 
 def main() -> None:
     """Read descriptions from stdin and write the dynamic config file."""
-    routers = {}
+    routers: dict[str, RouterEntry] = {}
     skipped = False
-    for vmid, desc in sorted(
-        json.load(sys.stdin).items(), key=lambda kv: int(kv[0])
-    ):
+    descriptions = cast("dict[str, str]", json.load(sys.stdin))
+    for vmid, desc in sorted(descriptions.items(), key=lambda kv: int(kv[0])):
         m = BLOC.search(desc)
         if not m:
             continue
@@ -165,17 +196,17 @@ def main() -> None:
             r"^[A-Za-z0-9_-]+:\s*\S+=", bloc, re.M
         ):
             print(
-                f"::warning::gateway NOTES CT {vmid}: flat key=value "
-                "variant A is not supported by this reconcile; bloc skipped "
-                "(see wiki format arbitration)",
+                f"::warning::gateway NOTES CT {vmid}: flat key=value " +
+                "variant A is not supported by this reconcile; " +
+                "bloc skipped (see wiki format arbitration)",
                 file=sys.stderr
             )
             sys.exit(4)
         if re.search(r"^\s*routers:\s*$", bloc,
                      re.M) and not FENCE.search(bloc):
             print(
-                f"::warning::gateway NOTES CT {vmid}: `routers:` without a "
-                "```yaml fence is not supported; bloc skipped",
+                f"::warning::gateway NOTES CT {vmid}: `routers:` " +
+                "without a ```yaml fence is not supported; bloc skipped",
                 file=sys.stderr
             )
             sys.exit(4)
@@ -194,7 +225,7 @@ def main() -> None:
         prefix=".dynamic.yml.", dir=os.path.dirname(GW_OUT) or "."
     )
     with os.fdopen(fd, "w") as f:
-        f.write(content)
+        _ = f.write(content)
     os.chmod(tmp, 0o644)
     os.replace(tmp, GW_OUT)
     print(

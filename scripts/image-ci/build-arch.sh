@@ -590,7 +590,9 @@ lint_image() {
   # entrypoint (image-builder) would eat every argument of the invocation.
   # One line on purpose: the stub-based tests record each podman invocation
   # as a single log line.
-  podman_ run --rm --entrypoint sh "${ref}" -c 'if ! command -v bootc >/dev/null 2>&1; then echo "no bootc: lint not applicable"; exit 0; fi; if [ -z "$(ls -A /usr/lib/modules 2>/dev/null)" ]; then echo "no kernel: lint not applicable"; exit 0; fi; ldd /usr/bin/bootc; for so in /usr/lib/libostree-1.so*; do [ -e "${so}" ] && ldd "${so}"; done; exec bootc container lint' || return 1
+  # The container script contains no $ at all, so nothing can expand on the
+  # host and shellcheck has no SC2016 to report: no suppression is needed.
+  podman_ run --rm --entrypoint sh "${ref}" -c 'if ! command -v bootc >/dev/null 2>&1; then echo "no bootc: lint not applicable"; exit 0; fi; if ! ls -A /usr/lib/modules 2>/dev/null | grep -q .; then echo "no kernel: lint not applicable"; exit 0; fi; ldd /usr/bin/bootc; ls /usr/lib/libostree-1.so* >/dev/null 2>&1 && ldd /usr/lib/libostree-1.so*; exec bootc container lint' || return 1
 }
 
 phase_lint() {

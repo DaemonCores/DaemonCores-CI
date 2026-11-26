@@ -10,8 +10,21 @@ Writes ``wave0..wave3=<JSON array of package names>`` to the file named by
 import json
 import os
 import sys
+from typing import NotRequired, TypedDict, cast
 
 WAVE_COUNT = 4
+
+
+class PackageEntry(TypedDict):
+    """One package entry of the resolved manifest.
+
+    Attributes:
+        name: Package name.
+        deps: Names of the packages it depends on.
+    """
+
+    name: str
+    deps: NotRequired[list[str]]
 
 
 def wave(name: str, deps: dict[str, list[str]], memo: dict[str, int]) -> int:
@@ -39,7 +52,8 @@ def main(path: str) -> None:
         path: Manifest JSON file listing the packages and their deps.
     """
     with open(path, encoding="utf-8") as handle:
-        pkgs = json.load(handle)["packages"] or []
+        manifest = cast("dict[str, object]", json.load(handle))
+    pkgs = cast("list[PackageEntry]", manifest["packages"] or [])
     deps = {p["name"]: (p.get("deps") or []) for p in pkgs}
     memo: dict[str, int] = {}
 
@@ -53,12 +67,12 @@ def main(path: str) -> None:
     )
     if too_deep:
         sys.exit(
-            f"dependency chain deeper than {WAVE_COUNT} waves, "
+            f"dependency chain deeper than {WAVE_COUNT} waves, " +
             f"add a wave job for: {', '.join(too_deep)}"
         )
     with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as out:
         for i in range(WAVE_COUNT):
-            out.write(f"wave{i}={json.dumps(sorted(waves.get(i, [])))}\n")
+            _ = out.write(f"wave{i}={json.dumps(sorted(waves.get(i, [])))}\n")
 
 
 if __name__ == "__main__":

@@ -16,6 +16,19 @@ family safety net.
 import collections
 import json
 import sys
+from typing import NotRequired, TypedDict, cast
+
+
+class PackageEntry(TypedDict):
+    """One package entry of an expanded manifest.
+
+    Attributes:
+        name: Package name.
+        deps: Names of the packages it depends on.
+    """
+
+    name: str
+    deps: NotRequired[list[str]]
 
 
 def main(path: str, only: str) -> None:
@@ -27,22 +40,30 @@ def main(path: str, only: str) -> None:
             packages and their transitive deps are kept.
     """
     with open(path, encoding="utf-8") as fh:
-        m = json.load(fh)
-    pkgs = m.get("packages", [])
-    info = {p["name"]: p for p in pkgs if isinstance(p, dict) and "name" in p}
+        m = cast("dict[str, object]", json.load(fh))
+    pkgs = cast("list[object]", m.get("packages", []))
+    info: dict[str, PackageEntry] = {}
+    for item in pkgs:
+        if not isinstance(item, dict):
+            continue
+        entry = cast("PackageEntry", item)
+        if "name" in entry:
+            info[entry["name"]] = entry
     prefix = only if only.endswith("-") else only + "-"
     keep = {name for name in info if name == only or name.startswith(prefix)}
-    frontier = collections.deque(keep)
+    frontier: collections.deque[str] = collections.deque(keep)
     while frontier:
         name = frontier.popleft()
-        for dep in info.get(name, {}).get("deps") or []:
+        for dep in info[name].get("deps") or []:
             if dep in info and dep not in keep:
                 keep.add(dep)
                 frontier.append(dep)
     dropped = len(info) - len(keep)
-    m["packages"] = [p for p in pkgs if p.get("name") in keep]
+    m["packages"] = [
+        p for p in pkgs if cast("PackageEntry", p).get("name") in keep
+    ]
     print(
-        f"only closure: kept {len(keep)}/{len(info)} packages "
+        f"only closure: kept {len(keep)}/{len(info)} packages " +
         f"({dropped} dropped): {' '.join(sorted(keep))}",
         file=sys.stderr,
     )
