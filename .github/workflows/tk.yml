@@ -69,6 +69,18 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Project venv the type checker resolves imports through
+        run: |
+          set -eu
+          # [tool.basedpyright] pins venvPath "." and venv ".venv": third-party
+          # imports (pytest, yaml) resolve through that interpreter. A fresh
+          # runner has no .venv, so every one of them is unresolved there
+          # (run 45742556233: "Import pytest could not be resolved"; the same
+          # tree with .venv built passes), hence the declared environment from
+          # the tracked requirements, never a hand-picked package list.
+          python3 -m venv .venv
+          .venv/bin/python -m pip install --quiet --upgrade pip
+          .venv/bin/python -m pip install --quiet -r requirements-dev.txt
       - name: Toolchain of the detected languages
         run: |
           set -eu
@@ -96,12 +108,14 @@ jobs:
           # proxmox-ve-bootc (kernel data, packages.yml). That data belongs to
           # those repositories and never enters this one, so the test run
           # checks them out next to the workspace, where the tests look
-          # (REPO.parent/<name>), on the edge branch that carries the dev
-          # content.
+          # (REPO.parent/<name>). Each clone takes its repository's default
+          # branch, which is the branch those products publish: naming one
+          # branch here breaks the run the day a product renames or switches
+          # it (run 45742556233: proxmox-ve-bootc has no develop).
           parent="$(dirname "${GITHUB_WORKSPACE}")"
           for repo in debian-bootc proxmox-ve-bootc; do
             [ -d "${parent}/${repo}" ] && continue
-            git clone --quiet --depth 1 --branch develop \
+            git clone --quiet --depth 1 \
               "https://github.com/DaemonCores/${repo}.git" "${parent}/${repo}"
           done
       - name: Toolchain of the detected languages
