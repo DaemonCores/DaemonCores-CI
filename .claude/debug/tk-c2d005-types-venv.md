@@ -24,3 +24,9 @@
 ## Verification
 - `tk gate --only lint` exit 0 and `tk gate --only test` exit 0 locally after
   both changes; the run on the pushed commit is the remaining proof.
+
+## Run 45744073658: parity tests, exit 128
+
+- Symptom: 5 tests failed on git show of a pinned sha.
+- Cause (proven): the shas are unreachable in a pristine GitHub clone (full depth, 557 commits); history was rewritten and they only survive as local objects.
+- Fix: derive the pre-extraction tree as the parent of the commit that added the shared path (tests/historical.py).

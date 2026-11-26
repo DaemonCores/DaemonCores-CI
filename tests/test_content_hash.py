@@ -9,19 +9,20 @@ import subprocess
 from pathlib import Path
 
 import pytest
+from historical import pre_extraction_rev
 
 ROOT = Path(__file__).resolve().parents[1]
 LIB = ROOT / 'build-deb' / 'content-hash.sh'
-OLD_REV = '4a62cec'
 
 
 def old_script() -> str:
     """Return the build-deb.sh text from before the extraction.
 
     Returns:
-        The script source at ``OLD_REV``.
+        The script source, from before the extraction into ``content-hash.sh``.
     """
-    return subprocess.run(['git', 'show', f'{OLD_REV}:build-deb/build-deb.sh'],
+    rev = pre_extraction_rev('build-deb/content-hash.sh')
+    return subprocess.run(['git', 'show', f'{rev}:build-deb/build-deb.sh'],
                           cwd=ROOT,
                           check=True,
                           capture_output=True,

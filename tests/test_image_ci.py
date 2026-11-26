@@ -14,6 +14,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
+from historical import pre_extraction_rev
 from typed_docs import (
     as_list,
     as_mapping,
@@ -27,7 +28,6 @@ from typed_docs import (
 ROOT = Path(__file__).resolve().parents[1]
 CI = ROOT / 'scripts' / 'image-ci'
 WORKFLOW = ROOT / '.github' / 'workflows' / 'bootc-build.yml'
-OLD_REV = '28dd042'
 JQ_WORKS = shutil.which('jq') is not None and subprocess.run(
     ['jq', '-n', '1'], capture_output=True, check=False
 ).returncode == 0
@@ -341,8 +341,9 @@ def _old_chash_script() -> str:
     Returns:
         The shell text, GitHub expressions replaced by their values.
     """
+    rev = pre_extraction_rev('scripts/image-ci/build-arch.sh')
     text = subprocess.run([
-        'git', 'show', f'{OLD_REV}:.github/workflows/bootc-build.yml'
+        'git', 'show', f'{rev}:.github/workflows/bootc-build.yml'
     ],
                           cwd=ROOT,
                           check=True,

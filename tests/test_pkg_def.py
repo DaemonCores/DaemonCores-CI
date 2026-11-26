@@ -9,11 +9,11 @@ import subprocess
 from pathlib import Path
 
 import pytest
+from historical import pre_extraction_rev
 from typed_docs import as_mapping, as_str, iter_steps, load_yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / 'pkg-def' / 'pkg-def.sh'
-OLD_REV = 'fc585a9'
 
 MANIFEST = """
 packages:
@@ -64,13 +64,14 @@ def old_step(step_id: str = 'def') -> str:
         step_id: Id of the step to extract.
 
     Returns:
-        The step's ``run`` text at ``OLD_REV``.
+        The step's ``run`` text, from before the extraction into ``pkg-def.sh``.
 
     Raises:
         AssertionError: If the workflow holds no step with that id.
     """
+    rev = pre_extraction_rev('pkg-def/pkg-def.sh')
     text = subprocess.run([
-        'git', 'show', f'{OLD_REV}:.github/workflows/build-one-deb.yml'
+        'git', 'show', f'{rev}:.github/workflows/build-one-deb.yml'
     ],
                           cwd=ROOT,
                           check=True,
