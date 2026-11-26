@@ -17,8 +17,7 @@ $(VBIN)/pip:
 	python3 -m venv $(VENV)
 
 admission: $(VBIN)/pip
-	@$(VBIN)/pip install --quiet --upgrade ruff yapf docformatter mypy \
-		basedpyright pydoclint bandit pytest pyyaml types-PyYAML
+	@$(VBIN)/pip install --quiet --upgrade -r requirements-dev.txt
 
 check: admission
 	$(VBIN)/yapf --diff --recursive $(PYTHON_SRCS) $(PYTHON_TESTS)

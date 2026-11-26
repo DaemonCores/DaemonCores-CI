@@ -5,10 +5,11 @@ import json
 import pathlib
 import subprocess
 import sys
+from typing import cast
 
 conf_dir, node = sys.argv[1], sys.argv[2]
 if conf_dir:
-    out = {}
+    out: dict[str, str] = {}
     for f in sorted(pathlib.Path(conf_dir).glob("*.conf")):
         for line in f.read_text().splitlines():
             if line.startswith("description: "):
@@ -23,7 +24,7 @@ ids = subprocess.run([
                      text=True,
                      check=True)
 out = {}
-for guest in json.loads(ids.stdout):
+for guest in cast("list[dict[str, object]]", json.loads(ids.stdout)):
     vid = str(guest["vmid"])
     cfg = subprocess.run([
         "pvesh", "get", f"/nodes/{node}/lxc/{vid}/config", "--output-format",
@@ -32,5 +33,6 @@ for guest in json.loads(ids.stdout):
                          capture_output=True,
                          text=True,
                          check=True)
-    out[vid] = json.loads(cfg.stdout).get("description", "")
+    payload = cast("dict[str, object]", json.loads(cfg.stdout))
+    out[vid] = cast("str", payload.get("description", ""))
 print(json.dumps(out))

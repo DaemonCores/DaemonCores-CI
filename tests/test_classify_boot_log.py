@@ -11,6 +11,7 @@ booting the published live ISOs in QEMU:
   timed out in run 45087765493, before any ``Freeing unused kernel memory``.
 """
 
+import runpy
 import subprocess
 import sys
 from pathlib import Path
@@ -180,3 +181,96 @@ def test_command_line_prints_the_stage() -> None:
         check=True,
     )
     assert out.stdout.strip() == 'kernel'
+
+
+def test_the_hand_over_marker_proves_userspace_ran() -> None:
+    """``Freeing unused kernel memory`` means the kernel ran ``/init``."""
+    log = 'Linux version 7.2.15\nFreeing unused kernel memory: 1024K\n'
+    assert classify_boot_log.classify(log) == 'booting'
+    assert classify_boot_log.stage(log) == 'userspace'
+
+
+def test_run_init_as_init_process_also_proves_userspace_ran() -> None:
+    """The other hand-over marker is enough on its own."""
+    log = 'Linux version 7.2.15\nRun /init as init process\n'
+    assert classify_boot_log.stage(log) == 'userspace'
+
+
+def test_main_without_a_log_is_a_usage_error(
+    capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A command line that names no log exits 2 with the usage on stderr.
+
+    Args:
+        capsys: Output capture.
+    """
+    assert classify_boot_log.main([]) == 2
+    err = capsys.readouterr().err
+    assert 'usage: classify_boot_log.py [--stage] LOG' in err
+
+
+def test_main_prints_the_state_of_an_existing_log(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The default invocation prints the state, not the stage.
+
+    Args:
+        tmp_path: Directory holding the captured log.
+        capsys: Output capture.
+    """
+    log = tmp_path / 'serial.log'
+    _ = log.write_text('Debian GNU/Linux 13 (ttyS0)\n')
+    assert classify_boot_log.main([str(log)]) == 0
+    assert capsys.readouterr().out == 'up\n'
+
+
+def test_main_prints_the_stage_and_a_missing_log_is_empty(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """``--stage`` answers ``kernel`` when QEMU has not written the log yet.
+
+    Args:
+        tmp_path: Directory with no log file.
+        capsys: Output capture.
+    """
+    assert classify_boot_log.main(['--stage',
+                                   str(tmp_path / 'absent.log')]) == 0
+    assert capsys.readouterr().out == 'kernel\n'
+
+
+def test_main_reads_sys_argv_when_no_list_is_given(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+    capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Without an explicit list, ``main`` takes the process command line.
+
+    Args:
+        monkeypatch: Environment patcher.
+        tmp_path: Directory holding the captured log.
+        capsys: Output capture.
+    """
+    log = tmp_path / 'serial.log'
+    _ = log.write_text('Linux version 7.2.15\n')
+    monkeypatch.setattr(sys, 'argv', ['classify_boot_log.py', str(log)])
+    assert classify_boot_log.main() == 0
+    assert capsys.readouterr().out == 'booting\n'
+
+
+def test_the_script_entry_point_prints_the_state(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+    capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Run as ``__main__``, the workflow contract still prints one word.
+
+    Args:
+        monkeypatch: Environment patcher.
+        tmp_path: Directory holding the captured log.
+        capsys: Output capture.
+    """
+    log = tmp_path / 'serial.log'
+    _ = log.write_text('Debian GNU/Linux 13 (ttyS0)\n')
+    monkeypatch.setattr(sys, 'argv', [str(SCRIPT), str(log)])
+    with pytest.raises(SystemExit) as excinfo:
+        _ = runpy.run_path(str(SCRIPT), run_name='__main__')
+    assert excinfo.value.code == 0
+    assert capsys.readouterr().out == 'up\n'

@@ -10,6 +10,7 @@ and the profile Conflicts stays an intentional shared slot (one
 /lib/modules/<release>/ dir, one profile at a time).
 """
 
+import runpy
 import sys
 from pathlib import Path
 
@@ -97,6 +98,23 @@ def test_bore_xanmod_alternate_sibling_registered() -> None:
     # entry comment (xanmod ships no bore file at all).
     text = SIBLINGS_YML.read_text()
     assert "K-PORT" in text.split("bore-xanmod")[1].split("- name: msm")[0]
+
+
+def test_the_module_runs_as_a_script(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Running the module alone delegates to pytest and exits with its status.
+
+    The nested session deselects this very test, which would otherwise run the
+    module again and never terminate.
+
+    Args:
+        monkeypatch: Environment patcher.
+    """
+    monkeypatch.setenv(
+        'PYTEST_ADDOPTS', '-k \'not test_the_module_runs_as_a_script\''
+    )
+    with pytest.raises(SystemExit) as exit_code:
+        _ = runpy.run_path(str(Path(__file__)), run_name='__main__')
+    assert exit_code.value.code == 0
 
 
 if __name__ == "__main__":

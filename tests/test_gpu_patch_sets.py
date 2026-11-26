@@ -30,6 +30,7 @@ import tempfile
 import textwrap
 from pathlib import Path
 
+import pytest
 from typed_docs import as_list, as_mapping, as_mappings, as_str, load_yaml
 
 REPO = Path(__file__).resolve().parents[1]
@@ -369,3 +370,32 @@ def test_pve_lane_applies_the_gpu_manifest_against_its_tree() -> None:
     # module pair lanes).
     assert "kernel_build_module" in text
     assert "kernel_module_run_build" not in text
+
+
+def test_a_driver_entry_may_omit_its_digest(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A sha256-less entry passes the schema; only a pin is validated.
+
+    The product manifests pin every entered entry today, so the optional-digest
+    path of the schema check is exercised on a tree of the same shape.
+
+    Args:
+        tmp_path: Scratch directory holding the synthetic kernel-src tree.
+        monkeypatch: Patcher pointing the check at that tree.
+    """
+    manifest = f"""patches:
+  - name: pinned
+    url: https://example.invalid/pinned.patch
+    sha256: {'a' * 64}
+  - name: unpinned
+    url: https://example.invalid/unpinned.patch
+"""
+    tree = tmp_path / "kernel-src"
+    for profile in GPU_PROFILES:
+        gpu = tree / "patches" / "gpu" / profile
+        gpu.mkdir(parents=True)
+        for name in ("nvidia.yml", "amd.yml", "intel.yml"):
+            _ = (gpu / name).write_text(manifest)
+    monkeypatch.setattr("test_gpu_patch_sets.KERNEL_SRC", tree)
+    test_gpu_manifests_present_and_schema()

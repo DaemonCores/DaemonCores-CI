@@ -12,14 +12,18 @@ the ISO, so the arm64 CPU model is pinned to a real one.
 import re
 from pathlib import Path
 
+import pytest
 from typed_docs import as_mapping, as_str, iter_steps, load_yaml
 
 WORKFLOW = Path(__file__).resolve(
 ).parents[1] / '.github' / 'workflows' / 'iso-builder.yml'
 
 
-def _smoke_script() -> str:
+def _smoke_script(workflow_path: Path = WORKFLOW) -> str:
     """Return the run block of the ISO boot smoke step.
+
+    Args:
+        workflow_path: Workflow file to read.
 
     Returns:
         The shell text of ``Boot smoke test the ISO (QEMU)``.
@@ -27,7 +31,7 @@ def _smoke_script() -> str:
     Raises:
         AssertionError: If the smoke step is not found in the workflow.
     """
-    workflow = as_mapping(load_yaml(WORKFLOW.read_text()))
+    workflow = as_mapping(load_yaml(workflow_path.read_text()))
     for step in iter_steps(workflow):
         if step.get('name') == 'Boot smoke test the ISO (QEMU)':
             return as_str(step['run'])
@@ -55,3 +59,22 @@ def test_arm64_smoke_budget_exceeds_slow_tcg_boot() -> None:
     assert int(match.group(1)) >= 1800
     assert 'seq "${BUDGET}"' in script
     assert 'seq 900' not in script
+
+
+def test_a_workflow_without_the_smoke_step_is_reported(tmp_path: Path) -> None:
+    """The extractor names the missing step instead of returning nothing.
+
+    Args:
+        tmp_path: Scratch directory holding the synthetic workflow.
+    """
+    path = tmp_path / 'iso-builder.yml'
+    _ = path.write_text(
+        """jobs:
+  build:
+    steps:
+      - name: Build the ISO
+        run: echo build
+"""
+    )
+    with pytest.raises(AssertionError, match='smoke step not found'):
+        _ = _smoke_script(path)

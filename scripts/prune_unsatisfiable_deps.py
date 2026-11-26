@@ -13,6 +13,19 @@ is then in the manifest and nothing is stripped.
 
 import json
 import sys
+from typing import NotRequired, TypedDict, cast
+
+
+class PackageEntry(TypedDict):
+    """One package entry of an expanded manifest.
+
+    Attributes:
+        name: Package name.
+        deps: Names of the packages it depends on.
+    """
+
+    name: str
+    deps: NotRequired[list[str]]
 
 
 def main(path: str) -> None:
@@ -22,15 +35,17 @@ def main(path: str) -> None:
         path: Manifest JSON file, rewritten in place.
     """
     with open(path, encoding="utf-8") as fh:
-        m = json.load(fh)
-    names = {p["name"] for p in m["packages"]}
-    for p in m["packages"]:
+        m = cast("dict[str, object]", json.load(fh))
+    packages = cast("list[PackageEntry]", m["packages"])
+    names = {p["name"] for p in packages}
+    for p in packages:
         deps = p.get("deps") or []
         kept = [d for d in deps if d in names]
         if kept != deps:
+            dropped = [d for d in deps if d not in names]
             print(
-                "only filter: dropped unsatisfiable deps of "
-                f"{p['name']}: {[d for d in deps if d not in names]}",
+                "only filter: dropped unsatisfiable deps of " +
+                f"{p['name']}: {dropped}",
                 file=sys.stderr
             )
             p["deps"] = kept

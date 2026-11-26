@@ -57,14 +57,17 @@ def _yq_dir() -> str:
     return str(Path(yq).parent)
 
 
-def old_step() -> str:
-    """Return the former inline ``Read package definition`` script.
+def old_step(step_id: str = 'def') -> str:
+    """Return one step of the former inline ``Read package definition`` script.
+
+    Args:
+        step_id: Id of the step to extract.
 
     Returns:
         The step's ``run`` text at ``OLD_REV``.
 
     Raises:
-        AssertionError: If the step is not found in the workflow.
+        AssertionError: If the workflow holds no step with that id.
     """
     text = subprocess.run([
         'git', 'show', f'{OLD_REV}:.github/workflows/build-one-deb.yml'
@@ -75,9 +78,9 @@ def old_step() -> str:
                           text=True).stdout
     workflow = as_mapping(load_yaml(text))
     for step in iter_steps(workflow):
-        if step.get('id') == 'def':
+        if step.get('id') == step_id:
             return as_str(step['run'])
-    raise AssertionError('step def not found')
+    raise AssertionError(f'step {step_id} not found')
 
 
 def run(script: Path, tmp: Path, pkg: str) -> str:
@@ -133,3 +136,23 @@ def test_signs_flag_and_secret_resolved(tmp_path: Path) -> None:
     assert 'signs=yes' in out
     assert 'GH_TOKEN=tok-123' in out
     assert 'deps=libfoo libbar' in out
+
+
+def test_a_path_without_yq_is_reported(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A PATH holding no yq raises the named error.
+
+    Args:
+        tmp_path: Empty directory used as the whole PATH.
+        monkeypatch: Environment patcher.
+    """
+    monkeypatch.setenv('PATH', str(tmp_path))
+    with pytest.raises(RuntimeError, match='yq is not installed'):
+        _ = _yq_dir()
+
+
+def test_an_unknown_step_id_is_reported() -> None:
+    """The extractor fails on a step id the old workflow does not carry."""
+    with pytest.raises(AssertionError, match='step no-such-step not found'):
+        _ = old_step('no-such-step')

@@ -1,6 +1,7 @@
 """Unit tests for ``scripts/patch_guard.py``."""
 
 import hashlib
+import runpy
 import sys
 from pathlib import Path
 
@@ -10,6 +11,8 @@ from typed_docs import as_mapping, as_str, as_str_mapping, load_json
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 
 import patch_guard
+
+SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
 
 PATCH = """--- a/kernel/sched/core.c
 +++ b/kernel/sched/core.c
@@ -107,3 +110,30 @@ def test_update_merges_with_the_existing_lock(
     assert patch_guard.main(args) == 0
     keys = {as_str(key) for key in as_mapping(load_json(lock.read_text()))}
     assert keys == {"other.c", "kernel/sched/core.c"}
+
+
+def test_the_script_entry_point_writes_the_lock(
+    env: tuple[Path, Path, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Run as ``__main__``, ``--update`` writes the references and exits 0.
+
+    Args:
+        env: Tree, patch and lock path.
+        monkeypatch: Environment patcher.
+    """
+    tree, patch, lock = env
+    monkeypatch.setattr(
+        sys, "argv", [
+            str(SCRIPTS / "patch_guard.py"), "--tree",
+            str(tree), "--lock",
+            str(lock), "--update",
+            str(patch)
+        ]
+    )
+    with pytest.raises(SystemExit) as excinfo:
+        _ = runpy.run_path(str(SCRIPTS / "patch_guard.py"), run_name="__main__")
+    assert excinfo.value.code == 0
+    expected = hashlib.sha256(b"a\n").hexdigest()
+    assert as_str_mapping(load_json(lock.read_text())) == {
+        "kernel/sched/core.c": expected
+    }

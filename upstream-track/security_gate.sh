@@ -150,7 +150,9 @@ gate_ghsa() {
   local line
   while IFS= read -r line; do
     [[ -n "${line}" ]] || continue
-    read -r id state patched range <<<"${line}"
+    # The 4th field (the range expression) is not read: the range test is
+    # done on the patched versions below, keep the field alignment on _.
+    read -r id state patched _ <<<"${line}"
     [[ "${state}" == "published" ]] || continue
     if [[ -z "${cand}" ]]; then
       hits+=("${id}")

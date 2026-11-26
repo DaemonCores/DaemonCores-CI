@@ -1,0 +1,16 @@
+# Toolchain of the quality gate (make check / make test and tk gate --install).
+# The gate installs this file into its own venv, so every tool a stage calls is
+# declared here once; the stub package keeps mypy honest on pyyaml.
+ruff
+yapf
+docformatter
+mypy
+basedpyright
+pydoclint
+bandit
+pytest
+pytest-cov
+pip-audit
+pyyaml
+types-PyYAML
+mypy-extensions

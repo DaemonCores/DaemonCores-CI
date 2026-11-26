@@ -151,3 +151,9 @@ def test_issue_writer_stays_english_and_noise_free() -> None:
         assert script.count('POST') <= 1
     assert '⚠️ Broken build: ${PKG} (last valid .deb reused)' in flag
     assert 'last valid .deb reused)' in close
+
+
+def test_an_unknown_step_name_is_reported() -> None:
+    """A name absent from the workflow raises instead of returning a script."""
+    with pytest.raises(AssertionError, match='not found'):
+        _ = _step_run('Flag broken build (typo)')

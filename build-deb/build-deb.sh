@@ -112,11 +112,12 @@ run_build() {
     # prune drops it and the cache never restores it again). The outer
     # loop only WORD-SPLITS (globbing off — else the first pattern is
     # already a filename and the .deb suffix double-appends); the inner
-    # subshell re-enables globbing so each pattern expands against .deb.
-    # shellcheck disable=SC2086
+    # subshell re-enables globbing so each pattern expands against .deb, and
+    # the matches are listed by the shell itself (no ls | grep: a deb whose
+    # name carries an unusual character is still listed).
     set -f
     for pat in ${glob}; do
-      ( set +f; ls ${pat}.deb 2>/dev/null || true )
+      ( set +f; for found in ${pat}.deb; do [ -e "$found" ] || continue; printf '%s\n' "$found"; done )
     done
     set +f
   ) | jq -R . | jq -s .

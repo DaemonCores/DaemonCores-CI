@@ -1,5 +1,6 @@
 """Unit tests for ``scripts/boot_part_mb.py`` (gallium boot partition size)."""
 
+import runpy
 import sys
 from pathlib import Path
 
@@ -57,3 +58,30 @@ def test_cli_prints_the_size_and_fails_on_garbage(
         boot_part_mb.boot_part_mb([VMLINUZ, INITRAMFS])
     )
     assert boot_part_mb.main(['abc']) == 2
+
+
+SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
+
+
+def test_the_script_entry_point_prints_the_size(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Run as __main__, the script prints the size and exits 0.
+
+    Args:
+        monkeypatch: Environment patcher.
+        capsys: Output capture.
+    """
+    monkeypatch.setattr(
+        sys, "argv",
+        ["boot_part_mb.py", str(VMLINUZ),
+         str(INITRAMFS)]
+    )
+    with pytest.raises(SystemExit) as excinfo:
+        _ = runpy.run_path(
+            str(SCRIPTS / "boot_part_mb.py"), run_name="__main__"
+        )
+    assert excinfo.value.code == 0
+    assert capsys.readouterr().out.strip() == str(
+        boot_part_mb.boot_part_mb([VMLINUZ, INITRAMFS])
+    )

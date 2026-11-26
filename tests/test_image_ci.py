@@ -1215,3 +1215,21 @@ def test_the_thin_twin_is_derived_with_the_owner_tags(sb: Sandbox) -> None:
     log = sb.log.read_text()
     assert log.index('image-test test'
                      ) < log.rindex(f'{IMAGE}:latest_amd64-thpalways')
+
+
+@needs_jq
+def test_looking_up_an_absent_tag_raises(sb: Sandbox) -> None:
+    """The state lookup names the tag it could not find.
+
+    Args:
+        sb: Sandbox running the harness.
+    """
+    _ = sb.run([entry('latest')], 'hash')
+    with pytest.raises(KeyError, match='absent'):
+        _ = sb.row('absent')
+
+
+def test_a_build_command_without_a_tag_is_rejected() -> None:
+    """The tag extractor refuses a command line that carries no ``--tag``."""
+    with pytest.raises(AssertionError, match='no --tag option'):
+        _ = _tag_of('podman build -f Containerfile .')

@@ -85,6 +85,25 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Several tests compare today's code with the script it replaced
+          # (git show <old commit>:<path>), so the clone needs its history.
+          fetch-depth: 0
+      - name: Product sibling checkouts
+        run: |
+          set -eu
+          # The engine tests read the product trees of debian-bootc and
+          # proxmox-ve-bootc (kernel data, packages.yml). That data belongs to
+          # those repositories and never enters this one, so the test run
+          # checks them out next to the workspace, where the tests look
+          # (REPO.parent/<name>), on the edge branch that carries the dev
+          # content.
+          parent="$(dirname "${GITHUB_WORKSPACE}")"
+          for repo in debian-bootc proxmox-ve-bootc; do
+            [ -d "${parent}/${repo}" ] && continue
+            git clone --quiet --depth 1 --branch develop \
+              "https://github.com/DaemonCores/${repo}.git" "${parent}/${repo}"
+          done
       - name: Toolchain of the detected languages
         run: |
           set -eu

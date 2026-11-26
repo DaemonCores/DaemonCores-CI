@@ -134,7 +134,8 @@ def _discover_script() -> str:
 def _discover(
     tmp_path: Path,
     nosign: bool = False,
-    extra: dict[str, str] | None = None
+    extra: dict[str, str] | None = None,
+    preexisting: str = ''
 ) -> Discovered:
     """Run the discover step on a repository with three Containerfiles.
 
@@ -142,6 +143,7 @@ def _discover(
         tmp_path: Scratch repository root.
         nosign: Accepted for compatibility; no twin exists since L1.
         extra: Additional Containerfiles (name to content).
+        preexisting: Text already in ``GITHUB_OUTPUT`` when the step runs.
 
     Returns:
         The images of every architecture (flattened) and the manifest matrix.
@@ -158,6 +160,8 @@ def _discover(
     for name, content in (extra or {}).items():
         _ = (tmp_path / name).write_text(content)
     out = tmp_path / 'out'
+    if preexisting:
+        _ = out.write_text(preexisting)
     env = dict(
         os.environ,
         GITHUB_OUTPUT=str(out),
@@ -395,3 +399,17 @@ def test_arches_label_with_no_known_architecture_fails(tmp_path: Path) -> None:
                 'Containerfile.vendor': 'LABEL org.daemoncores.arches=riscv64\n'
             }
         )
+
+
+@needs_jq
+def test_output_lines_without_a_key_are_ignored(tmp_path: Path) -> None:
+    """A multiline block already in ``GITHUB_OUTPUT`` adds no matrix key.
+
+    The step appends to ``GITHUB_OUTPUT``; the GitHub multiline format puts bare
+    value and delimiter lines in the file too.
+
+    Args:
+        tmp_path: Scratch repository root.
+    """
+    result = _discover(tmp_path, preexisting='banner<<EOF\nthe banner\nEOF\n')
+    assert {entry['arch'] for entry in result['wave1']} == {'amd64', 'arm64'}

@@ -958,3 +958,37 @@ def test_every_release_held_stays_a_hold(
     assert result.returncode == 0, result.stderr
     assert 'skip=true' in (api / 'out').read_text()
     assert 'security HOLD' in result.stderr
+
+
+def test_the_gate_library_loads_without_an_election_directory() -> None:
+    """A pure query works when the caller exports no ``ELECTION_DIR``.
+
+    Sourcing the library must not need the election log: track.sh sources it
+    before any log path is resolved.
+    """
+    done = _gate('gate_date_epoch 1970-01-01T00:00:00Z')
+    assert done.returncode == 0, done.stderr
+    assert done.stdout.strip() == '0'
+
+
+def test_a_path_absent_from_the_api_tree_is_a_404(
+    tmp_path: Path, serve: Callable[[Path], str]
+) -> None:
+    """The fake API answers 404 for a path its tree does not hold.
+
+    Args:
+        tmp_path: Scratch directory holding the served tree.
+        serve: HTTP server factory for the API tree.
+    """
+    root = tmp_path / 'api'
+    root.mkdir()
+    base = serve(root)
+    done = subprocess.run([
+        'curl', '-sS', '-o', '/dev/null', '-w', '%{http_code}', f'{base}/absent'
+    ],
+                          check=False,
+                          capture_output=True,
+                          text=True,
+                          timeout=30)
+    assert done.returncode == 0, done.stderr
+    assert done.stdout == '404'
