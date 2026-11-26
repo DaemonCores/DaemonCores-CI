@@ -192,7 +192,16 @@ jobs:
     permissions:
       contents: read
       packages: read
+    env:
+      # The product's boot-test manifest, read by image-test.sh.
+      TESTS_FILE: workflows/tests.yml
     steps:
+      # Product first: this checkout cleans the workspace root.
+      - name: Fetch the product test manifest
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
       - name: Fetch the shared tooling
         uses: actions/checkout@v4
         with:

@@ -53,6 +53,24 @@ def _archs(name: str) -> set[str]:
     }
 
 
+def test_smoke_reads_the_manifest_of_the_product() -> None:
+    """The harness gets the caller's manifest, present in the workspace.
+
+    `image-test.sh prepare` exits with "TESTS_FILE is not set" otherwise, and
+    the tooling checkout must come after the product one, which cleans the
+    workspace root.
+    """
+    job = _job('smoke')
+    assert as_str_mapping(job['env'])['TESTS_FILE'] == 'workflows/tests.yml'
+    checkouts = [
+        as_str_mapping(step.get('with', {}))
+        for step in map(as_str_mapping, as_list(job['steps']))
+        if as_str(step.get('uses', '')).startswith('actions/checkout@')
+    ]
+    assert [with_.get('path') for with_ in checkouts] == [None, '.ci-tooling']
+    assert 'repository' not in checkouts[0]
+
+
 def test_smoke_boots_every_built_arch() -> None:
     """Each architecture the rebuild produces is booted before promotion."""
     assert _archs('smoke') == _archs('rebuild')
