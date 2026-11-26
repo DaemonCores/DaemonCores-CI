@@ -19,7 +19,7 @@ WORKFLOW = Path(__file__).resolve(
 ).parents[1] / '.github' / 'workflows' / 'iso-builder.yml'
 
 
-def _smoke_script(workflow_path: Path = WORKFLOW) -> str:
+def smoke_script(workflow_path: Path = WORKFLOW) -> str:
     """Return the run block of the ISO boot smoke step.
 
     Args:
@@ -40,7 +40,7 @@ def _smoke_script(workflow_path: Path = WORKFLOW) -> str:
 
 def test_arm64_smoke_does_not_use_cpu_max() -> None:
     """The aarch64 QEMU command names a concrete CPU model, never ``max``."""
-    script = _smoke_script()
+    script = smoke_script()
     match = re.search(r'qemu-system-aarch64[^\n]*?-cpu\s+(\S+)', script)
     assert match, 'aarch64 QEMU command without an explicit -cpu'
     assert match.group(1) != 'max'
@@ -53,7 +53,7 @@ def test_arm64_smoke_budget_exceeds_slow_tcg_boot() -> None:
     on the shared runner (DEBUG.md 31): a flat 900 s reports a slow boot as a
     stall. The login marker stays mandatory, only the time grows.
     """
-    script = _smoke_script()
+    script = smoke_script()
     match = re.search(r'arm64\)\s+BUDGET="\$\{SMOKE_BUDGET_S:-(\d+)\}"', script)
     assert match, 'no per-arch smoke budget for arm64'
     assert int(match.group(1)) >= 1800
@@ -77,4 +77,4 @@ def test_a_workflow_without_the_smoke_step_is_reported(tmp_path: Path) -> None:
 """
     )
     with pytest.raises(AssertionError, match='smoke step not found'):
-        _ = _smoke_script(path)
+        _ = smoke_script(path)
